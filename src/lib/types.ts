@@ -195,6 +195,8 @@ export interface InboxMail {
   text: string;
   link: string | null;
   delivery: 'smtp' | 'resend' | 'simulated';
+  /** Why it did not go, when sending was tried and failed. */
+  error?: string | null;
   providerId: string | null;
   taskId: string;
   deliverableId: string | null;

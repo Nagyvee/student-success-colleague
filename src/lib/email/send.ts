@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { CheckInMessage, InboxMail, QuizQuestion, QuizResult, RemedialQuiz } from '@/lib/types';
-import { publicUrl, pushMail, uid } from '@/lib/engine/store';
+import { log, publicUrl, pushMail, uid } from '@/lib/engine/store';
 
 /* Mail out of the colleague.
  *
@@ -23,7 +23,7 @@ function smtp() {
     transport = nodemailer.createTransport({
       host: process.env.SMTP_HOST, port, secure: port === 465,
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 15_000,
+      connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 15_000,
     });
   }
   return transport;
@@ -38,12 +38,20 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
   const to = process.env.DEMO_RECIPIENT_EMAIL || input.to;
   let delivery: InboxMail['delivery'] = 'simulated';
   let providerId: string | null = null;
+  let error: string | null = null;
   const t = smtp();
   if (t) {
     try {
       const info = await t.sendMail({ from, to, subject: input.subject, html: input.html, text: input.text });
       delivery = 'smtp'; providerId = info.messageId || null;
-    } catch (e) { console.warn('[thuso] SMTP send failed:', (e as Error).message); }
+    } catch (e) {
+      const err = e as Error & { code?: string; responseCode?: number };
+      error = `${err.code ? `${err.code}: ` : ''}${err.message}`;
+      // A connection that never opens is what a host that blocks mail ports looks like.
+      const blocked = /ETIMEDOUT|ECONNREFUSED|ESOCKET|EHOSTUNREACH|ENETUNREACH|Greeting never received|Connection timeout/i.test(error);
+      log('system', 'error', `Email to ${to} was not sent: ${error}${blocked ? ` · the server cannot reach ${process.env.SMTP_HOST}:${process.env.SMTP_PORT || 465}. Some hosts (Render's free plan among them) block mail ports; use a paid instance, or an SMTP provider on port 2525 (e.g. Brevo).` : ''}`);
+      console.warn('[thuso] SMTP send failed:', error);
+    }
   } else if (process.env.RESEND_API_KEY) {
     try {
       const res = await fetch('https://api.resend.com/emails', {
@@ -57,7 +65,7 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
   }
   const mail: InboxMail = {
     id: uid('m'), ts: Date.now(), to, toName: input.toName, from, subject: input.subject, html: input.html, text: input.text,
-    link: input.link, delivery, providerId, taskId: input.taskId, deliverableId: input.deliverableId,
+    link: input.link, delivery, providerId, taskId: input.taskId, deliverableId: input.deliverableId, error,
   };
   pushMail(mail);
   return mail;

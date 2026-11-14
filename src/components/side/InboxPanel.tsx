@@ -27,7 +27,7 @@ function MailCard({ m, onOpen, onInspect }: { m: InboxMail; onOpen: (id: string)
     <div className="mail">
       <div className="mail-t">
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
-          <span className={`badge ${m.delivery !== 'simulated' ? 'badge-good' : 'badge-soft'}`}><Icon name={m.delivery !== 'simulated' ? 'send' : 'mail'} size={10} />{m.delivery === 'smtp' ? 'Delivered by email' : m.delivery === 'resend' ? 'Sent via Resend' : 'Preview (not sent)'}</span>
+          <span className={`badge ${m.delivery !== 'simulated' ? 'badge-good' : m.error ? 'badge-bad' : 'badge-soft'}`} title={m.error || undefined}><Icon name={m.delivery !== 'simulated' ? 'send' : m.error ? 'warn' : 'mail'} size={10} />{m.delivery === 'smtp' ? 'Delivered by email' : m.delivery === 'resend' ? 'Sent via Resend' : m.error ? 'Not sent: email server unreachable' : 'Preview (not sent)'}</span>
           <span className="faint" style={{ fontSize: 11 }}>{new Date(m.ts).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
         <b>{m.subject}</b>

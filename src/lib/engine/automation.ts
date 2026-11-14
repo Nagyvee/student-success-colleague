@@ -60,6 +60,7 @@ export function ensureAutomation() {
   const h = hub();
   if (h.timer) return;
   h.timer = setInterval(tick, 1500);
+  keepAwake();
   publish();
 }
 
@@ -155,4 +156,16 @@ export function verify(body: string, header: string | null) {
   const want = Buffer.from(sign(body));
   const got = Buffer.from(header);
   return want.length === got.length && timingSafeEqual(want, got);
+}
+
+/* On Render's free plan a service sleeps after 15 minutes without a visitor,
+ * and an always-on colleague must not sleep. When Render tells us our public
+ * address, we visit ourselves every 10 minutes. Elsewhere this does nothing. */
+const ga = globalThis as unknown as { __ssAwake?: ReturnType<typeof setInterval> };
+function keepAwake() {
+  const url = process.env.RENDER_EXTERNAL_URL || process.env.KEEP_AWAKE_URL;
+  if (!url || ga.__ssAwake) return;
+  const ping = () => { fetch(`${url.replace(/\/$/, '')}/api/health`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }).catch(() => { /* next time */ }); };
+  ga.__ssAwake = setInterval(ping, 10 * 60_000);
+  setTimeout(ping, 30_000);
 }
