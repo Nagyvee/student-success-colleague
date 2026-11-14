@@ -327,7 +327,7 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
       tool: 'lms_adapter.update_student_status', payload: { learners: cases.map((c) => c.learner.id), status: 'intervention' },
     });
     const mode = getState().caps.email;
-    ctx.say('system', 'email', `${plural(quizzes.length + checkins.length, 'email')} ${mode === 'smtp' ? 'sent by email (SMTP)' : mode === 'resend' ? 'sent via Resend' : 'placed in the Inbox tab (no email account connected)'}.`);
+    ctx.say('system', 'email', `${plural(quizzes.length + checkins.length, 'email')} ${mode === 'smtp' ? 'sent by email (Nodemailer SMTP)' : 'placed in the Inbox tab (no email account connected)'}.`);
     ctx.stage('deliver', 'done', `${plural(quizzes.length + checkins.length, 'email')} sent · LMS updated`);
     ctx.announce('coo', `Sent · ${[quizzes.length ? plural(quizzes.length, 'quiz', 'quizzes') : '', checkins.length ? plural(checkins.length, 'check-in') : ''].filter(Boolean).join(' and ')} · LMS updated`, 'good');
     setAgent('learning', { tasksDone: getState().agents.learning.tasksDone + quizzes.length });

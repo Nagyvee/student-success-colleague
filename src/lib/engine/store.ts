@@ -46,7 +46,7 @@ export function capabilities(): Capabilities {
     : openai ? (process.env.OPENAI_MODEL || 'gpt-4o-mini') : 'deterministic simulation';
   return {
     ai: { provider, model },
-    email: process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS ? 'smtp' : process.env.RESEND_API_KEY ? 'resend' : 'simulated',
+    email: process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS ? 'smtp' : 'simulated',
     lmsLiveConfigured: Boolean(process.env.LMS_API_URL && process.env.LMS_API_KEY),
     baseUrl: publicUrl(),
     dialer: Boolean(process.env.DIALER_URL && process.env.DIALER_API_KEY),

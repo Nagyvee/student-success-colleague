@@ -194,7 +194,7 @@ export interface InboxMail {
   html: string;
   text: string;
   link: string | null;
-  delivery: 'smtp' | 'resend' | 'simulated';
+  delivery: 'smtp' | 'simulated';
   /** Why it did not go, when sending was tried and failed. */
   error?: string | null;
   providerId: string | null;
@@ -234,7 +234,7 @@ export interface Settings {
 
 export interface Capabilities {
   ai: { provider: 'anthropic' | 'openai' | 'simulation'; model: string };
-  email: 'smtp' | 'resend' | 'simulated';
+  email: 'smtp' | 'simulated';
   lmsLiveConfigured: boolean;
   baseUrl: string;
   dialer: boolean;

@@ -2,12 +2,11 @@ import nodemailer from 'nodemailer';
 import type { CheckInMessage, InboxMail, QuizQuestion, QuizResult, RemedialQuiz } from '@/lib/types';
 import { log, publicUrl, pushMail, uid } from '@/lib/engine/store';
 
-/* Mail out of the colleague.
+/* Mail out of the colleague via Nodemailer (SMTP).
  *
- * SMTP first (Nodemailer): set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
- * (for Gmail: smtp.gmail.com, 465, your address and an App Password). Resend
- * second, if RESEND_API_KEY is set. Otherwise the message lands in the Inbox
- * tab, exactly as it would have been sent. DEMO_RECIPIENT_EMAIL, if set,
+ * Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (for Gmail: smtp.gmail.com,
+ * 465, your address and an App Password). Otherwise the message lands in the
+ * Inbox tab, exactly as it would have been sent. DEMO_RECIPIENT_EMAIL, if set,
  * redirects every message to one inbox. Every message is logged either way. */
 
 export interface MailInput {
@@ -25,9 +24,9 @@ function smtpPass() {
 
 let transport: nodemailer.Transporter | null = null;
 function smtp() {
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
+  if (!clean(process.env.SMTP_HOST) || !clean(process.env.SMTP_USER) || !clean(process.env.SMTP_PASS)) return null;
   if (!transport) {
-    const port = Number(process.env.SMTP_PORT || 465);
+    const port = Number(clean(process.env.SMTP_PORT) || 465) || 465;
     transport = nodemailer.createTransport({
       host: clean(process.env.SMTP_HOST), port, secure: port === 465,
       auth: { user: clean(process.env.SMTP_USER), pass: smtpPass() },
@@ -38,12 +37,22 @@ function smtp() {
 }
 
 export function emailMode(): InboxMail['delivery'] {
-  return smtp() ? 'smtp' : process.env.RESEND_API_KEY ? 'resend' : 'simulated';
+  return smtp() ? 'smtp' : 'simulated';
+}
+
+function senderAddress() {
+  const user = clean(process.env.SMTP_USER);
+  const rawFrom = clean(process.env.EMAIL_FROM);
+  if (rawFrom) {
+    if (rawFrom.includes('@')) return rawFrom;
+    if (user) return `${rawFrom} <${user}>`;
+  }
+  return user ? `Thuso Student Success <${user}>` : 'Thuso Student Success <noreply@thuso.local>';
 }
 
 export async function sendMail(input: MailInput): Promise<InboxMail> {
-  const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Thuso Student Success <${process.env.SMTP_USER}>` : 'Thuso Student Success <onboarding@resend.dev>');
-  const to = process.env.DEMO_RECIPIENT_EMAIL || input.to;
+  const from = senderAddress();
+  const to = clean(process.env.DEMO_RECIPIENT_EMAIL) || input.to;
   let delivery: InboxMail['delivery'] = 'simulated';
   let providerId: string | null = null;
   let error: string | null = null;
@@ -60,16 +69,6 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
       log('system', 'error', `Email to ${to} was not sent: ${error}${blocked ? ` · the server cannot reach ${process.env.SMTP_HOST}:${process.env.SMTP_PORT || 465}. Some hosts (Render's free plan among them) block mail ports; use a paid instance, or an SMTP provider on port 2525 (e.g. Brevo).` : ''}`);
       console.warn('[thuso] SMTP send failed:', error);
     }
-  } else if (process.env.RESEND_API_KEY) {
-    try {
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from, to: [to], subject: input.subject, html: input.html, text: input.text }),
-      });
-      if (res.ok) { const data = (await res.json()) as { id?: string }; delivery = 'resend'; providerId = data.id || null; }
-      else console.warn('[thuso] Resend refused the message:', res.status, await res.text().catch(() => ''));
-    } catch (e) { console.warn('[thuso] Resend unreachable:', (e as Error).message); }
   }
   const mail: InboxMail = {
     id: uid('m'), ts: Date.now(), to, toName: input.toName, from, subject: input.subject, html: input.html, text: input.text,

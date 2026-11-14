@@ -13,7 +13,7 @@ export default function MailModal({ mail: m, onClose, onInspect }: { mail: Inbox
           <div style={{ minWidth: 0 }}>
             <h2>{m.subject}</h2>
             <p className="gate-sub">
-              <span className={`badge ${m.delivery !== 'simulated' ? 'badge-good' : 'badge-soft'}`}><Icon name={m.delivery !== 'simulated' ? 'send' : 'mail'} size={10} />{m.delivery === 'smtp' ? `Delivered by email to ${m.to}` : m.delivery === 'resend' ? `Delivered via Resend${m.providerId ? ` · ${m.providerId}` : ''}` : 'Preview (no email account connected)'}</span>
+              <span className={`badge ${m.delivery !== 'simulated' ? 'badge-good' : 'badge-soft'}`}><Icon name={m.delivery !== 'simulated' ? 'send' : 'mail'} size={10} />{m.delivery === 'smtp' ? `Delivered by email to ${m.to}` : m.error ? 'Not sent: email server unreachable' : 'Preview (no email account connected)'}</span>
               <span>From {m.from}</span><span>· To {m.toName} &lt;{m.to}&gt;</span>
             </p>
           </div>

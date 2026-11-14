@@ -214,7 +214,7 @@ on request, and is emailed every day at 17:00 to `MANAGER_EMAIL`.
 | `src/lib/ai/instructions.ts` | What you taught each agent. |
 | `src/lib/lms/lmsAdapter.ts` | The LMS interface, a live HTTP adapter and the sandbox. `sheet.ts` is the Google Sheet source. |
 | `src/lib/calls/dialer.ts` | The follow-up call through our dialer's API (`POST /api/v1/ai-calls`). |
-| `src/lib/email/send.ts` | SMTP (Nodemailer) or Resend, and every email template. |
+| `src/lib/email/send.ts` | SMTP (Nodemailer), and every email template. |
 | `src/lib/engine/quiz.ts` | Grading, the LMS score sync, the result card and the next steps. |
 | `src/lib/reports.ts`, `src/lib/musaReport.ts` | The numbers and Musa's written report. |
 

@@ -124,7 +124,7 @@ export default function SettingsPage() {
           <div className="set-h"><h2>Where the work goes</h2></div>
           <div className="set-cards">
             <div className="set-card">
-              <h3><Icon name="mail" size={15} />Email {email === 'smtp' ? <span className="badge badge-good">Sending (SMTP)</span> : email === 'resend' ? <span className="badge badge-good">Sending (Resend)</span> : <span className="badge badge-mute">Preview only</span>}</h3>
+              <h3><Icon name="mail" size={15} />Email {email === 'smtp' ? <span className="badge badge-good">Sending (Nodemailer SMTP)</span> : <span className="badge badge-mute">Preview only</span>}</h3>
               <p>{email === 'simulated' ? <>Emails appear in the Inbox tab. To really send, set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASS</code> in <code>.env.local</code> (Gmail: smtp.gmail.com, 465, an App Password) and restart.</> : 'Study packs, quizzes and check-ins go to each learner\'s email in the learner records.'}</p>
             </div>
             <div className="set-card">
