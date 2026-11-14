@@ -1,0 +1,155 @@
+/* ══ Night ═══════════════════════════════════════════════════════════════════
+   Dark mode is the office after hours: navy carpet, lit glass, glowing
+   screens and stars outside, with dark-glass panels over it. It only
+   repaints; every size and position stays the light theme's. */
+
+/* ── The office ─────────────────────────────────────────────────────────── */
+:root[data-theme="dark"] .office { color:#fff; --glow:#9fc5ff; --good:#3ddbc9; --warn:#e5a53a;
+  background:
+    radial-gradient(700px 380px at 76% 14%, rgba(207,224,255,.075), transparent 62%),
+    radial-gradient(900px 500px at 20% 100%, rgba(0,0,0,.35), transparent 62%),
+    linear-gradient(160deg, #0c1836 0%, #0a1430 55%, #091026 100%);
+  border:1px solid rgba(255,255,255,.1); box-shadow:var(--sh-lg); }
+:root[data-theme="dark"] .office-grid { background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1.2px); }
+:root[data-theme="dark"] .office-sky { display:block; }
+:root[data-theme="dark"] .office-vignette { background:radial-gradient(120% 90% at 50% 50%, transparent 58%, rgba(0,0,0,.4) 100%); }
+:root[data-theme="dark"] .ground-shadow { background:radial-gradient(ellipse at 50% 50%, rgba(0,0,0,.55), rgba(0,0,0,.25) 45%, transparent 72%); }
+:root[data-theme="dark"] .slab { background:linear-gradient(135deg, #182650, #121f45 60%, #141f44); box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+:root[data-theme="dark"] .slab-face { background:#0b1432; }
+:root[data-theme="dark"] .slab-face-w { background:#080f28; }
+:root[data-theme="dark"] .corridor-floor { background:repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 calc(var(--u) * 30px), rgba(255,255,255,.012) calc(var(--u) * 30px) calc(var(--u) * 60px)), #1c2b55; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+:root[data-theme="dark"] .corridor-line { border-top-color:rgba(255,255,255,.14); }
+:root[data-theme="dark"] .room-floor {
+  background:
+    radial-gradient(65% 50% at 50% 0%, rgba(159,197,255,.14), transparent 72%),
+    repeating-linear-gradient(0deg, rgba(159,197,255,.04) 0 1px, transparent 1px calc(var(--u) * 20px)),
+    repeating-linear-gradient(90deg, rgba(159,197,255,.04) 0 1px, transparent 1px calc(var(--u) * 20px)),
+    linear-gradient(180deg, #213467, #192a54);
+  box-shadow:inset 0 0 0 1px rgba(159,197,255,.16), inset calc(var(--u) * 14px) calc(var(--u) * 14px) calc(var(--u) * 34px) calc(var(--u) * -12px) rgba(0,0,0,.5); }
+:root[data-theme="dark"] .room-floor.is-busy { box-shadow:inset 0 0 0 2px rgba(159,197,255,.58), inset 0 0 calc(var(--u) * 65px) rgba(159,197,255,.16); }
+:root[data-theme="dark"] .room-floor.is-scan { box-shadow:inset 0 0 0 2px rgba(159,197,255,.78), inset 0 0 calc(var(--u) * 70px) rgba(159,197,255,.24); }
+:root[data-theme="dark"] .room-floor.is-amber { background:linear-gradient(180deg, rgba(229,165,58,.18), rgba(25,42,84,.92)); }
+:root[data-theme="dark"] .room-floor.is-green { box-shadow:inset 0 0 0 3px rgba(61,219,201,.95), inset 0 0 calc(var(--u) * 75px) rgba(61,219,201,.26); }
+:root[data-theme="dark"] .room-floor.is-focus { box-shadow:inset 0 0 0 2px rgba(255,255,255,.55); }
+:root[data-theme="dark"] .ceiling-light { background:radial-gradient(closest-side, rgba(220,232,255,.10), transparent); }
+:root[data-theme="dark"] .threshold { background:rgba(255,255,255,.22); }
+:root[data-theme="dark"] .rug { background:repeating-linear-gradient(45deg, rgba(255,255,255,.055) 0 calc(var(--u) * 6px), rgba(255,255,255,.02) calc(var(--u) * 6px) calc(var(--u) * 12px)); border-color:rgba(255,255,255,.1); }
+:root[data-theme="dark"] .mat { background:repeating-linear-gradient(90deg, rgba(255,255,255,.38) 0 calc(var(--u) * 4px), rgba(255,255,255,.14) calc(var(--u) * 4px) calc(var(--u) * 8px)); border-color:rgba(255,255,255,.45); }
+:root[data-theme="dark"] .path-lights { background:repeating-linear-gradient(90deg, transparent 0 calc(var(--u) * 14px), rgba(255,255,255,.5) calc(var(--u) * 14px) calc(var(--u) * 16px)); }
+:root[data-theme="dark"] .glass { background:repeating-linear-gradient(90deg, transparent 0 calc(var(--u) * 56px), rgba(255,255,255,.32) calc(var(--u) * 56px) calc(var(--u) * 57.5px)), linear-gradient(180deg, rgba(200,222,255,.3), rgba(200,222,255,.08) 55%, rgba(200,222,255,.15));
+  border:1px solid rgba(255,255,255,.42); border-top:calc(var(--u) * 3px) solid rgba(255,255,255,.78); }
+:root[data-theme="dark"] .wall-y.glass { background:repeating-linear-gradient(0deg, transparent 0 calc(var(--u) * 56px), rgba(255,255,255,.32) calc(var(--u) * 56px) calc(var(--u) * 57.5px)), linear-gradient(270deg, rgba(200,222,255,.3), rgba(200,222,255,.08) 55%, rgba(200,222,255,.15)); }
+:root[data-theme="dark"] .glass::after, :root[data-theme="dark"] .wall-y.glass::after { background:linear-gradient(180deg, rgba(255,255,255,.26), transparent); }
+:root[data-theme="dark"] .wall-back { background:linear-gradient(180deg, #2b3d6c, #1e2f58 70%, #1a2a52); border:1px solid rgba(255,255,255,.2); border-top:calc(var(--u) * 4px) solid #3a4f84; }
+:root[data-theme="dark"] .wall-x.wall-back::before { background:rgba(255,255,255,.09); border-top:1px solid rgba(255,255,255,.14); }
+:root[data-theme="dark"] .wall-y.wall-back { border-right:calc(var(--u) * 4px) solid #3a4f84; }
+:root[data-theme="dark"] .win { background:linear-gradient(180deg, #13244d, #1d3466 60%, #2c4a86); border-color:#5a73a8; box-shadow:0 0 calc(var(--u) * 14px) rgba(120,160,240,.25); }
+:root[data-theme="dark"] .win.win-y { background:linear-gradient(270deg, #13244d, #1d3466 60%, #2c4a86); }
+:root[data-theme="dark"] .door-frame, :root[data-theme="dark"] .wall-y.door-frame { border-color:rgba(255,255,255,.62); }
+:root[data-theme="dark"] .door-entrance { border-color:#fff; box-shadow:0 0 calc(var(--u) * 22px) rgba(255,255,255,.45); background:linear-gradient(270deg, rgba(255,255,255,.2), transparent); }
+:root[data-theme="dark"] .face { filter:brightness(.78) saturate(1.05); }
+:root[data-theme="dark"] .face-s { box-shadow:0 calc(var(--u) * 6px) calc(var(--u) * 10px) calc(var(--u) * -4px) rgba(0,0,0,.55); }
+:root[data-theme="dark"] .screen { background:#0b1430; border-color:#d8e0f2; box-shadow:0 0 calc(var(--u) * 12px) rgba(159,197,255,.45); }
+:root[data-theme="dark"] .screen.is-live { box-shadow:0 0 calc(var(--u) * 18px) rgba(159,197,255,.8); }
+:root[data-theme="dark"] .kb { background:rgba(255,255,255,.4); }
+:root[data-theme="dark"] .cab-drawer { background:rgba(255,255,255,.4); }
+:root[data-theme="dark"] .board { box-shadow:0 calc(var(--u) * 4px) calc(var(--u) * 10px) rgba(0,0,0,.35); }
+:root[data-theme="dark"] .leaves i { box-shadow:0 calc(var(--u) * 3px) calc(var(--u) * 6px) rgba(0,0,0,.4); }
+:root[data-theme="dark"] .wall-sign { background:rgba(7,14,34,.95); border:1px solid rgba(159,197,255,.42); color:#f2f6ff; box-shadow:0 calc(var(--u) * 6px) calc(var(--u) * 16px) rgba(0,0,0,.62); }
+:root[data-theme="dark"] .wall-sign i { background:#9fc5ff; box-shadow:0 0 6px #9fc5ff; }
+:root[data-theme="dark"] .wall-sign.is-live { border-color:rgba(159,197,255,.85); box-shadow:0 0 calc(var(--u) * 18px) rgba(159,197,255,.45); }
+:root[data-theme="dark"] .wall-link { background:#ff7300 !important; border-color:#ff7300 !important; color:#fff !important; }
+:root[data-theme="dark"] .wall-link i { background:#fff !important; }
+:root[data-theme="dark"] .walker-shadow { background:radial-gradient(ellipse, rgba(0,0,0,.6), transparent 70%); }
+:root[data-theme="dark"] .fig { filter:drop-shadow(0 calc(var(--u) * 2px) calc(var(--u) * 3px) rgba(0,0,0,.45)); }
+:root[data-theme="dark"] .walker-ring { --st:#9fc5ff; }
+:root[data-theme="dark"] .walker.is-reviewing { --st:#ffffff; } :root[data-theme="dark"] .walker.is-revising { --st:#e5a53a; } :root[data-theme="dark"] .walker.is-celebrating { --st:#3ddbc9; }
+:root[data-theme="dark"] .trail-glow { stroke:rgba(159,197,255,.28); }
+:root[data-theme="dark"] .trail { stroke:rgba(214,230,255,.95); }
+:root[data-theme="dark"] .trail-end { fill:rgba(159,197,255,.25); stroke:rgba(214,230,255,.9); }
+:root[data-theme="dark"] .is-coo .trail { stroke:#fff; }
+
+/* ── Panels over the floor: dark glass ──────────────────────────────────── */
+:root[data-theme="dark"] .cmd-group, :root[data-theme="dark"] .office .view-ctrl, :root[data-theme="dark"] .focus-chip {
+  background:rgba(8,15,36,.8); border:1px solid rgba(159,197,255,.2); box-shadow:0 10px 28px -14px rgba(0,0,0,.8); }
+:root[data-theme="dark"] .cmd-btn, :root[data-theme="dark"] .view-ctrl button { color:#dfe8fb; }
+:root[data-theme="dark"] .cmd-btn svg { color:#9fc5ff; }
+:root[data-theme="dark"] .cmd-btn:hover:not(:disabled), :root[data-theme="dark"] .view-ctrl button:hover:not(:disabled) { background:rgba(159,197,255,.12); color:#fff; }
+:root[data-theme="dark"] .cmd-btn.is-open { background:rgba(159,197,255,.16); border-color:rgba(159,197,255,.35); color:#fff; }
+:root[data-theme="dark"] .cmd-btn.is-primary svg { color:#fff; }
+:root[data-theme="dark"] .cmd-pop { background:rgba(8,15,36,.96); border-color:rgba(159,197,255,.24); }
+:root[data-theme="dark"] .view-ctrl .sep { background:rgba(159,197,255,.18); }
+:root[data-theme="dark"] .view-ctrl .dir-btn { color:rgba(223,232,251,.7); }
+:root[data-theme="dark"] .view-ctrl .dir-btn.on { color:#fff; background:rgba(159,197,255,.14); }
+:root[data-theme="dark"] .focus-chip { color:#fff; }
+:root[data-theme="dark"] .goal-brand b, :root[data-theme="dark"] .live-pill b { color:#f4f7ff; }
+:root[data-theme="dark"] .goal-brand em, :root[data-theme="dark"] .live-pill em { color:rgba(217,226,255,.62); }
+:root[data-theme="dark"] .live-pill em.last { color:#dfe8fb; }
+:root[data-theme="dark"] .live-pill.is-working b { color:#ffa45c; }
+:root[data-theme="dark"] .test-chip b { color:rgba(217,226,255,.55); }
+:root[data-theme="dark"] .test-chip.on b, :root[data-theme="dark"] .test-chip.on svg { color:#f3c57a; }
+:root[data-theme="dark"] .drawer-tabs .cmd-btn em { background:rgba(159,197,255,.14); color:#dfe8fb; }
+:root[data-theme="dark"] .drawer-tabs .cmd-btn.is-open em { background:#e8efff; color:#0a1733; }
+
+:root[data-theme="dark"] .story { background:linear-gradient(180deg, rgba(10,18,42,.88), rgba(7,13,32,.94)); border:1px solid rgba(159,197,255,.2); box-shadow:0 20px 50px -20px rgba(0,0,0,.85); }
+:root[data-theme="dark"] .story.is-good { border-color:rgba(61,219,201,.45); } :root[data-theme="dark"] .story.is-warn { border-color:rgba(229,165,58,.5); } :root[data-theme="dark"] .story.is-bad { border-color:rgba(229,165,58,.7); }
+:root[data-theme="dark"] .story-ico { background:#cfe0ff; color:#0a1733; }
+:root[data-theme="dark"] .story.is-good .story-ico { background:#3ddbc9; color:#06231f; } :root[data-theme="dark"] .story.is-warn .story-ico, :root[data-theme="dark"] .story.is-bad .story-ico { background:#e5a53a; color:#2a1a00; }
+:root[data-theme="dark"] .story-who { color:#9fc5ff; }
+:root[data-theme="dark"] .story.is-good .story-who { color:#7ff0e2; } :root[data-theme="dark"] .story.is-warn .story-who, :root[data-theme="dark"] .story.is-bad .story-who { color:#f3c57a; }
+:root[data-theme="dark"] .story-text { color:#f4f7ff; }
+:root[data-theme="dark"] .story-stats { color:rgba(217,226,255,.65); }
+:root[data-theme="dark"] .story-stats em { color:#f3c57a; }
+:root[data-theme="dark"] .story-live { background:rgba(159,197,255,.14); color:#dce8ff; }
+:root[data-theme="dark"] .story-human { color:#7ff0e2; }
+:root[data-theme="dark"] .story-btn { background:#e8efff; color:#0a1733; }
+:root[data-theme="dark"] .story-btn:hover { background:#fff; color:#0a1733; }
+:root[data-theme="dark"] .story-trig { background:rgba(159,197,255,.14); color:#dfe8fb; }
+:root[data-theme="dark"] .story-trig.is-webhook, :root[data-theme="dark"] .story-trig.is-sheet { background:rgba(255,115,0,.18); color:#ffb37a; }
+:root[data-theme="dark"] .story-trig.is-schedule { background:rgba(61,219,201,.16); color:#7ff0e2; }
+:root[data-theme="dark"] .lt { color:rgba(217,226,255,.45); background:rgba(159,197,255,.07); }
+:root[data-theme="dark"] .lt.is-doing { color:#fff; background:linear-gradient(90deg, rgba(159,197,255,.32), rgba(159,197,255,.12)); background-size:200% 100%; }
+:root[data-theme="dark"] .lt.is-done { color:#06231f; background:#9fc5ff; }
+:root[data-theme="dark"] .story.is-good .lt.is-done { background:#3ddbc9; }
+:root[data-theme="dark"] .lt.is-fix.is-done, :root[data-theme="dark"] .lt.is-fix.is-doing { color:#2a1a00; background:#e5a53a; }
+:root[data-theme="dark"] .lt.is-skip { color:rgba(217,226,255,.3); background:rgba(159,197,255,.04); }
+
+:root[data-theme="dark"] .otag { background:rgba(8,15,36,.88); color:#f4f7ff; border:1px solid rgba(159,197,255,.24); box-shadow:0 6px 16px -6px rgba(0,0,0,.7); }
+:root[data-theme="dark"] .otag i { color:#9fc5ff; }
+:root[data-theme="dark"] .otag.is-reviewing { --st:#ffffff; } :root[data-theme="dark"] .otag.is-revising { --st:#e5a53a; } :root[data-theme="dark"] .otag.is-celebrating { --st:#3ddbc9; }
+:root[data-theme="dark"] .otag.is-reviewing i { color:#fff; } :root[data-theme="dark"] .otag.is-revising i { color:#f3c57a; } :root[data-theme="dark"] .otag.is-celebrating i { color:#7ff0e2; }
+:root[data-theme="dark"] .otag.is-visitor, :root[data-theme="dark"] .otag.is-packet, :root[data-theme="dark"] .otag.is-goal { background:#e8efff; color:#0a1733; border-color:#fff; }
+:root[data-theme="dark"] .stamp2 { background:rgba(8,15,36,.92); color:#3ddbc9; border-color:#3ddbc9; box-shadow:0 0 22px rgba(61,219,201,.4); }
+:root[data-theme="dark"] .stamp2 small { color:#f4f7ff; }
+:root[data-theme="dark"] .stamp2.is-bad { background:rgba(30,20,6,.9); color:#f3c57a; border-color:#e5a53a; box-shadow:0 0 26px rgba(229,165,58,.5); }
+
+/* The mistake card, at night. */
+:root[data-theme="dark"] .spot { background:#0f1934; border-color:rgba(229,165,58,.5); box-shadow:0 0 0 6px rgba(229,165,58,.12), 0 30px 70px -24px rgba(0,0,0,.85); }
+:root[data-theme="dark"] .spot.is-fixed { border-color:rgba(61,219,201,.5); box-shadow:0 0 0 6px rgba(61,219,201,.12), 0 30px 70px -24px rgba(0,0,0,.85); }
+:root[data-theme="dark"] .spot-head { background:rgba(229,165,58,.12); border-bottom-color:rgba(229,165,58,.25); }
+:root[data-theme="dark"] .spot.is-fixed .spot-head { background:rgba(61,219,201,.12); border-bottom-color:rgba(61,219,201,.25); }
+:root[data-theme="dark"] .spot-head b { color:#f3c57a; } :root[data-theme="dark"] .spot.is-fixed .spot-head b { color:#7ff0e2; }
+:root[data-theme="dark"] .spot-head span { color:rgba(217,226,255,.65); }
+:root[data-theme="dark"] .spot-row em { color:rgba(217,226,255,.5); }
+:root[data-theme="dark"] .spot-row p { color:#eef3ff; }
+:root[data-theme="dark"] .spot-old { background:rgba(255,138,128,.12); color:#ffb1a8 !important; text-decoration-color:rgba(255,138,128,.7); }
+:root[data-theme="dark"] .spot-new { background:rgba(61,219,201,.12); color:#7ff0e2 !important; }
+:root[data-theme="dark"] .spot-timer { background:#e5a53a; } :root[data-theme="dark"] .spot.is-fixed .spot-timer { background:#3ddbc9; }
+
+/* ── Pages ───────────────────────────────────────────────────────────────── */
+:root[data-theme="dark"] .lms-row.is-dirty { background:rgba(255,115,0,.08); }
+:root[data-theme="dark"] .pg-err { background:rgba(255,138,128,.1); border-color:rgba(255,138,128,.35); color:#ffb1a8; }
+:root[data-theme="dark"] .agent-av { background:#e8efff; color:#0a1733; }
+:root[data-theme="dark"] .rp-kpis .is-warn b { color:#f3c57a; } :root[data-theme="dark"] .rp-kpis .is-good b { color:#7ff0e2; }
+:root[data-theme="dark"] .set-card h3 svg, :root[data-theme="dark"] .rp-card h2 svg { color:#9fc5ff; }
+:root[data-theme="dark"] .cmd-err { background:rgba(255,138,128,.12); border-color:rgba(255,138,128,.35); color:#ffc9c2; }
+
+/* The theme switch in the top bar. */
+.cmd-group .iconbtn.theme-btn { width:32px; height:32px; border-radius:9px; color:#24345a; background:none; border:none; }
+.cmd-group .iconbtn.theme-btn:hover { background:#f0f3f8; }
+:root[data-theme="dark"] .cmd-group .iconbtn.theme-btn { color:#dfe8fb; }
+:root[data-theme="dark"] .cmd-group .iconbtn.theme-btn:hover { background:rgba(159,197,255,.12); }
+
+:root[data-theme="dark"] .spot.is-call { background:#0f1934; border-color:rgba(159,197,255,.5); box-shadow:0 0 0 6px rgba(159,197,255,.12), 0 30px 70px -24px rgba(0,0,0,.85); }
+:root[data-theme="dark"] .spot.is-call .spot-head { background:rgba(159,197,255,.12); border-bottom-color:rgba(159,197,255,.25); }
+:root[data-theme="dark"] .spot.is-call .spot-head b { color:#cfe0ff; }

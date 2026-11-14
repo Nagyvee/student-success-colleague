@@ -1,0 +1,184 @@
+/* ══ Light, floor-first ══════════════════════════════════════════════════════
+   The dialer's look over a daylight office: white cards, navy ink, one hairline
+   border, a soft shadow, and the brand orange only on the one action that
+   matters (Give goal). Loaded after shell.css; it only repaints and re-places. */
+
+.shell.is-solo .office-main { padding:12px; }
+.floor-wrap { position:relative; }
+.drawer-wrap { position:absolute; top:76px; right:12px; bottom:12px; z-index:30; display:flex; animation:drawerIn .22s var(--ease) both; }
+.drawer-wrap .side-panel { flex:1; box-shadow:0 18px 50px -20px rgba(10,23,51,.35); }
+@keyframes drawerIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:none; } }
+.drawer-panel .side-body { padding-top:4px; }
+
+.cmd-group { background:rgba(255,255,255,.95); border:1px solid #dfe5ef; box-shadow:0 6px 18px -10px rgba(10,23,51,.25); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+.cmd-btn { color:#24345a; }
+.cmd-btn svg { color:#5b6b8f; }
+.cmd-btn:hover:not(:disabled) { background:#f0f3f8; color:#0a1733; }
+.cmd-btn.is-open { background:#eaf0fb; border-color:#c9d6ef; color:#0a1733; }
+.cmd-btn.is-primary { background:#ff7300; color:#fff; box-shadow:0 4px 12px -4px rgba(255,115,0,.6); }
+.cmd-btn.is-primary svg { color:#fff; }
+.cmd-btn.is-primary:hover:not(:disabled) { background:#ff8420; color:#fff; }
+.cmd-btn.is-primary:disabled { background:#c8cfdb; box-shadow:none; opacity:1; color:#fff; }
+.cmd-pop { background:#ffffff; border:1px solid #dfe5ef; box-shadow:0 24px 60px -20px rgba(10,23,51,.35); }
+.goal-pop button { color:#24345a; }
+.goal-pop button svg { color:#3b6fd8; }
+.goal-pop button:hover { background:#f0f3f8; color:#0a1733; }
+.goal-brand { padding:5px 13px 5px 8px; }
+.goal-brand b { color:#0a1733; font-size:13px; }
+.goal-brand em { color:#5b6478; font-size:11px; }
+.goal-form > svg { color:#3b6fd8; }
+.goal-form input { color:#0a1733; font-size:14px; }
+.goal-form input::placeholder { color:#8c95a8; }
+.goal-form input:disabled { color:#24345a; }
+.goal-form:focus-within { border-color:#3b6fd8; box-shadow:0 0 0 3px rgba(59,111,216,.15), 0 6px 18px -10px rgba(10,23,51,.25); }
+.test-btn b { color:#8c95a8; }
+.test-btn.on b, .test-btn.on svg { color:#c47a00; }
+.set-row > span { color:#5b6478; }
+.set-val { font-size:12px; font-weight:700; color:#0a1733; }
+.seg-d { background:#f0f3f8; border-color:#dfe5ef; }
+.seg-d button { color:#5b6478; }
+.seg-d button:hover { color:#0a1733; }
+.seg-d button.on { background:#ffffff; color:#0a1733; box-shadow:0 1px 3px rgba(10,23,51,.15); }
+.set-foot { border-top-color:#e8ecf3; }
+.set-foot span { color:#8c95a8; }
+.cmd-err { color:#b42318; border-color:#f5c2bd; background:#fff5f4; }
+.drawer-tabs { margin-left:auto; flex-shrink:0; }
+.drawer-tabs .cmd-btn em { font-style:normal; font-size:10.5px; font-weight:800; padding:1px 6px; border-radius:999px; background:#eef2f8; color:#24345a; font-variant-numeric:tabular-nums; }
+.drawer-tabs .cmd-btn.is-open em { background:#0a1733; color:#fff; }
+.drawer-tabs .cmd-btn.is-fresh { position:relative; }
+.drawer-tabs .cmd-btn.is-fresh::after { content:""; position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:#ff7300; }
+@container office (max-width:1700px) { .drawer-tabs .tab-l { display:none; } .drawer-tabs .cmd-btn { padding:0 9px; } }
+@container office (max-width:1280px) { .test-btn .tab-l { display:none; } }
+@container office (max-width:1040px) { .goal-brand em { display:none; } }
+
+/* Camera: a small cluster in the bottom-right corner, above the caption. */
+.office .view-ctrl { top:auto; bottom:104px; right:12px; background:rgba(255,255,255,.95); border:1px solid #dfe5ef; box-shadow:0 6px 18px -10px rgba(10,23,51,.25); }
+.office.has-drawer .view-ctrl { right:408px; }
+.view-ctrl button { color:#24345a; }
+.view-ctrl button:hover:not(:disabled) { background:#f0f3f8; color:#0a1733; }
+.view-ctrl .sep { background:#e3e8f1; }
+.view-ctrl .dir-btn { color:#5b6478; }
+.view-ctrl .dir-btn.on { color:#0a1733; background:#eef2f8; }
+.focus-chip { top:auto; bottom:104px; right:auto; left:12px; background:#ffffff; border:1px solid #dfe5ef; color:#0a1733; box-shadow:0 6px 18px -10px rgba(10,23,51,.25); }
+.focus-chip button { background:#eef2f8; color:#24345a; }
+
+/* The caption: one white card, one line of story, the brief's loop under it. */
+.story { background:rgba(255,255,255,.96); border:1px solid #dfe5ef; box-shadow:0 10px 30px -16px rgba(10,23,51,.35); padding:10px 12px; gap:8px; }
+.office.has-drawer .story { right:408px; }
+.story.is-good { border-color:rgba(23,163,148,.5); } .story.is-warn { border-color:rgba(217,138,18,.5); } .story.is-bad { border-color:rgba(217,138,18,.75); }
+.story-ico { width:36px; height:36px; border-radius:10px; background:#eef2f8; color:#24345a; }
+.story.is-good .story-ico { background:#17a394; color:#fff; } .story.is-warn .story-ico { background:#f3b13c; color:#fff; } .story.is-bad .story-ico { background:#d98a12; color:#fff; }
+.story.is-running .story-ico { animation:none; }
+.story-who { color:#5b6478; letter-spacing:.06em; font-size:10.5px; }
+.story.is-good .story-who { color:#118276; } .story.is-warn .story-who, .story.is-bad .story-who { color:#a96a06; }
+.story-live { background:#eef2f8; color:#24345a; }
+.story-text { color:#0a1733; font-size:16px; -webkit-line-clamp:1; }
+.story-task { display:none; }
+.story-stats { color:#5b6478; }
+.story-stats em { color:#a96a06; }
+.story-human { color:#118276; }
+.story-btn { background:#0a1733; color:#fff; height:32px; }
+.story-btn:hover { background:#1b2c55; color:#fff; }
+.lt { color:#8c95a8; background:#f0f3f8; height:22px; }
+.lt.is-doing { color:#0a1733; background:linear-gradient(90deg, #cfdcf5, #eef2f8); background-size:200% 100%; }
+.lt.is-done { color:#fff; background:#24345a; }
+.lt.is-done i { background:rgba(255,255,255,.18); }
+.story.is-good .lt.is-done { background:#17a394; }
+.lt.is-fix.is-done, .lt.is-fix.is-doing { color:#fff; background:#d98a12; }
+.lt.is-skip { color:#aeb5c4; background:#f5f7fa; }
+
+/* On the floor: white name pills, grey notes, clean stamps. */
+.otag { background:#ffffff; color:#0a1733; border:1px solid #d6dde8; box-shadow:0 4px 12px -4px rgba(10,23,51,.25); font-weight:700; }
+.otag i { color:#5b6478; }
+.otag.is-reviewing { --st:#0a1733; } .otag.is-revising { --st:#d98a12; } .otag.is-celebrating { --st:#17a394; }
+.otag.is-revising i { color:#a96a06; } .otag.is-celebrating i { color:#118276; } .otag.is-reviewing i { color:#0a1733; }
+.otag.is-speaking { border-color:var(--st, #3b6fd8); box-shadow:0 0 0 2px rgba(59,111,216,.2), 0 6px 16px -6px rgba(10,23,51,.35); }
+.otag.is-visitor, .otag.is-packet, .otag.is-goal { background:#0a1733; color:#fff; border-color:#0a1733; }
+.note { background:rgba(36,44,64,.93); border-color:rgba(255,255,255,.1); color:#f2f5fb; box-shadow:0 12px 28px -12px rgba(10,23,51,.55); max-width:240px; }
+.note::after { background:rgba(36,44,64,.95); }
+.note-who { color:#c9d4ea; }
+.note-who em { display:none; }
+.stamp2 { background:#ffffff; color:#118276; border:2px solid #17a394; box-shadow:0 10px 26px -10px rgba(10,23,51,.35); }
+.stamp2 small { color:#24345a; }
+.stamp2.is-bad { background:#fffaf0; color:#a96a06; border-color:#d98a12; box-shadow:0 0 0 4px rgba(217,138,18,.15), 0 10px 26px -10px rgba(10,23,51,.35); }
+.carry-tag { box-shadow:0 calc(var(--u) * 3px) calc(var(--u) * 8px) rgba(10,23,51,.3); }
+
+/* The plan, inside the drawer. */
+.plan-card.is-flat { width:auto; max-height:none; overflow:visible; background:none; border:none; box-shadow:none; padding:4px 2px 12px; backdrop-filter:none; -webkit-backdrop-filter:none; animation:none; }
+.plan-card.is-flat .plan-kick { color:var(--muted); letter-spacing:.04em; }
+.plan-card.is-flat .plan-reading { display:block; -webkit-line-clamp:unset; color:var(--ink); font-size:13.5px; line-height:1.5; }
+.plan-card.is-flat .plan-steps li.is-doing { background:var(--surface-sunken); }
+.plan-card.is-flat .ps-ico { border-color:var(--line); color:var(--muted); }
+.plan-card.is-flat .plan-steps li.is-doing .ps-ico { border-color:#3b6fd8; color:#3b6fd8; }
+.plan-card.is-flat .plan-steps li.is-done .ps-ico { background:#17a394; border-color:#17a394; color:#fff; }
+.plan-card.is-flat .ps-t b { color:var(--ink-2); display:block; -webkit-line-clamp:unset; font-size:13px; }
+.plan-card.is-flat .plan-steps li.is-doing .ps-t b, .plan-card.is-flat .plan-steps li.is-done .ps-t b { color:var(--ink); }
+.plan-card.is-flat .ps-t em { color:var(--muted); }
+.plan-card.is-flat .ps-t em strong { color:#118276; }
+.plan-card.is-flat .plan-crit { display:flex; -webkit-line-clamp:unset; color:var(--muted); }
+.plan-card.is-flat .plan-crit svg { color:#3b6fd8; }
+.plan-card.is-flat .plan-sum { border-bottom-color:var(--line); }
+.plan-card.is-flat .plan-done { color:#118276; }
+.plan-card.is-flat .plan-nums div { background:var(--surface-sunken); }
+.plan-card.is-flat .plan-nums b { color:var(--ink); }
+.plan-card.is-flat .plan-nums span { color:var(--muted); }
+.plan-card.is-flat .plan-nums .is-zero { background:rgba(23,163,148,.1); }
+.plan-card.is-flat .plan-nums .is-zero b { color:#118276; }
+
+/* ── The spotlight: a mistake caught, then fixed ─────────────────────────── */
+.spot-wrap { position:absolute; left:12px; right:12px; top:84px; z-index:20; display:flex; justify-content:center; pointer-events:none; }
+.office.has-drawer .spot-wrap { right:408px; }
+.spot { position:relative; width:min(600px, 100%); overflow:hidden; border-radius:16px; background:#ffffff; border:1px solid #f0d7a8; box-shadow:0 0 0 6px rgba(217,138,18,.14), 0 30px 70px -24px rgba(10,23,51,.5);
+  animation:spotIn .45s cubic-bezier(.2,1.3,.4,1) both; }
+.spot.is-fixed { border-color:#a7e3da; box-shadow:0 0 0 6px rgba(23,163,148,.14), 0 30px 70px -24px rgba(10,23,51,.5); }
+@keyframes spotIn { from { opacity:0; transform:translateY(-14px) scale(.94); } to { opacity:1; transform:none; } }
+.spot-head { display:flex; align-items:center; gap:12px; padding:14px 18px; background:#fff6e5; border-bottom:1px solid #f3e1bd; }
+.spot.is-fixed .spot-head { background:#e9f8f5; border-bottom-color:#c8ece5; }
+.spot-ico { width:36px; height:36px; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; background:#d98a12; color:#fff; flex-shrink:0; animation:spotPulse 1.2s ease-in-out 3; }
+.spot.is-fixed .spot-ico { background:#17a394; animation:none; }
+@keyframes spotPulse { 0%,100% { box-shadow:0 0 0 0 rgba(217,138,18,.5); } 50% { box-shadow:0 0 0 8px rgba(217,138,18,0); } }
+.spot-head b { display:block; font-size:15.5px; font-weight:800; color:#7a4a00; letter-spacing:-.01em; }
+.spot.is-fixed .spot-head b { color:#0b6b60; }
+.spot-head span { display:block; font-size:12px; color:#5b6478; margin-top:1px; }
+.spot-body { display:flex; flex-direction:column; gap:10px; padding:14px 18px 18px; }
+.spot-row { display:grid; grid-template-columns:110px 1fr; gap:12px; align-items:baseline; }
+.spot-row em { font-style:normal; font-size:10.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:#8c95a8; }
+.spot-row p { margin:0; font-size:13.5px; line-height:1.45; color:#0a1733; }
+.spot-old { padding:7px 10px; border-radius:8px; background:#fdecea; color:#8a1c12 !important; text-decoration:line-through; text-decoration-color:rgba(180,35,24,.6); }
+.spot-new { padding:7px 10px; border-radius:8px; background:#e6f7f3; color:#0b6b60 !important; font-weight:600; }
+.spot-timer { position:absolute; left:0; bottom:0; height:3px; width:100%; background:#d98a12; transform-origin:0 50%; animation:spotTimer linear both; }
+.spot.is-fixed .spot-timer { background:#17a394; }
+@keyframes spotTimer { from { transform:scaleX(1); } to { transform:scaleX(0); } }
+
+/* The always-on pill in the top bar. */
+.live-pill { flex:1; min-width:0; gap:10px; padding:6px 14px; }
+.live-pill > span { display:flex; align-items:baseline; gap:10px; min-width:0; overflow:hidden; }
+.live-pill b { font-size:13px; font-weight:800; color:#0a1733; white-space:nowrap; }
+.live-pill em { font-style:normal; font-size:12.5px; color:#5b6478; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.live-pill em.last { color:#24345a; font-weight:600; }
+.live-pill em.q { color:#a96a06; font-weight:700; }
+.live-dot { width:9px; height:9px; border-radius:50%; background:#17a394; box-shadow:0 0 0 0 rgba(23,163,148,.5); animation:liveDot 2s ease-out infinite; flex-shrink:0; }
+.live-pill.is-working .live-dot { background:#ff7300; animation-duration:1s; }
+.live-pill.is-working b { color:#c45a00; }
+@keyframes liveDot { 0% { box-shadow:0 0 0 0 rgba(23,163,148,.5); } 100% { box-shadow:0 0 0 9px rgba(23,163,148,0); } }
+.test-chip { cursor:default; }
+.test-chip b { color:#8c95a8; } .test-chip.on b, .test-chip.on svg { color:#c47a00; }
+a.cmd-btn { text-decoration:none; }
+@container office (max-width:1500px) { .live-pill em.last { display:none; } .cmd-bar .cmd-group:not(.drawer-tabs) .tab-l { display:none; } }
+
+.story-trig { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:999px; background:#eef2f8; color:#24345a; font-weight:700; margin-right:4px; }
+.story-trig.is-webhook, .story-trig.is-sheet { background:#fff1e3; color:#a14d00; }
+.story-trig.is-schedule { background:#e9f8f5; color:#0b6b60; }
+
+.wall-link { pointer-events:auto; cursor:pointer; text-decoration:none; background:#0a1733 !important; color:#fff !important; border-color:#0a1733 !important; }
+.wall-link i { background:#ff7300 !important; }
+.wall-link:hover { background:#1b2c55 !important; }
+
+/* The call card. */
+.spot.is-call { border-color:#b9cdf5; box-shadow:0 0 0 6px rgba(59,111,216,.14), 0 30px 70px -24px rgba(10,23,51,.5); }
+.spot.is-call .spot-head { background:#edf3ff; border-bottom-color:#d3e0fa; }
+.spot.is-call .spot-ico { background:#3b6fd8; animation:callRing 1s ease-in-out infinite; }
+.spot.is-call .spot-head b { color:#1d3f8f; }
+.spot.is-call .spot-timer { background:#3b6fd8; }
+.spot-say { font-size:15px !important; font-weight:600; line-height:1.5 !important; }
+@keyframes callRing { 0%,100% { transform:rotate(0); } 10% { transform:rotate(-14deg); } 20% { transform:rotate(14deg); } 30% { transform:rotate(-10deg); } 40% { transform:rotate(0); } }
