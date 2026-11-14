@@ -15,14 +15,22 @@ export interface MailInput {
   link: string | null; taskId: string; deliverableId: string | null;
 }
 
+/** Values pasted into a host's settings can carry quotes, spaces or a stray line break. */
+const clean = (v?: string) => String(v || '').trim().replace(/^["']|["']$/g, '').trim();
+/** Gmail shows app passwords as four groups of four; the spaces are only for reading. */
+function smtpPass() {
+  const p = clean(process.env.SMTP_PASS);
+  return /gmail\.com|googlemail\.com/i.test(String(process.env.SMTP_HOST || '')) ? p.replace(/\s+/g, '') : p;
+}
+
 let transport: nodemailer.Transporter | null = null;
 function smtp() {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
   if (!transport) {
     const port = Number(process.env.SMTP_PORT || 465);
     transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST, port, secure: port === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      host: clean(process.env.SMTP_HOST), port, secure: port === 465,
+      auth: { user: clean(process.env.SMTP_USER), pass: smtpPass() },
       connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 15_000,
     });
   }
