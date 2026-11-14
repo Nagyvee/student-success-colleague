@@ -21,6 +21,27 @@ export default function Spotlight({ spot }: { spot: Spot | null | undefined }) {
   if (left <= 0) return null;
   const caught = spot.kind === 'caught';
   const owner = AGENT_BY_ID[spot.owner];
+  if (spot.kind === 'passed' || spot.kind === 'failed') {
+    const ok = spot.kind === 'passed';
+    return (
+      <div className="spot-wrap" aria-live="assertive">
+        <div key={spot.id} className={`spot is-${ok ? 'fixed' : 'caught'} is-result`}>
+          <div className="spot-head">
+            <span className="spot-ico"><Icon name={ok ? 'award' : 'graduation'} size={18} /></span>
+            <div><b>{spot.title}</b><span>{spot.subject}</span></div>
+          </div>
+          <div className="spot-body">
+            <div className="spot-row"><em>Score</em><p className="spot-score">{spot.rule}</p></div>
+            <div className="spot-row"><em>Result</em><p className={ok ? 'spot-new' : 'spot-warn'}>{spot.problem}</p></div>
+            {spot.steps && spot.steps.length > 0 && (
+              <div className="spot-row"><em>{ok ? 'Done' : 'Next steps'}</em><ol className="spot-steps">{spot.steps.map((s) => <li key={s}>{s}</li>)}</ol></div>
+            )}
+          </div>
+          <i className="spot-timer" style={{ animationDuration: `${spot.holdMs}ms` }} />
+        </div>
+      </div>
+    );
+  }
   if (spot.kind === 'call') {
     return (
       <div className="spot-wrap" aria-live="assertive">

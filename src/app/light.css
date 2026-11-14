@@ -182,3 +182,8 @@ a.cmd-btn { text-decoration:none; }
 .spot.is-call .spot-timer { background:#3b6fd8; }
 .spot-say { font-size:15px !important; font-weight:600; line-height:1.5 !important; }
 @keyframes callRing { 0%,100% { transform:rotate(0); } 10% { transform:rotate(-14deg); } 20% { transform:rotate(14deg); } 30% { transform:rotate(-10deg); } 40% { transform:rotate(0); } }
+
+/* Quiz result card. */
+.spot-score { font-size:18px !important; font-weight:800; letter-spacing:-.01em; }
+.spot-warn { padding:7px 10px; border-radius:8px; background:#fff3e0; color:#8a4b00 !important; font-weight:600; }
+.spot-steps { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:4px; font-size:13.5px; line-height:1.4; color:#0a1733; }

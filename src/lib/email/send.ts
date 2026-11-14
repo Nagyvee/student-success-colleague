@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
-import type { CheckInMessage, InboxMail, RemedialQuiz } from '@/lib/types';
-import { pushMail, uid } from '@/lib/engine/store';
+import type { CheckInMessage, InboxMail, QuizQuestion, QuizResult, RemedialQuiz } from '@/lib/types';
+import { publicUrl, pushMail, uid } from '@/lib/engine/store';
 
 /* Mail out of the colleague.
  *
@@ -102,4 +102,25 @@ export function checkInEmail(m: CheckInMessage) {
 <p style="font-size:14px;line-height:1.6;margin:0;color:#0a1733;background:#f4f7fc;border-radius:10px;padding:12px 14px"><b>One small thing:</b> ${esc(m.ask)}</p>`;
   const text = `${m.body}\n\n${m.ask}\n\nBongani · Thuso Student Success`;
   return { subject: m.subject, html: shell(m.subject, body, null), text };
+}
+
+/** After the quiz: well done, or the next steps with what was missed. */
+export function resultEmail(quiz: RemedialQuiz, result: QuizResult, missed: QuizQuestion[]) {
+  const first = quiz.learner.name.split(' ')[0];
+  const base = publicUrl();
+  if (result.passed) {
+    const subject = `Well done, ${first}: ${quiz.module.code} cleared`;
+    const body = `<p style="font-size:15px;line-height:1.65;margin:0 0 12px">Hi ${esc(first)},</p><p style="font-size:15px;line-height:1.65;margin:0 0 12px">You scored <b>${result.score} out of ${result.total} (${result.pct}%)</b> on ${esc(quiz.topic)}. Your record is updated and you're back on track. Keep the momentum going into the rest of ${esc(quiz.module.code)}.</p>`;
+    return { subject, html: shell(`You're back on track`, body, null), text: `Hi ${first}, you scored ${result.score}/${result.total} (${result.pct}%) on ${quiz.topic}. You're back on track. Thuso · Student Success` };
+  }
+  const subject = `${first}, your next steps on ${quiz.module.code}`;
+  const items = missed.map((q) => `<div style="margin:0 0 12px;padding:12px 14px;border-radius:10px;background:#f4f7fc"><b style="font-size:14px">${esc(q.prompt)}</b><p style="font-size:14px;margin:6px 0 0">Answer: <b>${esc(q.options[q.answerIndex] || '')}</b></p><p style="font-size:13px;color:#444a5c;margin:6px 0 0">${esc(q.explanation)}</p></div>`).join('');
+  const lesson = base && quiz.lesson ? `<p style="margin:14px 0 4px"><a href="${base}/learn/${quiz.quizId}" style="display:inline-block;background:#0a1733;color:#fff;font-weight:800;text-decoration:none;padding:12px 18px;border-radius:10px;font-size:14px">▶ Watch the lesson again</a></p>` : '';
+  const body = `<p style="font-size:15px;line-height:1.65;margin:0 0 12px">Hi ${esc(first)},</p>
+<p style="font-size:15px;line-height:1.65;margin:0 0 12px">Thanks for taking the quiz. You scored ${result.score} out of ${result.total} (${result.pct}%). That's not a failure, it shows us exactly where to help. Here's what happens next:</p>
+<p style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#62687a;margin:16px 0 8px">1 · What you missed, explained</p>${items}
+<p style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#62687a;margin:16px 0 4px">2 · The lesson again</p>${lesson || '<p style="font-size:14px;margin:0">Rewatch the lesson from your study pack email.</p>'}
+<p style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#62687a;margin:16px 0 4px">3 · A 20-minute catch-up</p><p style="font-size:14px;line-height:1.6;margin:0">Your tutor will be in touch to set up a short session on ${esc(quiz.topic)}. Reply to this email with a time that suits you.</p>`;
+  const text = `Hi ${first}, you scored ${result.score}/${result.total} (${result.pct}%). Next steps: the answers you missed are explained in this email, rewatch the lesson, and your tutor will set up a 20-minute catch-up on ${quiz.topic}. Thuso · Student Success`;
+  return { subject, html: shell('Your next steps', body, null), text };
 }

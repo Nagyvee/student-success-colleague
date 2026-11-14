@@ -153,3 +153,6 @@
 :root[data-theme="dark"] .spot.is-call { background:#0f1934; border-color:rgba(159,197,255,.5); box-shadow:0 0 0 6px rgba(159,197,255,.12), 0 30px 70px -24px rgba(0,0,0,.85); }
 :root[data-theme="dark"] .spot.is-call .spot-head { background:rgba(159,197,255,.12); border-bottom-color:rgba(159,197,255,.25); }
 :root[data-theme="dark"] .spot.is-call .spot-head b { color:#cfe0ff; }
+
+:root[data-theme="dark"] .spot-warn { background:rgba(229,165,58,.14); color:#f3c57a !important; }
+:root[data-theme="dark"] .spot-steps { color:#eef3ff; }

@@ -142,7 +142,9 @@ export interface Trigger { kind: 'manager' | 'webhook' | 'schedule' | 'sheet'; l
 export interface Spotlight {
   id: string;
   ts: number;
-  kind: 'caught' | 'fixed' | 'call';
+  kind: 'caught' | 'fixed' | 'call' | 'passed' | 'failed';
+  /** Next steps, for a quiz result card. */
+  steps?: string[];
   owner: AgentId;
   title: string;
   subject: string;

@@ -1,5 +1,6 @@
 import type { Deliverable, QuizResult, RemedialQuiz } from '@/lib/types';
-import { announce, bump, getState, log, patchTask, setAgent, setLearner, setRoom, upsertDeliverable } from './store';
+import { announce, bump, getState, log, patchTask, setAgent, setLearner, setRoom, setSpotlight, upsertDeliverable } from './store';
+import { resultEmail, sendMail } from '@/lib/email/send';
 import { getLmsAdapter } from '@/lib/lms/lmsAdapter';
 import { LOCALIZED_BANK } from '@/lib/ai/simulate';
 import { sleep } from './orchestrator';
@@ -85,7 +86,25 @@ async function reactInOffice(d: Deliverable<RemedialQuiz>, result: QuizResult, f
   } catch (e) {
     log('lms', 'error', `LMS sync failed (${(e as Error).message}); score kept locally and queued for retry.`, { taskId: d.taskId, deliverableId: d.id });
   }
-  // 2 · Student Success reacts
+  // 2 · the room sees it at once: a card with the score and, if it was not enough, what happens next
+  const missed = q.questions.filter((x, i) => result.answers[i] !== x.answerIndex);
+  const steps = result.passed
+    ? [`${first} is back On Track in the LMS`, 'A well-done email is on its way', 'Student Success keeps watching the next checkpoint']
+    : [
+        `Email ${first} the ${missed.length} question${missed.length === 1 ? '' : 's'} missed, each with the explanation`,
+        `Send the 3-minute lesson again, with the missed point first`,
+        `Tutor follow-up: a 20-minute catch-up on ${q.topic}`,
+        `Keep ${first} flagged as being helped and re-check in 7 days`,
+      ];
+  setSpotlight({
+    id: `res-${q.quizId}-${result.submittedAt}`, ts: Date.now(), kind: result.passed ? 'passed' : 'failed', owner: 'success',
+    title: `${q.learner.name} took the quiz`, subject: `${q.module.code} · ${q.topic}`,
+    rule: `${result.score} of ${result.total} correct · ${result.pct}% · pass mark ${q.passMark}%`,
+    problem: result.passed ? 'Passed. At-Risk → On Track.' : `Below the pass mark. ${missed.length ? `Missed: ${missed.map((x) => `Q${q.questions.indexOf(x) + 1}`).join(', ')}.` : ''}`,
+    before: null, after: null, steps, holdMs: 11000,
+  });
+
+  // 3 · Student Success reacts
   setRoom('success', 'busy', `Score in · ${first} ${result.pct}%`);
   setAgent('success', { status: 'thinking', thought: `${first} just finished the ${q.module.code} quiz: ${result.score}/${result.total}. Checking it against the pass mark…` });
   await sleep(1600);
@@ -103,19 +122,25 @@ async function reactInOffice(d: Deliverable<RemedialQuiz>, result: QuizResult, f
       toolCall: { tool: 'lms_adapter.update_student_status', payload: { endpoint: `PATCH /students/${q.learner.id}/status`, studentId: q.learner.id, previousStatus: 'at_risk', newStatus: 'on_track', note: `Cleared ${q.module.code} at ${result.pct}%` } },
     });
     setAgent('learning', { status: 'celebrating', thought: `The ${q.topic} refresher landed. Nice one, ${first}.` });
+    const mail = await sendMail({ to: q.learner.email, toName: q.learner.name, ...resultEmail(q, result, []), link: null, taskId: d.taskId, deliverableId: d.id });
+    log('success', 'email', `Well-done email ${mail.delivery === 'simulated' ? 'placed in the Inbox tab' : 'sent'} to ${q.learner.name}.`, { taskId: d.taskId, deliverableId: d.id });
   } else {
-    try { await adapter.updateStudentStatus(q.learner.id, 'intervention', `Scored ${result.pct}% on ${q.module.code} remedial; 1:1 booked`); } catch { /* logged above */ }
-    setLearner(q.learner.id, { status: 'intervention', lastEvent: `Scored ${result.pct}% on ${q.module.code} remedial · 1:1 booked` });
-    setRoom('success', 'amber', `${first}: ${result.pct}% · booking a 1:1`);
-    setAgent('success', { status: 'working', thought: `${first} scored ${result.pct}%, under the ${q.passMark}% pass mark. Booking the 20-minute 1:1 from the plan.` });
-    log('success', 'info', `${q.learner.name} scored ${result.pct}% on the ${q.module.code} remedial. Below the pass mark: the plan's 1:1 is triggered and the learner stays in intervention.`, { taskId: d.taskId, deliverableId: d.id });
-    setAgent('learning', { status: 'working', thought: `Preparing the 1:1 on ${q.topic} for ${first}.` });
+    try { await adapter.updateStudentStatus(q.learner.id, 'intervention', `Scored ${result.pct}% on ${q.module.code} catch-up quiz; next steps sent`); } catch { /* logged above */ }
+    setLearner(q.learner.id, { status: 'intervention', lastEvent: `Scored ${result.pct}% · next steps sent · tutor follow-up` });
+    void writeBack(q.learner.id, 'being helped', `Scored ${result.pct}% on the ${q.module.code} catch-up quiz; next steps sent`);
+    setRoom('success', 'amber', `${first}: ${result.pct}% · next steps`);
+    setAgent('success', { status: 'working', thought: `${first} scored ${result.pct}%, under the ${q.passMark}% pass mark. Not a failure, a signal: sending the missed answers and setting up a tutor catch-up.` });
+    log('success', 'info', `${q.learner.name} scored ${result.pct}% on the ${q.module.code} catch-up quiz, below the ${q.passMark}% pass mark. Next steps: the missed answers explained, the lesson again, a 20-minute tutor catch-up, re-check in 7 days.`, { taskId: d.taskId, deliverableId: d.id });
+    setAgent('learning', { status: 'working', thought: `Preparing the 20-minute catch-up on ${q.topic} for ${first}.` });
+    const mail = await sendMail({ to: q.learner.email, toName: q.learner.name, ...resultEmail(q, result, missed), link: null, taskId: d.taskId, deliverableId: d.id });
+    log('success', 'email', `Next-steps email ${mail.delivery === 'simulated' ? 'placed in the Inbox tab' : 'sent'} to ${q.learner.name}: ${missed.length} missed question${missed.length === 1 ? '' : 's'} explained, lesson link, tutor catch-up.`, { taskId: d.taskId, deliverableId: d.id });
+    announce('success', `${first} scored ${result.pct}% · next steps emailed, tutor catch-up set up`, 'warn');
   }
   // The plan's last step closes on the learner's own result.
   const task = getState().tasks.find((t) => t.id === d.taskId);
   if (task?.plan) {
     const steps = task.plan.steps.map((s) => (s.key === 'follow_up'
-      ? { ...s, status: result.passed ? 'done' as const : 'doing' as const, result: `${first} ${result.passed ? `passed ${result.pct}% · On Track` : `scored ${result.pct}% · 1:1 booked`}` }
+      ? { ...s, status: result.passed ? 'done' as const : 'doing' as const, result: `${first} ${result.passed ? `passed ${result.pct}% · On Track` : `scored ${result.pct}% · next steps sent`}` }
       : s));
     patchTask(task.id, { plan: { ...task.plan, steps } });
   }
