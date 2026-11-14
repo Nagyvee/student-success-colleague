@@ -142,6 +142,33 @@ video: slides animate in, the browser reads the narration aloud (Web Speech),
 captions run underneath, and it ends on "Take the quiz". It is a narrated
 slide lesson rendered in the browser, not a video file.
 
+## The follow-up call
+
+After the email, the academy's dialer phones the learner. Its AI caller
+(Deepgram for the voice and listening, Claude for the conversation) opens with
+a line Thuso writes: the learner's name, that the call is recorded, and what
+was just emailed. It keeps the call under a minute and never labels the
+learner. The dialer's own rules still apply (AI caller on, calling hours,
+do-not-call list). Set `DIALER_URL` and `DIALER_API_KEY` (a dialer key with
+the "Start AI calls" scope); the call and its result appear on the floor and
+in the activity feed.
+
+## The quiz result
+
+When the learner submits, the office shows it at once. Passed: At-Risk → On
+Track and a well-done email. Below the pass mark: the missed questions with
+explanations, the lesson again and a tutor catch-up are emailed straight away,
+and the learner stays flagged as being helped.
+
+## Hosting
+
+Thuso is one always-on Node server (live updates, background runs, the
+scheduler), so host it on Render, Railway, Fly or a VPS, not on per-request
+serverless. On Render: build `npm install && npm run build`, start
+`npm start`. On Render's free plan Thuso pings its own `/api/health` every 10
+minutes so it does not sleep, but the free plan blocks mail ports: use a paid
+instance for Gmail SMTP, or an SMTP provider on port 2525 (for example Brevo).
+
 ## How it is built
 
 - **Next.js 15 · TypeScript · Tailwind v4 · Framer Motion · Anthropic SDK ·
