@@ -190,6 +190,7 @@ export async function POST(req: Request) {
             channel: channel(m.channel), cta: m.cta, resourceIds: strArr(m.resourceIds, 3) || [],
             expiresAt: typeof m.expiresAt === 'number' ? m.expiresAt : null,
             funding: Array.isArray(m.funding) ? m.funding : undefined,
+            repeatable: typeof m.repeatable === 'boolean' ? m.repeatable : undefined,
           });
           return NextResponse.json({ ok: true, message: saved });
         }

@@ -18,6 +18,8 @@ export function auditAgentMessage(input: {
   channel: MessageChannel;
   department: DepartmentKind | undefined;
   fields: Record<string, string>;
+  /** Saved messages (written and approved once) may explain more than a one-off reply. */
+  maxWords?: number;
 }): AuditVerdict {
   const notes: string[] = [];
   const { body, subject, firstName } = input;
@@ -33,7 +35,8 @@ export function auditAgentMessage(input: {
   if (THREATS.test(text)) notes.push('It threatens (legal action, suspension, collections). Our tone is help first; escalation is a person\'s decision, not an email\'s.');
   if (PRESSURE.test(text)) notes.push('It uses pressure tactics (last chance, act now). Give a reason, not a deadline we invented.');
   if (wa && words > 110) notes.push(`At ${words} words it is too long for WhatsApp; keep it under 100.`);
-  if (!wa && words > 230) notes.push(`At ${words} words it is too long; keep emails under 200 words.`);
+  const cap = input.maxWords ?? 230;
+  if (!wa && words > cap) notes.push(`At ${words} words it is too long; keep emails under ${cap - 30} words.`);
   if (words < 25) notes.push('It is too short to feel personal or useful.');
 
   if (input.department === 'finance') {

@@ -181,6 +181,8 @@ export interface ProgrammeVideo {
   viaAi: boolean;
   createdAt: number;
   views: number;
+  /** The script mentions an offer that ends on this day: the video is rewritten after it. */
+  validUntil?: number | null;
 }
 
 /* ── Counters: how much of the nurturing AI actually wrote ────────────────── */

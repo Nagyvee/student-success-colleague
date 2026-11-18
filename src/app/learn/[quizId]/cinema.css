@@ -62,6 +62,10 @@
     linear-gradient(180deg, color-mix(in srgb, var(--base, #0a1733) 30%, transparent) 0%, color-mix(in srgb, var(--base, #0a1733) 62%, transparent) 55%, color-mix(in srgb, var(--base, #0a1733) 92%, transparent) 100%),
     linear-gradient(100deg, color-mix(in srgb, var(--deep, #5e0743) 46%, transparent) 0%, transparent 55%); }
 .cin-grade.is-on { opacity:1; }
+/* A photo scene: the photo is the point; only the lower third is darkened for the words. */
+.cin-grade.is-light { background:
+  linear-gradient(180deg, transparent 0%, transparent 42%, color-mix(in srgb, var(--base, #0a1733) 55%, transparent) 72%, color-mix(in srgb, var(--base, #0a1733) 90%, transparent) 100%),
+  linear-gradient(100deg, color-mix(in srgb, var(--deep, #5e0743) 30%, transparent) 0%, transparent 45%); }
 
 /* Film grain (moving, so it reads as film rather than texture). */
 .cin-grain { position:absolute; inset:-60%; opacity:.09; mix-blend-mode:overlay;

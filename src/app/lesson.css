@@ -9,6 +9,7 @@
   background:radial-gradient(1100px 600px at 50% -20%, rgba(94,7,67,.28), transparent 65%), #070e22; }
 .vl-top { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px; }
 .vl-top .logo-word { color:#fff; }
+.vl-academy { font-size:17px; font-weight:800; letter-spacing:-.01em; color:#fff; }
 .vl-top > span { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.62); text-align:right; }
 .vl-main { flex:1; width:100%; max-width:1080px; margin:0 auto; padding:4px 16px 36px; display:flex; flex-direction:column; gap:14px; }
 .vl-card { padding:24px; border-radius:18px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08); }

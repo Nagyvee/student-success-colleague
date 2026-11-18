@@ -42,6 +42,9 @@ export interface CompleteOptions {
   maxTokens?: number;
   timeoutMs?: number;
   json?: boolean;
+  /** A stronger model for work done once (a programme video's script); everyday agent work stays on the default. */
+  model?: string;
+  effort?: 'low' | 'medium' | 'high';
 }
 
 export async function complete(o: CompleteOptions): Promise<string | null> {
@@ -52,7 +55,7 @@ export async function complete(o: CompleteOptions): Promise<string | null> {
   const timeoutMs = o.timeoutMs ?? 28_000;
   try {
     bump('aiCalls');
-    if (p === 'anthropic') return await completeAnthropic(o.system, o.prompt, maxTokens, timeoutMs);
+    if (p === 'anthropic') return await completeAnthropic(o.system, o.prompt, maxTokens, timeoutMs, o.model, o.effort);
     return await completeOpenAI(o.system, o.prompt, maxTokens, timeoutMs, o.json !== false);
   } catch (e) {
     console.warn('[student-success] model call failed, using simulation:', (e as Error)?.message || e);
@@ -60,9 +63,9 @@ export async function complete(o: CompleteOptions): Promise<string | null> {
   }
 }
 
-async function completeAnthropic(system: string, prompt: string, maxTokens: number, timeoutMs: number) {
+async function completeAnthropic(system: string, prompt: string, maxTokens: number, timeoutMs: number, modelOverride?: string, effortLevel: 'low' | 'medium' | 'high' = 'low') {
   const client = anthropicClient();
-  const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+  const model = modelOverride || process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
   const base = {
     model,
     max_tokens: maxTokens,
@@ -70,7 +73,7 @@ async function completeAnthropic(system: string, prompt: string, maxTokens: numb
     messages: [{ role: 'user' as const, content: prompt }],
   };
   // Effort is the speed lever on the 5-series; older models ignore it.
-  const effort = /opus-5|sonnet-5|haiku-5|fable|opus-4-[678]|sonnet-4-6/.test(model) ? { output_config: { effort: 'low' as const } } : {};
+  const effort = /opus-5|sonnet-5|haiku-5|fable|opus-4-[678]|sonnet-4-6/.test(model) ? { output_config: { effort: effortLevel } } : {};
   let res: Anthropic.Message | Anthropic.Beta.BetaMessage;
   try {
     const req = { ...base, ...effort, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };

@@ -525,7 +525,9 @@ export interface CheckInMessage {
  *  greeting · flow (things moving through stages) · branch (one thing, two outcomes) ·
  *  compare (mistake vs fix) · code (typed, a line highlighted) · analogy (everyday thing ≈ concept) ·
  *  big (one number or word) · recap · cta. 'concept' and 'steps' are kept for older lessons. */
-export type SlideVisual = 'greeting' | 'flow' | 'branch' | 'compare' | 'code' | 'analogy' | 'big' | 'recap' | 'cta' | 'concept' | 'steps';
+export type SlideVisual = 'greeting' | 'flow' | 'branch' | 'compare' | 'code' | 'analogy' | 'big' | 'recap' | 'cta' | 'concept' | 'steps'
+  /* A lead's programme video: a real photo, facts, a price card, the months ahead, the jobs it leads to. */
+  | 'photo' | 'facts' | 'price' | 'timeline' | 'careers';
 /** @deprecated Lessons use one brand accent now; kept so older lessons still load. */
 export type SlideAccent = 'orange' | 'teal' | 'violet' | 'blue' | 'rose' | 'amber';
 /** A thing on screen: an icon and a two- or three-word label. */
@@ -546,6 +548,10 @@ export interface LessonScene {
   caption?: string;
   /** code: the line numbers (1-based) the scene points at. */
   highlight?: number[];
+  /** price: up to three prices ("Accredited", was "R 74 999", now "R 37 499", "paid in full by 15 Dec"). */
+  rows?: { label: string; was?: string; now: string; note?: string }[];
+  /** photo: a small line above the headline ("Our Rosebank hub"). */
+  kicker?: string;
 }
 export interface LessonSlide { heading: string; points: string[]; code?: string; say: string; visual?: SlideVisual; accent?: SlideAccent; scene?: LessonScene }
 export interface Lesson {

@@ -217,10 +217,10 @@ test('footage goes where it fits: a welcome shot for the greeting, a celebration
     mediaDoc.set([item('wave', ['welcome', 'team']), item('grad', ['graduation', 'celebration']), item('class', ['students', 'classroom']), item('code', ['coding', 'laptop'], 'photo')]);
     const slides = [{ visual: 'greeting' }, { visual: 'flow' }, { visual: 'big' }, { visual: 'recap' }, { visual: 'cta' }] as { visual: 'greeting' | 'flow' | 'big' | 'recap' | 'cta' }[];
     const lead = media.footageFor(slides, 'Software Development', 'lead');
-    assert.match(lead[0]!.url, /f_wave$/, 'greeting: the welcome clip');
+    assert.match(lead[0]!.url, /f_wave(&|$)/, 'greeting: the welcome clip');
     assert.equal(lead[1], null, 'a diagram stays clean');
-    assert.match(lead[2]!.url, /f_code$/, 'a big moment in a software video: coding footage');
-    assert.match(lead[4]!.url, /f_grad$/, 'the ending: the celebration');
+    assert.match(lead[2]!.url, /f_code(&|$)/, 'a big moment in a software video: coding footage');
+    assert.match(lead[4]!.url, /f_grad(&|$)/, 'the ending: the celebration');
     const lesson = media.footageFor(slides, 'JS-07', 'lesson');
     assert.equal(lesson[2], null, 'a lesson keeps teaching scenes clean');
     assert.ok(lesson[0] && lesson[4]);
@@ -263,4 +263,23 @@ test('a message aimed at a way of paying: Black Friday skips student-loan leads,
   assert.equal(fitsFunding(blackFriday, {}), true, 'a lead who did not say still gets it');
   assert.equal(fitsFunding({ funding: ['loan'] }, { payment_plan: 'I require a student loan' }), true);
   assert.equal(fitsFunding({}, { funding: 'loan' }), true, 'no restriction: everyone');
+});
+
+test('the voice says rand, percent, times and acronyms the way a South African presenter would', async () => {
+  const { forSpeech, numberWords } = await import('../src/lib/media/speech');
+  assert.equal(numberWords(37499), 'thirty-seven thousand, four hundred and ninety-nine');
+  assert.equal(numberWords(8000), 'eight thousand');
+  assert.equal(numberWords(1500), 'one thousand, five hundred');
+  assert.equal(numberWords(74999), 'seventy-four thousand, nine hundred and ninety-nine');
+  assert.equal(numberWords(2024), 'two thousand and twenty-four');
+  assert.equal(forSpeech('Accredited programmes are R 37 499 instead of R 74 999.'), 'Accredited programmes are thirty-seven thousand, four hundred and ninety-nine rand instead of seventy-four thousand, nine hundred and ninety-nine rand.');
+  assert.equal(forSpeech('Pay R8 000 by 31 December, then 12 x R 3 997.'), 'Pay eight thousand rand by 31 December, then twelve payments of three thousand, nine hundred and ninety-seven rand.');
+  assert.equal(forSpeech('From R1 500 - R3 000 a month'), 'From one thousand, five hundred to three thousand rand a month');
+  assert.equal(forSpeech('R37,499.50 total'), 'thirty-seven thousand, four hundred and ninety-nine rand and fifty cents total');
+  assert.equal(forSpeech('Save 50% when you pay in full.'), 'Save fifty percent when you pay in full.');
+  assert.equal(forSpeech('Live classes Mon–Thu 10:00–16:00 SAST.'), 'Live classes Monday to Thursday ten to four South African time.');
+  assert.equal(forSpeech('Pay before 23:59.'), 'Pay before eleven fifty-nine.');
+  assert.equal(forSpeech('An NQF Level 5 qualification, SAQA ID 118708, QCTO and MICT SETA accredited.'), 'An N Q F Level 5 qualification, S A Q A I D 118708, Q C T O and M I C T SETA accredited.');
+  assert.equal(forSpeech('Takes 12–18 months.'), 'Takes twelve to eighteen months.');
+  assert.equal(forSpeech('Learn AI with Python & SQL'), 'Learn A I with Python and sequel');
 });

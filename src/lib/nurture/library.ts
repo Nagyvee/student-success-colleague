@@ -68,7 +68,7 @@ export function checkMessage(m: Pick<NurtureMessage, 'subject' | 'body' | 'chann
   if (/(\b\d{1,3}\s?(%|percent\b)|\bhalf price\b|\bdiscount|\bfree registration\b|\bspecial offer\b|\bpromo(tion)?\b)/i.test(`${m.subject} ${m.body}`) && !m.expiresAt) notes.push('This looks like an offer: give it an end date so it is never sent after it ends.');
   const merged = mergeText(m.body, sample);
   const withAsk = m.cta.target === 'reply' ? merged : `${merged}\n\n${m.cta.label}`;
-  const verdict = auditAgentMessage({ body: withAsk, subject: mergeText(m.subject, sample), firstName: sample.first_name, channel: m.channel === 'whatsapp' ? 'whatsapp' : 'email', department: 'admissions', fields: {} });
+  const verdict = auditAgentMessage({ body: withAsk, subject: mergeText(m.subject, sample), firstName: sample.first_name, channel: m.channel === 'whatsapp' ? 'whatsapp' : 'email', department: 'admissions', fields: {}, maxWords: 340 });
   notes.push(...verdict.notes
     .filter((n) => !/placeholder/i.test(n) || unknown.length === 0)
     // The button is the next step when there is one.
@@ -194,17 +194,19 @@ export function pickMessage(fields: Record<string, string>, stage: NurtureStage)
 export interface Rendered { subject: string; html: string; text: string; whatsapp: string; resources: NurtureResource[]; ctaHref: string | null; unsub: string }
 
 function card(href: string, r: NurtureResource): string {
-  const label = r.kind === 'video' ? 'Watch the video' : r.kind === 'pdf' ? 'Read the guide' : 'Have a look';
-  const thumb = r.kind === 'video' && r.thumb
-    ? `<tr><td><a href="${href}" style="display:block;text-decoration:none"><img src="${r.thumb}" width="556" alt="${esc(r.title)}" style="display:block;width:100%;max-width:556px;height:auto;border-radius:12px 12px 0 0;border:0" /></a></td></tr>`
+  // A video gets a small card (with its thumbnail when there is one); a guide or a link stays plain text.
+  if (r.kind !== 'video') {
+    const label = r.kind === 'pdf' ? 'Read the guide' : 'Have a look';
+    return `<p style="margin:0 0 16px"><b style="color:#0a1733">${esc(r.title)}</b>${r.hook ? `<br/><span style="color:#4a556e">${esc(r.hook)}</span>` : ''}<br/><a href="${href}" style="color:#0a1733;font-weight:700">${label}</a></p>`;
+  }
+  const thumb = r.thumb
+    ? `<tr><td><a href="${href}" style="display:block;text-decoration:none"><img src="${r.thumb}" width="560" alt="${esc(r.title)}" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px 12px 0 0;border:0" /></a></td></tr>`
     : '';
-  const badge = r.kind === 'pdf' ? 'Guide · PDF' : r.kind === 'video' ? 'Video' : 'Read';
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:14px 0;border:1px solid #e4e9f2;border-radius:12px;border-collapse:separate;overflow:hidden">
-${thumb}<tr><td style="padding:14px 16px;background:#f9fbff;border-radius:${thumb ? '0 0 12px 12px' : '12px'}">
-<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#5e0743">${badge}</span>
-<a href="${href}" style="display:block;margin:4px 0 4px;font-size:16px;font-weight:800;color:#0a1733;text-decoration:none">${esc(r.title)}</a>
-${r.hook ? `<span style="display:block;font-size:14px;line-height:1.55;color:#4a556e">${esc(r.hook)}</span>` : ''}
-<a href="${href}" style="display:inline-block;margin-top:8px;font-size:13px;font-weight:800;color:#ff7300;text-decoration:none">${label} &rarr;</a>
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0;border:1px solid #e4e9f2;border-radius:12px;border-collapse:separate">
+${thumb}<tr><td style="padding:14px 16px">
+<a href="${href}" style="display:block;font-size:16px;font-weight:700;color:#0a1733;text-decoration:none">${esc(r.title)}</a>
+${r.hook ? `<span style="display:block;font-size:14px;line-height:1.55;color:#4a556e;margin-top:4px">${esc(r.hook)}</span>` : ''}
+<a href="${href}" style="display:inline-block;margin-top:8px;font-size:14px;font-weight:700;color:#0a1733">Watch the video</a>
 </td></tr></table>`;
 }
 
@@ -248,20 +250,18 @@ export function renderForLead(msg: NurtureMessage, rec: Pick<DataRecord, 'key' |
     ? null
     : trackUrl(base, p(t, t === 'resource' ? { r: ctaRes!.id } : t === 'url' ? { u: msg.cta.url } : {}));
   const cards = [...resources.filter((r) => r.id !== ctaRes?.id), ...(fresh && fresh.id === ctaRes?.id ? [fresh] : [])].map((r) => card(trackUrl(base, p('res', { r: r.id })), r)).join('');
-  const voucher = opts.voucher ? voucherCard(opts.voucher, `${base.replace(/\/$/, '')}/v/${opts.voucher.code}`) : '';
+  const voucher = opts.voucher ? voucherCard(opts.voucher, `${base.replace(/\/$/, '')}/v/${opts.voucher.code}`, ac.academyName) : '';
   const video = t === 'video' && ctaHref ? videoInvite(ctaHref, vars.first_name, vars.programme) : '';
   const unsub = trackUrl(base, p('unsub'), 'u');
   const pixel = trackUrl(base, p('open'), 'o');
 
-  const askLine = t === 'reply' ? `<p style="font-size:14px;line-height:1.68;margin:18px 0 0;color:#0a1733;background:#f4f7fc;border-radius:10px;padding:15px 18px;border:1px solid #e2e8f4"><b>Next step:</b> ${esc(msg.cta.label)}</p>` : '';
-  const html = emailShell(
-    subject,
-    `${formatHtmlParagraphs(body)}${voucher}${video}${cards}${askLine}${signatureBlock(sender.name, sender.office, ac.academyName)}`,
-    // The video card is the button for a video message; everything else gets the orange button.
-    ctaHref && t !== 'video' ? { href: ctaHref, label: msg.cta.label } : null,
-    { agentName: sender.name, officeName: sender.office },
-    { footer: `Not for you right now? <a href="${unsub}" style="color:#6f7890">Stop these emails</a>.`, pixel, preheader: preheaderOf(body) },
-  );
+  const cta = ctaHref && t !== 'video' ? `<p style="margin:6px 0 20px"><a href="${ctaHref}" style="color:#0a1733;font-weight:700;font-size:16px">${esc(msg.cta.label)}</a></p>` : '';
+  const html = plainLeadEmail({
+    body: `${formatPlain(body)}${voucher}${cta}${video}${cards}`,
+    sender: sender.name, office: sender.office, academy: ac.academyName,
+    footer: `Not for you right now? <a href="${unsub}" style="color:#8a93a6">Stop these emails</a>.`,
+    pixel, preheader: preheaderOf(body),
+  });
   const text = [
     body,
     opts.voucher ? `Your voucher: ${opts.voucher.code} (${valueText(opts.voucher.offer)} ${opts.voucher.offer.appliesTo}, valid until ${dateText(opts.voucher.expiresAt)})` : '',
@@ -277,6 +277,28 @@ export function renderForLead(msg: NurtureMessage, rec: Pick<DataRecord, 'key' |
   return { subject, html, text, whatsapp, resources: fresh ? [...resources, fresh] : resources, ctaHref, unsub };
 }
 
+/** Paragraphs that never break mid-line; "- " lines become a simple list. */
+function formatPlain(raw: string): string {
+  return raw.replace(/\r\n/g, '\n').split(/\n{2,}/).map((b) => b.trim()).filter(Boolean).map((block) => {
+    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length > 1 && lines.every((l) => /^[-•*]\s+/.test(l))) {
+      return `<ul style="margin:0 0 16px;padding-left:20px">${lines.map((l) => `<li style="margin:0 0 6px">${esc(l.replace(/^[-•*]\s+/, ''))}</li>`).join('')}</ul>`;
+    }
+    return `<p style="margin:0 0 16px">${lines.map((l) => esc(l)).join('<br/>')}</p>`;
+  }).join('');
+}
+
+/** A clean, personal email: white, readable, no banner. Only a video invite and a voucher card are designed. */
+function plainLeadEmail(input: { body: string; sender: string; office: string; academy: string; footer: string; pixel: string; preheader: string }): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head><body style="margin:0;background:#ffffff">
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#ffffff;opacity:0">${esc(input.preheader)}</div>
+<div style="max-width:600px;margin:0 auto;padding:24px 20px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#1b253b">
+${input.body}
+<p style="margin:22px 0 0">Warm regards,<br/><b>${esc(input.sender)}</b><br/><span style="color:#5b6478;font-size:13px">${esc(input.office)} &middot; ${esc(input.academy)}</span></p>
+<p style="margin:28px 0 0;font-size:12px;color:#8a93a6">${input.footer}</p>
+</div><img src="${input.pixel}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px" /></body></html>`;
+}
+
 /** A guide or video that fits them and they have not had yet (for "something useful" messages). */
 export function freshResource(fields: Record<string, string>): NurtureResource | null {
   const had = new Set((fields.nurture_res || '').split('|').filter(Boolean));
@@ -290,15 +312,18 @@ function preheaderOf(body: string): string {
   return after.replace(/\s+/g, ' ').slice(0, 140);
 }
 
-function voucherCard(v: { code: string; expiresAt: number; offer: VoucherOffer }, shareHref: string): string {
+function voucherCard(v: { code: string; expiresAt: number; offer: VoucherOffer }, shareHref: string, academy: string): string {
   const o = v.offer;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 10px;border-collapse:separate">
-<tr><td style="border:2px dashed #ff7300;border-radius:14px;padding:22px 18px;text-align:center;background:#fff8f2;font-family:Inter,Segoe UI,Arial,sans-serif">
-<span style="display:block;font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#5e0743">A voucher in your name</span>
-<span style="display:block;font-size:30px;font-weight:900;line-height:1.2;color:#0a1733;margin:8px 0 4px">${esc(valueText(o))}</span>
-<span style="display:block;font-size:14px;color:#4a556e">${esc(o.appliesTo)} &middot; valid until ${esc(dateText(v.expiresAt))}</span>
-<span style="display:inline-block;margin-top:14px;padding:11px 18px;border-radius:10px;background:#0a1733;color:#ffffff;font:800 18px/1 Consolas,Menlo,monospace;letter-spacing:.14em">${esc(v.code)}</span>
-<span style="display:block;font-size:12.5px;color:#62687a;margin-top:12px">Give this code when you apply.${o.shareable ? ` Know someone thinking about tech? <a href="${shareHref}" style="color:#0a1733;font-weight:700">Pass it on</a>.` : ''}</span>
+  const f = 'font-family:Arial,Helvetica,sans-serif';
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 18px;border-collapse:separate">
+<tr><td bgcolor="#0a1733" style="background:#0a1733;background-image:linear-gradient(135deg,#0a1733 0%,#0a1733 60%,#5e0743 100%);border-radius:16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td style="padding:22px 24px 4px;${f};font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#ffb27a">A voucher in your name &middot; ${esc(academy)}</td></tr>
+<tr><td style="padding:2px 24px 0;${f};font-size:34px;font-weight:800;line-height:1.15;color:#ffffff">${esc(valueText(o))}</td></tr>
+<tr><td style="padding:4px 24px 18px;${f};font-size:14px;line-height:1.5;color:#c9d2ea">${esc(o.appliesTo)} &middot; valid until ${esc(dateText(v.expiresAt))}</td></tr>
+<tr><td style="padding:0 24px 22px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="border:2px dashed #ff7300;border-radius:10px;background:#13224a;padding:12px 18px;font-family:Consolas,Menlo,monospace;font-size:20px;font-weight:800;letter-spacing:.16em;color:#ffffff">${esc(v.code)}</td></tr></table></td></tr>
+<tr><td style="border-top:1px dashed #33436e;padding:14px 24px 18px;${f};font-size:13px;line-height:1.55;color:#c9d2ea">Give this code when you apply.${o.shareable ? ` Know someone thinking about tech? <a href="${shareHref}" style="color:#ffb27a;font-weight:700">Pass it on</a>.` : ''}</td></tr>
+</table>
 </td></tr></table>`;
 }
 

@@ -25,7 +25,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ tenant: string;
     const headers: Record<string, string> = {
       'Content-Type': f.mime || item.mime,
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'public, max-age=86400',
+      'Cache-Control': 'public, max-age=2592000, immutable',
       'X-Robots-Tag': 'noindex',
     };
     const range = req.headers.get('range');

@@ -193,3 +193,55 @@
 }
 .sc-noticed--plain { padding:1.2cqw 2.4cqw; }
 .sc-noticed--plain .sc-noticed-text { align-items:center; }
+
+/* ══ Programme-video scenes (a lead's video) ═══════════════════════════════ */
+
+/* photo: the academy's own photo fills the frame; the words sit low on the left, like a documentary lower third */
+.sc-photo { justify-content:flex-end; align-items:flex-start; text-align:left; padding:6cqw 7cqw 10.5cqw; }
+.sc-lower { display:flex; flex-direction:column; gap:1cqw; max-width:70cqw; }
+.sc-kicker { display:inline-block; align-self:flex-start; font-size:clamp(10px, 1.3cqw, 15px); font-weight:800; letter-spacing:.14em; text-transform:uppercase;
+  color:#fff; background:var(--a); padding:.45em .9em; border-radius:.4em; }
+.sc-photo-title { margin:0; font-size:clamp(20px, 4.6cqw, 58px); font-weight:800; letter-spacing:-.025em; line-height:1.05; color:#fff; text-shadow:0 .3cqw 2.4cqw rgba(0,0,0,.45); }
+.sc-photo-cap { margin:0; max-width:58cqw; font-size:clamp(12px, 1.9cqw, 22px); line-height:1.4; color:rgba(255,255,255,.88); font-weight:500; text-shadow:0 .2cqw 1.6cqw rgba(0,0,0,.5); }
+
+/* facts: big numbers in tiles */
+.sc-facts-grid { display:grid; gap:1.6cqw; width:min(84cqw, 100%); grid-template-columns:repeat(4, 1fr); }
+.sc-facts-grid.n2 { grid-template-columns:repeat(2, 1fr); width:56cqw; }
+.sc-facts-grid.n3 { grid-template-columns:repeat(3, 1fr); width:72cqw; }
+.sc-fact { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.8cqw; padding:2.6cqw 1.4cqw; border-radius:2cqw;
+  background:rgba(10,23,51,.55); border:1px solid rgba(255,255,255,.14); backdrop-filter:blur(6px); }
+.sc-fact b { font-size:clamp(18px, 4cqw, 50px); font-weight:800; letter-spacing:-.02em; line-height:1; color:#fff; }
+.sc-fact span { font-size:clamp(10px, 1.45cqw, 17px); color:rgba(255,255,255,.7); line-height:1.3; }
+.sc-fact:first-child b { color:var(--a); }
+
+/* price: standard fee struck through, then their price */
+.sc-price-row { display:flex; gap:2cqw; justify-content:center; width:100%; }
+.sc-price-card { display:flex; flex-direction:column; align-items:center; gap:.7cqw; padding:2.4cqw 2.6cqw; min-width:22cqw; border-radius:2.2cqw;
+  background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14); }
+.sc-price-card small { font-size:clamp(10px, 1.35cqw, 16px); font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:rgba(255,255,255,.65); }
+.sc-was { position:relative; font-size:clamp(13px, 2.2cqw, 26px); font-weight:600; color:rgba(255,255,255,.55); }
+.sc-was i { position:absolute; left:-4%; right:-4%; top:52%; height:.22cqw; min-height:2px; background:var(--a); transform-origin:left center; border-radius:2px; }
+.sc-price-card b { font-size:clamp(22px, 5.2cqw, 64px); font-weight:800; letter-spacing:-.03em; line-height:1; color:var(--a); }
+.sc-price-card em { font-style:normal; font-size:clamp(10px, 1.4cqw, 16px); color:rgba(255,255,255,.75); max-width:24cqw; line-height:1.35; }
+
+/* timeline: the months ahead */
+.sc-tl { position:relative; display:grid; grid-template-columns:repeat(var(--n), 1fr); width:min(84cqw, 100%); padding-top:3.4cqw; }
+.sc-tl-track { position:absolute; top:4.5cqw; left:calc(50% / var(--n)); right:calc(50% / var(--n)); height:.35cqw; min-height:3px; border-radius:99px; background:rgba(255,255,255,.14); }
+.sc-tl-track i { position:absolute; inset:0 auto 0 0; border-radius:inherit; background:linear-gradient(90deg, color-mix(in srgb, var(--a) 50%, transparent), var(--a)); }
+.sc-tl-step { position:relative; display:flex; flex-direction:column; align-items:center; gap:.8cqw; padding:0 1cqw; }
+.sc-tl-dot { width:2.4cqw; height:2.4cqw; border-radius:50%; background:#0f1d40; border:.35cqw solid rgba(255,255,255,.3); margin-bottom:.6cqw; z-index:1; }
+.sc-tl-step.is-on .sc-tl-dot { border-color:var(--a); background:var(--a); }
+.sc-tl-step.is-now .sc-tl-dot { box-shadow:0 0 0 .9cqw color-mix(in srgb, var(--a) 25%, transparent); }
+.sc-tl-step b { font-size:clamp(12px, 2cqw, 24px); font-weight:800; line-height:1.15; }
+.sc-tl-step small { font-size:clamp(10px, 1.4cqw, 16px); color:rgba(255,255,255,.68); line-height:1.3; }
+
+/* careers: the jobs, appearing one by one */
+.sc-chips { display:flex; flex-wrap:wrap; justify-content:center; gap:1.2cqw 1.4cqw; max-width:80cqw; }
+.sc-chip { display:inline-flex; align-items:center; gap:.9cqw; padding:1.1cqw 1.9cqw 1.1cqw 1.2cqw; border-radius:999px; font-size:clamp(12px, 2cqw, 24px); font-weight:700;
+  background:rgba(10,23,51,.6); border:1px solid rgba(255,255,255,.16); backdrop-filter:blur(6px); }
+.sc-chip i { display:inline-grid; place-items:center; width:2.8cqw; height:2.8cqw; border-radius:50%; background:var(--a); color:#fff; font-size:1.5cqw; font-style:normal; }
+
+@media (max-width:640px) {
+  .sc-facts-grid, .sc-facts-grid.n3 { grid-template-columns:repeat(2, 1fr); }
+  .sc-price-row { flex-wrap:wrap; }
+}

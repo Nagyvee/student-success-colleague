@@ -91,6 +91,11 @@ export default function Scene(props: SceneProps) {
     case 'analogy': return <Analogy {...props} scene={scene} />;
     case 'recap': return <Recap {...props} scene={scene} />;
     case 'cta': return <Cta {...props} />;
+    case 'photo': return <PhotoScene {...props} scene={scene} />;
+    case 'facts': return <Facts {...props} scene={scene} />;
+    case 'price': return <Price {...props} scene={scene} />;
+    case 'timeline': return <Timeline {...props} scene={scene} />;
+    case 'careers': return <Careers {...props} scene={scene} />;
     case 'big':
     default: return <Big {...props} scene={scene.value ? scene : { value: slide.heading, caption: scene.caption }} />;
   }
@@ -357,6 +362,114 @@ function Cta({ slide, progress, reduced, first, n, pass, tiles: given, kicker }:
           <motion.div key={s} {...pop(at(progress, 0.15 + k * 0.15, reduced), reduced)}><b>{b}</b><span>{s}</span></motion.div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ── photo: a real moment from the academy, with a lower third ─────────── */
+
+function PhotoScene({ slide, progress, reduced, scene }: SceneProps & { scene: LessonScene }) {
+  return (
+    <div className="sc sc-photo">
+      <div className="sc-lower">
+        {scene.kicker && <motion.small className="sc-kicker" {...pop(true, reduced)}>{scene.kicker}</motion.small>}
+        <h2 className="sc-photo-title"><Words text={stripWave(slide.heading)} reduced={reduced} delay={0.2} /></h2>
+        {scene.caption && <motion.p className="sc-photo-cap" {...pop(at(progress, 0.3, reduced), reduced)}>{scene.caption}</motion.p>}
+      </div>
+    </div>
+  );
+}
+
+/* ── facts: the numbers that matter, as tiles ─────────────────────────── */
+
+function Facts({ slide, progress, reduced, scene }: SceneProps & { scene: LessonScene }) {
+  const items = scene.nodes || [];
+  return (
+    <div className="sc sc-facts">
+      <Title text={slide.heading} reduced={reduced} />
+      <div className={`sc-facts-grid n${items.length}`}>
+        {items.map((it, k) => (
+          <motion.div key={k} className="sc-fact" {...pop(at(progress, 0.08 + k * (0.7 / Math.max(1, items.length)), reduced), reduced)}>
+            <b>{it.label}</b>
+            {it.note && <span>{it.note}</span>}
+          </motion.div>
+        ))}
+      </div>
+      {scene.caption && <Caption text={scene.caption} on={at(progress, 0.82, reduced)} reduced={reduced} />}
+    </div>
+  );
+}
+
+/* ── price: the standard fee struck through, the price they would pay ─── */
+
+function Price({ slide, progress, reduced, scene }: SceneProps & { scene: LessonScene }) {
+  const rows = scene.rows || [];
+  return (
+    <div className="sc sc-price">
+      <Title text={slide.heading} reduced={reduced} />
+      <div className={`sc-price-row n${rows.length}`}>
+        {rows.map((r, k) => {
+          const on = at(progress, 0.1 + k * 0.22, reduced);
+          const struck = at(progress, 0.2 + k * 0.22, reduced);
+          return (
+            <motion.div key={k} className="sc-price-card" {...pop(on, reduced)}>
+              <small>{r.label}</small>
+              {r.was && (
+                <span className={`sc-was${struck ? ' is-struck' : ''}`}>
+                  {r.was}
+                  <motion.i initial={reduced ? false : { scaleX: 0 }} animate={{ scaleX: struck ? 1 : 0 }} transition={{ duration: 0.5, ease: EASE }} />
+                </span>
+              )}
+              <motion.b initial={reduced ? false : { opacity: 0, y: 12 }} animate={struck || !r.was ? { opacity: 1, y: 0 } : { opacity: 0, y: 12 }} transition={{ duration: 0.6, ease: EASE }}>{r.now}</motion.b>
+              {r.note && <em>{r.note}</em>}
+            </motion.div>
+          );
+        })}
+      </div>
+      {scene.caption && <Caption text={scene.caption} on={at(progress, 0.7, reduced)} reduced={reduced} />}
+    </div>
+  );
+}
+
+/* ── timeline: the months ahead ───────────────────────────────────────── */
+
+function Timeline({ slide, progress, reduced, scene }: SceneProps & { scene: LessonScene }) {
+  const items = scene.nodes || [];
+  const reached = reduced ? items.length - 1 : Math.min(items.length - 1, Math.floor(progress * (items.length + 0.3)));
+  const fill = items.length > 1 ? (reached / (items.length - 1)) * 100 : 100;
+  return (
+    <div className="sc sc-timeline">
+      <Title text={slide.heading} reduced={reduced} />
+      <div className="sc-tl" style={{ ['--n' as string]: items.length }}>
+        <div className="sc-tl-track" aria-hidden="true"><motion.i initial={reduced ? false : { width: '0%' }} animate={{ width: `${fill}%` }} transition={{ duration: 0.8, ease: EASE }} /></div>
+        {items.map((it, k) => (
+          <motion.div key={k} className={`sc-tl-step${k <= reached ? ' is-on' : ''}${k === reached ? ' is-now' : ''}`} {...pop(k <= reached, reduced)}>
+            <span className="sc-tl-dot" aria-hidden="true" />
+            <b>{it.label}</b>
+            {it.note && <small>{it.note}</small>}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── careers: the jobs this path leads to ─────────────────────────────── */
+
+function Careers({ slide, progress, reduced, scene }: SceneProps & { scene: LessonScene }) {
+  const items = scene.nodes || [];
+  const shown = reduced ? items.length : Math.min(items.length, Math.floor(progress * (items.length + 0.8)) + 1);
+  return (
+    <div className="sc sc-careers">
+      <Title text={slide.heading} reduced={reduced} />
+      <div className="sc-chips">
+        {items.map((it, k) => (
+          <motion.span key={k} className="sc-chip" {...pop(k < shown, reduced)}>
+            <i><Ic name={it.icon} fallback="rocket" /></i>{it.label}
+          </motion.span>
+        ))}
+      </div>
+      {scene.caption && <Caption text={scene.caption} on={at(progress, 0.8, reduced)} reduced={reduced} />}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Logo from '@/components/Logo';
 import Icon from '@/components/Icon';
 import QuizPlayer, { type PlayResult, type PlayableQuestion } from '@/components/QuizPlayer';
 import { post } from '@/hooks/useOfficeStream';
@@ -63,8 +62,8 @@ export default function QuizPage({ quizId }: { quizId: string }) {
   return (
     <div className="qp mt-page">
       <header className="qp-top">
-        <Logo word="Thuso" size="sm" />
-        <span className="mini" style={{ color: 'rgba(255,255,255,.7)' }}>{quiz?.academyName ? `${quiz.academyName} · ` : ''}Your study pack</span>
+        <b className="vl-academy">{quiz?.academyName || 'Your academy'}</b>
+        <span className="mini" style={{ color: 'rgba(255,255,255,.7)' }}>Your study pack</span>
       </header>
       <main className="qp-wrap">
         {err && <div className="qp-hero"><h1>We could not find that test</h1><p>{err} If you reached this from an email, the link may have been for a demo session that has since been reset.</p></div>}

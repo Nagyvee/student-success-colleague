@@ -96,6 +96,7 @@ export async function addMedia(file: { name: string; mime: string; data: Buffer 
   };
   mediaDoc.get().unshift(m);
   mediaDoc.save();
+  if (kind === 'photo') { const tid = currentTenantId(); setTimeout(() => { void warmPhotos(tid); }, 1500); }
   log('system', 'info', `Footage added: "${m.title}" (${kind}${tags.length ? `: ${tags.join(', ')}` : ''}). The videos use it from now on.`);
   return m;
 }
@@ -129,6 +130,10 @@ const ROLE: Partial<Record<SlideVisual, string[]>> = {
   recap: ['students', 'classroom', 'team', 'celebration'],
   big: ['students', 'classroom', 'coding', 'laptop', 'office', 'city', 'campus'],
   analogy: ['city', 'students', 'office', 'classroom', 'campus'],
+  photo: ['campus', 'students', 'classroom', 'team', 'welcome', 'celebration', 'coding'],
+  facts: ['classroom', 'students', 'laptop', 'coding'],
+  timeline: ['classroom', 'coding', 'laptop', 'students'],
+  careers: ['office', 'team', 'laptop', 'coding', 'celebration'],
 };
 
 /** Programme words that point at a tag. */
@@ -169,8 +174,26 @@ export function footageFor(slides: { visual?: SlideVisual }[], programme: string
     }
     if (!best) return null;
     used.set(best.m.id, (used.get(best.m.id) || 0) + 1);
-    return { url: mediaUrl(best.m, tenantId), kind: best.m.kind as 'video' | 'photo' };
+    const url = mediaUrl(best.m, tenantId);
+    // Photos through Next's resizer: full-HD, compressed, cached after the first view.
+    return { url: best.m.kind === 'photo' ? photoUrl(best.m, tenantId) : url, kind: best.m.kind as 'video' | 'photo' };
   });
+}
+
+/** The resized photo the videos show (Next's image resizer, full-HD, compressed). */
+export const photoUrl = (m: Pick<MediaItem, 'fileId'>, tenantId = currentTenantId()) => `/_next/image?url=${encodeURIComponent(mediaUrl(m, tenantId))}&w=1920&q=72`;
+
+/** Ask the running server for each photo's resized copy once, so it is ready before anyone watches. */
+export async function warmPhotos(tenantId = currentTenantId()): Promise<number> {
+  const port = process.env.PORT || '3200';
+  let n = 0;
+  for (const m of mediaDoc.get(tenantId).filter((x) => x.enabled && x.kind === 'photo')) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}${photoUrl(m, tenantId)}`, { signal: AbortSignal.timeout(60_000) });
+      if (r.ok) { await r.arrayBuffer(); n++; }
+    } catch { /* the viewer's browser will ask for it instead */ }
+  }
+  return n;
 }
 
 /** The academy's own music bed, if it uploaded one. */

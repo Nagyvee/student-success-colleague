@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { withTenant } from '@/lib/auth/tenantContext';
 import { getAcademyContext, getTenantIntegrations, listTenantIds } from '@/lib/auth/accounts';
 import { bootReady } from '@/lib/engine/automation';
@@ -120,6 +121,7 @@ export async function GET(req: Request) {
         ctaKicker: `Your next step, ${first}`,
         footage: footageFor(lesson.slides, video.programme === 'general' ? programme : video.programme, 'lead'),
         music: musicFor(),
+        audioVersion: createHash('sha1').update(lesson.slides.map((s) => s.say).join('|')).digest('hex').slice(0, 12),
       });
     }
 

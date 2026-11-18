@@ -46,7 +46,7 @@ const SWEEP_GOAL = 'Weekly sweep: check every cohort and get every learner who i
 const SWEEP_DAY = 1;      // Monday
 const SWEEP_HOUR = 7;     // 07:00, server time (SAST)
 
-type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; booted?: boolean };
+type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean };
 const g = globalThis as unknown as { __ssAutoMap?: Map<string, Hub>; __ssTimer?: ReturnType<typeof setInterval> | null; __thusoBoot?: Promise<void> };
 
 function hub(tenantId = currentTenantId()): Hub {
@@ -103,6 +103,8 @@ async function bootTenant(tid: string) {
     ]).catch(() => {});
     try { ensureDepartmentModel(); } catch (e) { console.warn('[thuso] department setup failed:', (e as Error).message); }
   });
+  // Photos for the videos, resized once the server is up (the first viewer never waits for a 10 MB original).
+  setTimeout(() => { void withTenant(tid, () => import('@/lib/nurture/media').then((m) => m.warmPhotos(tid))).catch(() => {}); }, 20_000);
 }
 
 /** Resolves once every workspace has been loaded (APIs wait for it before changing structure). */
@@ -291,6 +293,11 @@ function tick() {
       void pumpCampaigns().catch(() => { /* next tick */ });
     }
     // Replies in the mailbox (IMAP), once a minute when switched on.
+    // Programme videos that quote an offer which has ended are rewritten with what is current.
+    if (!h.lastVideoCheck || Date.now() - h.lastVideoCheck >= 3_600_000) {
+      h.lastVideoCheck = Date.now();
+      void import('@/lib/nurture/video').then((v) => v.refreshExpiredVideos()).catch(() => { /* next hour */ });
+    }
     if (!h.lastMailCheck || Date.now() - h.lastMailCheck >= 60_000) {
       h.lastMailCheck = Date.now();
       void checkReplies().catch(() => { /* the error is on the watch status */ });

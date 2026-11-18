@@ -3,7 +3,7 @@ import type { ProgrammeVideo } from './types';
 import { meta, metaDoc, bumpStat, nid } from './store';
 import { matchProgramme, leadProgramme, programmeList } from './programmes';
 import { bankKnowledge } from './bank';
-import { SCENE_ICONS, clampWords, cleanScene, sceneComplete, visualOf } from '@/lib/lessonScene';
+import { LEAD_VISUALS, SCENE_ICONS, clampWords, cleanScene, sceneComplete, visualOf } from '@/lib/lessonScene';
 import { generateJSON, isStr, noEmoji, obj } from '@/lib/ai/llm';
 import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
@@ -63,7 +63,7 @@ function parseScenes(x: unknown, opts: { min: number; max: number; closing: bool
   const o = obj(x); if (!o || !Array.isArray(o.slides) || o.slides.length < opts.min || o.slides.length > opts.max) return null;
   const slides = (o.slides as unknown[]).map((v, i, all) => {
     const q = obj(v); if (!q || !isStr(q.heading) || !isStr(q.say)) return null;
-    const wanted = visualOf(q);
+    const wanted = visualOf(q, LEAD_VISUALS);
     if (!wanted) console.warn(`[thuso] lead video: a scene with no known visual: ${JSON.stringify(v).slice(0, 300)}`);
     let visual: SlideVisual = wanted && wanted !== 'greeting' && wanted !== 'code' && (opts.closing || wanted !== 'cta') ? wanted : 'big';
     if (opts.closing && i === all.length - 1) visual = 'cta';
@@ -79,33 +79,53 @@ function parseScenes(x: unknown, opts: { min: number; max: number; closing: bool
   return slides.every(Boolean) ? (slides as LessonSlide[]) : null;
 }
 
+/** The model's "valid_until" (an offer's last day), as the end of that day in South Africa. */
+function endOfDay(x: unknown): number | null {
+  if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(x.trim())) return null;
+  const t = Date.parse(`${x.trim()}T23:59:59+02:00`);
+  return Number.isFinite(t) && t > Date.now() ? t : null;
+}
+
 export async function buildProgrammeVideo(programme: string): Promise<ProgrammeVideo> {
   const ac = getAcademyContext();
   const ti = getTenantIntegrations(currentTenantId());
   const p = programme.trim().slice(0, 80) || 'general';
   const name = presenter();
-  const topic = p === 'general' ? `studying tech at ${ac.academyName}` : p;
-  const known = [ti.academyFocus ? `Programmes: ${ti.academyFocus}` : '', ti.agentKnowledge || '', bankKnowledge(2000)].filter(Boolean).join('\n');
+  const topic = p === 'general' ? `studying tech at ${ac.academyName} (all programmes)` : `the ${p} programme at ${ac.academyName}`;
+  const known = [ti.academyFocus ? `Programmes: ${ti.academyFocus}` : '', ti.agentKnowledge || '', bankKnowledge(2500)].filter(Boolean).join('\n');
+  const today = new Date().toISOString().slice(0, 10);
+  let validUntil: number | null = null;
   const ai = await generateJSON<LessonSlide[]>({
-    system: `You are ${name}, an admissions consultant at ${ac.academyName}, a tech academy in South Africa. You script short animated explainer videos (a great YouTube explainer, not a slide deck) for people deciding whether to study with us. Warm, hopeful, confident, never pushy; natural South African English. Facts: only what you know below; never invent fees, salaries, statistics, dates or promises. Reply with one JSON object only.`,
-    prompt: `Script the shared part of a 2-minute video about ${topic}. A personal greeting scene is added before it for each viewer, so do not greet.
+    system: `You are ${name}, an admissions consultant at ${ac.academyName} in South Africa. You script short, documentary-style videos that make someone want to study with us: real photos of our classrooms and people, the facts that matter on screen, and a warm, confident voice. Natural South African English. Never pushy. Facts: only what is written below, quoted exactly (names, NQF levels, SAQA IDs, durations, rand amounts, dates); never invent fees, salaries, statistics, dates or promises. Reply with one JSON object only.`,
+    prompt: `Today is ${today}. Script the shared part of a 3-minute video about ${topic}. A personal greeting by name is added before it for each viewer, so do not greet.
 ${known ? `What you know:\n${known}\n` : ''}
-THE GOLDEN RULE: the screen SHOWS, the voice TELLS. Every scene is an animation; on-screen words are tiny labels, never sentences.
+THE GOLDEN RULE: the screen SHOWS what the voice TELLS. When the voice says a number, a qualification, a price or a job, that exact thing is on screen in that scene. On-screen words are short labels; the voice does the explaining.
 
-6 scenes in this order of purpose:
-1. Why this field matters, as one big idea: "big" with scene.value (max 3 words) and scene.caption (max 10 words, a complete phrase).
-2. What you learn, in order: "flow" with scene.nodes = 3 to 5 stages [{"label": "max 3 words", "icon"}].
-3. Where you start vs where you could be: "compare" (scene.left, scene.right, each {"label": "max 6 words", "icon"}).
-4. How it works with us (live classes, projects, support) as an "analogy": an everyday South African thing ≈ how we teach. scene.left = the everyday thing, scene.right = the concept (each {"label": "max 3 words", "icon"}), scene.caption = "max 10 words, a complete phrase".
-5. "recap": scene.nodes = 3 to 4 reasons to choose this path, each {"label": "max 6 words", "icon"}.
-6. "cta": the next step (take the button below, or reply with a question), short and encouraging.
+Ten scenes, in this order:
+1. "photo" (a real photo of our people fills the screen): the hook. Why this field, why now, why people like them can do it. scene.kicker = "${ac.academyName}", heading = a bold line (max 6 words), scene.caption = one line (max 12 words).
+2. "facts": the programme at a glance. scene.nodes = 3 or 4 tiles, each {"label": the number or short fact (max 3 words, e.g. "NQF 5", "12-18 months", "100% online"), "note": what it means (max 5 words)}.
+3. "flow": what you learn, in order. scene.nodes = 4 or 5 stages, each {"label": a real module or tool from what you know (max 3 words), "icon"}.
+4. "photo": how classes work (live online classes, the days and times, mentors, a class you belong to). kicker, heading (max 6 words), caption (max 12 words).
+5. "timeline": the months ahead. scene.nodes = 3 or 4 steps, each {"label": the period (e.g. "Months 1-4"), "note": what happens (max 6 words)}.
+6. "careers": the jobs this path leads to. scene.nodes = 4 to 6 job titles from what you know, each {"label": max 4 words, "icon"}.
+7. "price": what it costs and the current offers. scene.rows = 1 to 3 cards, each {"label": max 4 words (e.g. "Accredited, paid in full"), "was": the standard fee as written (e.g. "R 74 999") or omit, "now": the price they would pay (e.g. "R 37 499" or "R 3 997/month"), "note": the condition and its end date (max 7 words)}. scene.caption = one line about other ways to pay (monthly plans, student loans), max 14 words. Quote amounts exactly as written above.
+8. "photo": the people and the support (mentors, career coach, internship with a hiring partner). kicker, heading, caption.
+9. "recap": scene.nodes = 3 or 4 reasons to choose this path with us, each {"label": max 6 words, "icon"}.
+10. "cta": the next step: take the button below, or reply to the email with a question. Short and warm.
 Icons: exactly from this list: ${SCENE_ICONS.join(', ')}.
-Every scene: "visual" (exactly one of: big, flow, branch, compare, analogy, recap, cta), "heading" (max 5 words), "scene" (the fields named above for that visual), "points": [], "say": narration of 35 to 60 words for the ear (short sentences, contractions, point at the screen, no markdown, no emoji).
+Every scene: "visual" (exactly one of: photo, facts, flow, timeline, careers, price, recap, cta), "heading" (max 6 words), "scene" (the fields named above), "points": [], "say": narration of 35 to 65 words for the ear (short sentences, contractions, talk about what is on screen; write rand amounts as "R 37 499"; no markdown, no emoji).
+If any scene mentions an offer that ends on a date, set "valid_until" to the earliest such date (YYYY-MM-DD), else null.
 
-JSON: {"slides": [{"visual": "...", "heading": "...", "scene": {...}, "points": [], "say": "..."}]}`,
-    maxTokens: 14000,
-    timeoutMs: 50000,
-    validate: (x) => parseScenes(x, { min: 4, max: 8, closing: true }),
+JSON: {"valid_until": "YYYY-MM-DD" or null, "slides": [{"visual": "...", "heading": "...", "scene": {...}, "points": [], "say": "..."}]}`,
+    maxTokens: 24000,
+    timeoutMs: 120000,
+    model: process.env.VIDEO_SCRIPT_MODEL || 'claude-sonnet-5-5',
+    effort: 'medium',
+    validate: (x) => {
+      const slides = parseScenes(x, { min: 6, max: 12, closing: true });
+      if (slides) validUntil = endOfDay(obj(x)?.valid_until);
+      return slides;
+    },
   });
   if (ai) bumpStat('aiBuilds');
   const m = meta();
@@ -119,11 +139,19 @@ JSON: {"slides": [{"visual": "...", "heading": "...", "scene": {...}, "points": 
     viaAi: Boolean(ai),
     createdAt: Date.now(),
     views: prev?.views || 0,
+    validUntil: ai ? validUntil : null,
   };
   m.videos = [video, ...m.videos.filter((v) => v.id !== video.id)].slice(0, MAX_VIDEOS);
   metaDoc.save();
-  log('system', 'dispatch', `Programme video ready: "${video.title}" (${video.slides.length} scenes${video.viaAi ? '' : ', from the template'}). Every lead who opens it is greeted by name.`);
+  log('system', 'dispatch', `Programme video ready: "${video.title}" (${video.slides.length} scenes${video.viaAi ? '' : ', from the template'})${video.validUntil ? `; it mentions an offer, so it is rewritten after ${new Date(video.validUntil).toISOString().slice(0, 10)}` : ''}. Every lead who opens it is greeted by name.`);
   return video;
+}
+
+/** Videos whose offer has ended are rewritten with what is current (checked by the always-on pump). */
+export async function refreshExpiredVideos(): Promise<number> {
+  const due = meta().videos.filter((v) => v.validUntil && v.validUntil < Date.now());
+  for (const v of due) await buildProgrammeVideo(v.programme);
+  return due.length;
 }
 
 /** Make the videos for every programme that has none yet (and the general one). */

@@ -8,7 +8,6 @@ import {
   RotateCcw, SkipBack, SkipForward, Volume2, VolumeX,
 } from 'lucide-react';
 import type { Lesson, LessonSlide } from '@/lib/types';
-import Logo from '@/components/Logo';
 import Scene from './scenes';
 import { Backdrop, Camera, LightLeak, cutFor, cutVariants, useScore, type SceneFootage } from './cinema';
 import './cinema.css';
@@ -47,6 +46,8 @@ interface View {
   footage?: (SceneFootage | null)[];
   /** The academy's own music track (else a soft generated bed). */
   music?: string | null;
+  /** Changes when the script changes: a different programme or a rebuilt video never replays a cached voice. */
+  audioVersion?: string;
 }
 
 type Phase = 'title' | 'playing' | 'paused' | 'done';
@@ -90,11 +91,11 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
   // A lead's programme video reads from the nurture API with their signed token; a lesson reads by quiz id.
   const enc = encodeURIComponent;
   const dataUrl = lead ? `/api/nurture/public?watch=1&t=${enc(lead)}` : `/api/quiz/${enc(quizId)}`;
-  const audioUrl = (n: number | 'probe') => (lead
-    ? `/api/nurture/public?audio=${n}&t=${enc(lead)}`
-    : n === 'probe' ? `/api/lesson/${enc(quizId)}/audio?probe=1` : `/api/lesson/${enc(quizId)}/audio?slide=${n}`);
   const reduced = useReducedMotion();
   const [view, setView] = useState<View | null>(null);
+  const audioUrl = (n: number | 'probe') => (lead
+    ? `/api/nurture/public?audio=${n}&t=${enc(lead)}${view?.audioVersion ? `&v=${enc(view.audioVersion)}` : ''}`
+    : n === 'probe' ? `/api/lesson/${enc(quizId)}/audio?probe=1` : `/api/lesson/${enc(quizId)}/audio?slide=${n}`);
   const [err, setErr] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>('title');
   const [i, setI] = useState(0);
@@ -128,6 +129,11 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
   const academy = view?.lesson?.academyName || view?.academyName || '';
   const totalMs = useMemo(() => slides.reduce((t, s) => t + estimateMs(s.say), 0), [slides]);
   const minutes = Math.max(2, Math.round(totalMs / 60000));
+
+  // Every photo of the video starts loading at once, so a scene never appears before its photo.
+  useEffect(() => {
+    for (const f of view?.footage || []) if (f?.kind === 'photo') { const img = new Image(); img.src = f.url; }
+  }, [view?.footage]);
 
   /* ── load the lesson and pick the voice ─────────────────────────────── */
   useEffect(() => {
@@ -345,9 +351,10 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
 
   return (
     <div className="vl-page">
+      {/* What the student or lead sees is the academy, not the software behind it. */}
       <header className="vl-top">
-        <Logo size="sm" />
-        <span>{academy ? `${academy} · ` : ''}{isLead ? 'Made for you' : 'Your personal lesson'}</span>
+        <b className="vl-academy">{academy || 'Your academy'}</b>
+        <span>{isLead ? 'Made for you' : 'Your personal lesson'}</span>
       </header>
       <main className="vl-main">
         {err && <div className="vl-card"><h1>We could not find this {isLead ? 'video' : 'lesson'}</h1><p>{err} If you opened this from an email, the link may be from a demo that has since been reset.</p></div>}
@@ -362,7 +369,7 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
               style={{ ['--a' as string]: brand.accent, ['--a2' as string]: brand.accent, ['--base' as string]: brand.base, ['--deep' as string]: brand.deep }}
             >
               <div className={`vl-stage vl-bg--${phase === 'title' ? 'title' : phase === 'done' ? 'done' : slide.visual || 'concept'}${sceneFootage ? ' has-footage' : ''}`}>
-                <Backdrop footage={sceneFootage} index={phase === 'title' ? 0 : i} playing={phase === 'playing' || phase === 'title'} />
+                <Backdrop footage={sceneFootage} index={phase === 'title' ? 0 : i} playing={phase === 'playing' || phase === 'title'} light={phase !== 'title' && phase !== 'done' && slide.visual === 'photo'} />
                 <LightLeak show={leakAt === i} />
 
                 {phase === 'title' && (

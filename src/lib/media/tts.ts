@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { forSpeech } from './speech';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -93,7 +94,8 @@ async function deepgram(text: string, signal: AbortSignal): Promise<Buffer> {
 
 /** Plain, speakable text: no markdown, no emoji, within the provider's limits. */
 export function speakable(text: string): string {
-  return text
+  // Rand, percentages, times and acronyms as a presenter would say them.
+  return forSpeech(text)
     .replace(/[`*_#>]/g, '')
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
     .replace(/\s+/g, ' ')

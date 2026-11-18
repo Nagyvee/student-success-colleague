@@ -17,7 +17,7 @@ export interface SceneFootage { url: string; kind: 'video' | 'photo' }
 
 /* ── Backdrop ─────────────────────────────────────────────────────────────── */
 
-export function Backdrop({ footage, index, playing }: { footage: SceneFootage | null; index: number; playing: boolean }) {
+export function Backdrop({ footage, index, playing, light = false }: { footage: SceneFootage | null; index: number; playing: boolean; light?: boolean }) {
   return (
     <div className={`cin-bg${playing ? '' : ' is-paused'}`} aria-hidden="true">
       <div className="cin-mesh" />
@@ -39,7 +39,7 @@ export function Backdrop({ footage, index, playing }: { footage: SceneFootage | 
         )}
       </AnimatePresence>
       {/* The grade: footage sits in the brand's colours, the scene stays readable on top. */}
-      <div className={`cin-grade${footage ? ' is-on' : ''}`} />
+      <div className={`cin-grade${footage ? ' is-on' : ''}${light ? ' is-light' : ''}`} />
       <div className="cin-grain" />
       <div className="cin-vignette" />
     </div>
