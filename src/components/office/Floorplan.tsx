@@ -15,13 +15,8 @@ import Spotlight from './Spotlight';
  *
  * One tilted world. A floating slab carries four glass-walled offices around
  * a corridor; the two outer walls at the back are solid with windows, every
- * other wall is a low glass partition so the audience sees inside.
- *
- * The camera frames the building between the command bar and the story
- * band, so nothing the audience needs is ever under a bar. The viewer drives
- * it (drag to turn and tilt, scroll to zoom, click an office to fly in), or
- * the director does: during a run it cuts to the room of whoever is speaking.
- * Any touch of the camera hands control back to the viewer until the next run. */
+ * other wall is a low glass partition so the audience sees inside, and each
+ * agent sits right at their PC & workstation aligned to ROOMS[dept].desk. */
 
 const BACK = 80;   // the building's outer back walls
 const PART = 40;   // glass partitions
@@ -30,11 +25,25 @@ const SIDE = 16;   // side margin the camera keeps
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 type Framing = { room: Dept; tight: boolean } | null;
 
-export default function Floorplan({ state, inspectId, onInspect, stage = false, onStage, insetRight = 0, children }: {
-  state: WorldState; inspectId?: string | null; onInspect?: (id: string) => void;
-  stage?: boolean; onStage?: () => void;
+export default function Floorplan({
+  state,
+  inspectId,
+  onInspect,
+  stage = false,
+  onStage,
+  insetRight = 0,
+  roomLabels,
+  children,
+}: {
+  state: WorldState;
+  inspectId?: string | null;
+  onInspect?: (id: string) => void;
+  stage?: boolean;
+  onStage?: () => void;
   /** Width kept clear on the right (the drawer), so the building slides aside instead of hiding under it. */
-  insetRight?: number; children?: React.ReactNode;
+  insetRight?: number;
+  roomLabels?: Partial<Record<Dept, string>>;
+  children?: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>(DEFAULT_VIEW);
@@ -105,11 +114,15 @@ export default function Floorplan({ state, inspectId, onInspect, stage = false, 
 
   const takeOver = useCallback(() => { setPaused(true); }, []);
 
-  // Scroll to zoom; the page itself must not scroll under the floor.
+  // Scroll / trackpad pinch to zoom; the page itself must not scroll under the floor.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const onWheel = (e: WheelEvent) => { e.preventDefault(); setPaused(true); setZoom((z) => clamp(z * Math.exp(-e.deltaY * 0.0012), 0.75, 2.6)); };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setPaused(true);
+      setZoom((z) => clamp(z * Math.exp(-e.deltaY * 0.0012), 0.75, 2.6));
+    };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
@@ -138,7 +151,7 @@ export default function Floorplan({ state, inspectId, onInspect, stage = false, 
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
-    if (!d.moved && Math.hypot(dx, dy) < 5) return;
+    if (!d.moved && Math.hypot(dx, dy) > 5) return;
     if (!d.moved) { d.moved = true; setDragging(true); takeOver(); (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); }
     setView({ rz: clamp(d.view.rz - dx * 0.28, LIMITS.rzMin, LIMITS.rzMax), rx: clamp(d.view.rx - dy * 0.18, LIMITS.rxMin, LIMITS.rxMax) });
   };
@@ -161,9 +174,16 @@ export default function Floorplan({ state, inspectId, onInspect, stage = false, 
   const following = director && !paused && Boolean(runId);
 
   return (
-    <div className={`office${frame ? ' is-focused' : ''}${dragging ? ' is-dragging' : ''}${insetRight ? ' has-drawer' : ''}`} ref={ref}
-      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-      role="img" aria-label="Live isometric office floorplan. Drag to rotate, scroll to zoom, click an office to fly in.">
+    <div
+      className={`office${frame ? ' is-focused' : ''}${dragging ? ' is-dragging' : ''}${insetRight ? ' has-drawer' : ''}`}
+      ref={ref}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+      role="img"
+      aria-label="Live isometric office floorplan. Drag to rotate, scroll to zoom, click an office to fly in."
+    >
       <div className="office-sky" />
       <div className="office-grid" />
       <div className="iso-world">
@@ -183,7 +203,13 @@ export default function Floorplan({ state, inspectId, onInspect, stage = false, 
         <WallY className="door-frame door-entrance" x={2} y={ENTRANCE_INSIDE.y - DOOR / 2} len={DOOR} h={PART} />
 
         {ROOM_ORDER.map((id) => (
-          <Room key={id} id={id} room={state.rooms[id]} focused={frame?.room === id && frame.tight} label={ROOMS[id].name} />
+          <Room
+            key={id}
+            id={id}
+            room={state.rooms[id]}
+            focused={frame?.room === id && frame.tight}
+            label={roomLabels?.[id] || ROOMS[id].name}
+          />
         ))}
 
         {walks.length > 0 && (
@@ -229,7 +255,7 @@ export default function Floorplan({ state, inspectId, onInspect, stage = false, 
       </div>
       {frame?.tight && (
         <div className="floor-ui focus-chip">
-          <span>{ROOMS[frame.room].name}</span>
+          <span>{roomLabels?.[frame.room] || ROOMS[frame.room].name}</span>
           <button type="button" onClick={() => flyTo(null)} aria-label="Back to the whole floor"><Icon name="x" size={13} /></button>
         </div>
       )}

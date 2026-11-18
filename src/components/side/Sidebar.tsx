@@ -48,7 +48,7 @@ export default function Sidebar({ state, tab, onInspect, onOpenMail, onClose }: 
           : <div className="feed-empty">No plan yet. Give the colleague a goal and the Planner writes one here.</div>)}
         {tab === 'feed' && <AuditFeed feed={state?.feed || []} onInspect={onInspect} />}
         {tab === 'deliverables' && <DeliverablesPanel deliverables={state?.deliverables || []} onInspect={onInspect} />}
-        {tab === 'inbox' && <InboxPanel inbox={state?.inbox || []} onOpen={onOpenMail} onInspect={onInspect} />}
+        {tab === 'inbox' && <InboxPanel inbox={state?.inbox || []} pending={(state?.pendingOutreach || []).filter((p) => p.status === 'pending')} onOpen={onOpenMail} onInspect={onInspect} paused={Boolean(state?.caps.sendingPaused)} />}
         {tab === 'learners' && <LearnersPanel learners={state?.learners || []} />}
       </div>
     </div>

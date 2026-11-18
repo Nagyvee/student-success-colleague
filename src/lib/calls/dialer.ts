@@ -7,7 +7,13 @@
  *   DIALER_URL       e.g. https://dialer.melsoft.org (or http://localhost:3000)
  *   DIALER_API_KEY   a dialer API key with the "Start AI calls" scope */
 
+import { getTenantIntegrations } from '@/lib/auth/accounts';
+import { liveAllowed } from '@/lib/email/pause';
+import { currentTenantId } from '@/lib/auth/tenantContext';
+
 export function dialerReady() {
+  const ti = getTenantIntegrations(currentTenantId());
+  if (!liveAllowed(ti.liveOutreachEnabled)) return false;
   return Boolean(process.env.DIALER_URL && process.env.DIALER_API_KEY);
 }
 
@@ -17,6 +23,9 @@ const headers = () => ({ Authorization: `Bearer ${process.env.DIALER_API_KEY}`, 
 export interface CallRequest { name: string; phone: string; email?: string; greeting: string; instructions: string; maxSeconds?: number }
 
 export async function placeCall(r: CallRequest): Promise<{ ok: true; callId: string } | { ok: false; error: string }> {
+  if (!liveAllowed(getTenantIntegrations(currentTenantId()).liveOutreachEnabled)) {
+    return { ok: false, error: 'Blocked by Safe Test Mode (Live Outreach is OFF — no live phone call placed).' };
+  }
   if (!dialerReady()) return { ok: false, error: 'The dialer is not connected (set DIALER_URL and DIALER_API_KEY).' };
   try {
     const res = await fetch(`${base()}/api/v1/ai-calls`, {

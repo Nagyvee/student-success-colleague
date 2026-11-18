@@ -9,10 +9,10 @@ import { Anchor, Billboard, Box, Floor, WallX } from './iso';
  * always in front of its agent and hides their legs the way a desk does.
  * Everything is a block or a standing plane; nothing is a picture. */
 
-const NAVY = '#e8ecf2';   // desk tops: white laminate
-const WOOD = '#a0714a';
-const DARK = '#2e3d60';   // chairs
-const STEEL = '#c3cbd8';  // cabinets
+const NAVY = '#e8ecf2';   // desk tops: clean architectural laminate
+const WOOD = '#a0714a';   // warm executive walnut
+const DARK = '#2e3d60';   // ergonomic chairs
+const STEEL = '#c3cbd8';  // steel filing cabinets
 
 function Chair({ x, y, c = DARK, back = true }: { x: number; y: number; c?: string; back?: boolean }) {
   return (

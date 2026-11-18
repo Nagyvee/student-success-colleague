@@ -42,14 +42,37 @@ export function CatchUpView({ plan }: { plan: CatchUpPlan }) {
 }
 
 export function CheckInView({ m }: { m: CheckInMessage }) {
+  if (m.html) {
+    // A saved message, voucher or result: shown exactly as it lands in their inbox.
+    return (
+      <div className="doc">
+        <div className="doc-hero">
+          <span className="mini">{m.library?.voucherOfferId ? 'Voucher email' : m.library ? 'Saved message' : 'Email'} · to {m.learner.name}{m.learner.email ? ` (${m.learner.email})` : ''}</span>
+          <h3>{m.subject}</h3>
+        </div>
+        <iframe title={`Email to ${m.learner.name}`} srcDoc={m.html} sandbox="" style={{ width: '100%', height: 560, border: '1px solid var(--line, #e2e8f0)', borderRadius: 12, background: '#fff' }} />
+        {m.library?.voucherOfferId && <div className="doc-callout"><b>The voucher code</b> is made when you approve, so a rejected voucher never exists.</div>}
+      </div>
+    );
+  }
+  const paragraphs = m.body
+    .split(/\n{2,}|\r?\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
   return (
     <div className="doc">
       <div className="doc-hero">
         <span className="mini">Personal check-in · to {m.learner.name}</span>
         <h3>{m.subject}</h3>
       </div>
-      <p style={{ fontSize: 15, lineHeight: 1.65, margin: 0 }}>{m.body}</p>
-      <div className="note is-cta"><b>One small thing:</b> {m.ask}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {(paragraphs.length ? paragraphs : [m.body]).map((p, i) => (
+          <p key={i} style={{ fontSize: 15, lineHeight: 1.7, margin: 0, whiteSpace: 'pre-wrap' }}>
+            {p}
+          </p>
+        ))}
+      </div>
+      <div className="doc-callout is-cta"><b>One small thing:</b> {m.ask}</div>
     </div>
   );
 }
@@ -70,7 +93,7 @@ export function QuizView({ quiz, baseUrl, dispatched }: { quiz: RemedialQuiz; ba
     <div className="doc">
       <div className="doc-hero" style={{ display: 'grid', gridTemplateColumns: qr ? '1fr auto' : '1fr', gap: 16, alignItems: 'center' }}>
         <div>
-          <span className="mini">Remedial micro-quiz · {quiz.module.code}</span>
+          <span className="mini">Mastery test · {quiz.module.code}</span>
           <h3>{quiz.learner.name} · {quiz.topic}</h3>
           <p>{quiz.questions.length} questions · pass mark {quiz.passMark}% · {quiz.status === 'completed' ? `completed, ${quiz.result?.pct}%` : dispatched ? 'awaiting the learner' : 'not yet dispatched'}</p>
           {dispatched && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>

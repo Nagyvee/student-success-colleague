@@ -1,0 +1,29 @@
+/* Go-live checklist */
+.gl { display:flex; flex-direction:column; gap:16px; max-width:980px; }
+.gl-loading { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; padding:20px 0; }
+.gl-head { flex-direction:row; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.gl-score { display:flex; align-items:center; gap:16px; min-width:0; }
+.gl-score h2 { margin:0; font-size:18px; font-weight:800; letter-spacing:-.01em; }
+.gl-ring { --p:0; flex:none; width:64px; height:64px; border-radius:50%; display:grid; place-items:center;
+  background:conic-gradient(var(--good) calc(var(--p) * 1%), var(--track) 0); }
+.gl-ring b { display:grid; place-items:center; width:50px; height:50px; border-radius:50%; background:var(--surface-raised); font-size:14px; font-weight:800; }
+.gl-pill { flex:none; font-size:12px; font-weight:800; padding:5px 10px; border-radius:999px; border:1px solid var(--line); }
+.gl-pill.is-ok { color:var(--good-ink); background:var(--good-wash); border-color:var(--good-line); }
+.gl-pill.is-todo { color:var(--warn-ink); background:var(--warn-wash); border-color:var(--warn-line); }
+.gl-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
+.gl-item { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-top:1px solid var(--line); }
+.gl-item:first-child { border-top:0; padding-top:2px; }
+.gl-ic { flex:none; margin-top:1px; color:var(--muted); }
+.gl-item.is-ok .gl-ic { color:var(--good); }
+.gl-item.is-todo .gl-ic { color:var(--warn); }
+.gl-item.is-info .gl-ic { color:var(--accent); }
+.gl-body { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
+.gl-body b { font-size:14px; }
+.gl-detail { font-size:13px; color:var(--ink-2); line-height:1.5; }
+.gl-fix { font-size:13px; line-height:1.5; color:var(--ink); background:var(--wash); border-radius:8px; padding:7px 10px; margin-top:4px; }
+.gl-item.is-ok .gl-fix { display:none; }
+.gl-go { flex:none; align-self:center; }
+@media (max-width:640px) {
+  .gl-item { flex-wrap:wrap; }
+  .gl-go { margin-left:29px; }
+}

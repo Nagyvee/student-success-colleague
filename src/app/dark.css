@@ -6,10 +6,9 @@
 /* ── The office ─────────────────────────────────────────────────────────── */
 :root[data-theme="dark"] .office { color:#fff; --glow:#9fc5ff; --good:#3ddbc9; --warn:#e5a53a;
   background:
-    radial-gradient(700px 380px at 76% 14%, rgba(207,224,255,.075), transparent 62%),
-    radial-gradient(900px 500px at 20% 100%, rgba(0,0,0,.35), transparent 62%),
-    linear-gradient(160deg, #0c1836 0%, #0a1430 55%, #091026 100%);
-  border:1px solid rgba(255,255,255,.1); box-shadow:var(--sh-lg); }
+    radial-gradient(750px 420px at 74% 14%, rgba(148,197,255,.08), transparent 62%),
+    radial-gradient(ellipse at 50% 28%, #162238 0%, #0b1324 58%, #050912 100%);
+  border:1px solid rgba(148,163,184,.18); box-shadow:var(--sh-lg); }
 :root[data-theme="dark"] .office-grid { background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1.2px); }
 :root[data-theme="dark"] .office-sky { display:block; }
 :root[data-theme="dark"] .office-vignette { background:radial-gradient(120% 90% at 50% 50%, transparent 58%, rgba(0,0,0,.4) 100%); }

@@ -25,7 +25,10 @@ function firstSentence(t: string) {
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class Ctx {
-  constructor(public task: Task) {}
+  task: Task;
+  constructor(task: Task) {
+    this.task = task;
+  }
 
   get state() { return getState(); }
   get speed() { return getState().settings.speed; }

@@ -56,7 +56,8 @@ export default function DeliverableModal({ deliverable: d, state, onClose }: { d
 function Doc({ d, baseUrl }: { d: Deliverable; baseUrl: string }) {
   switch (d.kind) {
     case 'catchup_plan': return <CatchUpView plan={d.content as CatchUpPlan} />;
-    case 'checkin_message': return <CheckInView m={d.content as CheckInMessage} />;
+    case 'checkin_message':
+    case 'agent_message': return <CheckInView m={d.content as CheckInMessage} />;
     case 'remedial_quiz': return <QuizView quiz={d.content as RemedialQuiz} baseUrl={baseUrl} dispatched={d.status === 'dispatched'} />;
   }
 }
@@ -107,7 +108,7 @@ function Diff({ d }: { d: Deliverable }) {
       </div>
     );
   }
-  if (d.kind === 'checkin_message') {
+  if (d.kind === 'checkin_message' || d.kind === 'agent_message') {
     const prev = d.previous as CheckInMessage; const cur = d.content as CheckInMessage;
     return (
       <div className="diff">

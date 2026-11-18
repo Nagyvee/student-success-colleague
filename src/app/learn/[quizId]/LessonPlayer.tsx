@@ -1,144 +1,474 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import type { Lesson } from '@/lib/types';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import {
+  ArrowRight, Captions, CaptionsOff, Check, Maximize2, Minimize2, Music, Pause, Play,
+  RotateCcw, SkipBack, SkipForward, Volume2, VolumeX,
+} from 'lucide-react';
+import type { Lesson, LessonSlide } from '@/lib/types';
 import Logo from '@/components/Logo';
-import Icon from '@/components/Icon';
+import Scene from './scenes';
+import { Backdrop, Camera, LightLeak, cutFor, cutVariants, useScore, type SceneFootage } from './cinema';
+import './cinema.css';
+import '../../lesson.css';
+import './scenes.css';
 
-/* The 3-minute lesson, played like a video.
+/* The personal video lesson.
  *
- * Lindiwe wrote the slides and the narration for this one learner; the
- * browser reads the narration aloud (Web Speech), the slide's points appear as
- * it speaks, captions run underneath, and the bar shows how far along it is.
- * No speech voice on the device? It still plays, timed from the words, with
- * captions. At the end: straight into the quiz. */
+ * Lindiwe wrote eight slides and their narration for this one learner. The
+ * player stages each slide as a scene (greeting, concept, steps, code,
+ * compare, analogy, recap, call to action), a natural voice reads the
+ * narration (server text-to-speech when configured, the browser's voice
+ * otherwise, captions always), and it ends in the learner's test. */
 
-interface View { learner: { name: string }; module: { code: string; title: string }; topic: string; lesson: Lesson | null }
+interface View {
+  learner: { name: string };
+  module: { code: string; title: string };
+  topic: string;
+  passMark: number;
+  questions: unknown[];
+  lesson: Lesson | null;
+  academyName?: string;
+  evidence?: { scorePct: number | null; missedTopics: string[] } | null;
+  /** The academy's colours: navy base, a deep second colour, one accent. */
+  brand?: { base: string; deep: string; accent: string };
+  /* A lead's programme video (not a lesson before a test): */
+  /** What the presenter noticed about them (their programme, quiz result, where they came from). */
+  noticed?: string[];
+  presenter?: { label: string };
+  /** Where the video ends: the career-fit quiz or the application. */
+  cta?: { href: string; label: string };
+  skip?: { href: string; label: string };
+  ctaTiles?: [string, string][];
+  ctaKicker?: string;
+  /** The academy's footage for each scene (null: the animated backdrop). */
+  footage?: (SceneFootage | null)[];
+  /** The academy's own music track (else a soft generated bed). */
+  music?: string | null;
+}
 
-const wordsMs = (t: string) => Math.max(3500, t.split(/\s+/).length * 380);
+type Phase = 'title' | 'playing' | 'paused' | 'done';
+type Voice = 'server' | 'browser' | 'silent';
 
-export default function LessonPlayer({ quizId }: { quizId: string }) {
+const estimateMs = (t: string) => Math.max(4200, t.split(/\s+/).filter(Boolean).length * 400 + 900);
+const fmt = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+/** Captions in readable chunks: a sentence or two, never a wall of text. */
+function chunk(say: string): string[] {
+  // Split only where a sentence really ends (punctuation then a space), so "Promise.all" or "3.5" stay whole.
+  const sentences = say.split(/(?<=[.!?]["')]?)\s+/).map((x) => x.trim()).filter(Boolean);
+  const out: string[] = [];
+  let cur = '';
+  for (const s of sentences) {
+    if (cur && (cur + ' ' + s).length > 120) { out.push(cur); cur = s; } else cur = cur ? `${cur} ${s}` : s;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** The best voice the device has: natural/neural voices first, South African English
+ *  preferred, the robotic Windows desktop voices last. Used only without a server voice. */
+function rankVoice(v: SpeechSynthesisVoice): number {
+  const name = v.name.toLowerCase();
+  let score = 0;
+  if (!/^en/i.test(v.lang)) return -1000;
+  if (/natural|neural/.test(name)) score += 60;
+  if (/online/.test(name)) score += 20;
+  if (/google/.test(name)) score += 35;
+  if (/siri|premium|enhanced/.test(name)) score += 30;
+  if (/en-za/i.test(v.lang)) score += 18;
+  else if (/en-gb/i.test(v.lang)) score += 10;
+  else if (/en-us/i.test(v.lang)) score += 8;
+  if (/leah|libby|sonia|aria|jenny|ava|emma|natasha|samantha|karen|female/.test(name)) score += 4;
+  if (/desktop|david|zira|mark|hazel|george|susan|microsoft (david|zira|mark)/.test(name) && !/natural|online/.test(name)) score -= 50;
+  return score;
+}
+
+export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: string }) {
+  // A lead's programme video reads from the nurture API with their signed token; a lesson reads by quiz id.
+  const enc = encodeURIComponent;
+  const dataUrl = lead ? `/api/nurture/public?watch=1&t=${enc(lead)}` : `/api/quiz/${enc(quizId)}`;
+  const audioUrl = (n: number | 'probe') => (lead
+    ? `/api/nurture/public?audio=${n}&t=${enc(lead)}`
+    : n === 'probe' ? `/api/lesson/${enc(quizId)}/audio?probe=1` : `/api/lesson/${enc(quizId)}/audio?slide=${n}`);
+  const reduced = useReducedMotion();
   const [view, setView] = useState<View | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>('title');
   const [i, setI] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [started, setStarted] = useState(false);
-  const [done, setDone] = useState(false);
-  const [shown, setShown] = useState(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voice = useRef<SpeechSynthesisVoice | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [voice, setVoice] = useState<Voice>('browser');
+  const [muted, setMuted] = useState(false);
+  // Captions: off when a real voice narrates (it is a video, not a reading), on when muted or silent.
+  const [ccChoice, setCc] = useState<boolean | null>(null);
+  const [full, setFull] = useState(false);
+  // The music bed under the voice: on unless the viewer turned it off before.
+  const [musicOn, setMusicOn] = useState(true);
+  useEffect(() => { try { if (localStorage.getItem('thuso-music') === 'off') setMusicOn(false); } catch { /* private mode */ } }, []);
+  const toggleMusic = () => setMusicOn((m) => { try { localStorage.setItem('thuso-music', m ? 'off' : 'on'); } catch { /* ignore */ } return !m; });
+  const [leakAt, setLeakAt] = useState(-1);
+  const [pseudoFull, setPseudoFull] = useState(false);
 
+  const playerRef = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const preloadRef = useRef<HTMLAudioElement | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clock = useRef({ start: 0, pausedAt: 0, pausedTotal: 0, dur: 5000, mode: 'timer' as 'audio' | 'speech' | 'timer' });
+  const runId = useRef(0);
+  const speechVoice = useRef<SpeechSynthesisVoice | null>(null);
+
+  const slides = useMemo(() => view?.lesson?.slides || [], [view]);
+  const slide: LessonSlide | undefined = slides[i];
+  const first = view?.learner.name.split(' ')[0] || '';
+  const n = view?.lesson?.questionCount || view?.questions.length || 10;
+  const pass = view?.passMark ?? view?.lesson?.passMark ?? 70;
+  const tutor = view?.lesson?.tutorName || 'Your tutor';
+  const academy = view?.lesson?.academyName || view?.academyName || '';
+  const totalMs = useMemo(() => slides.reduce((t, s) => t + estimateMs(s.say), 0), [slides]);
+  const minutes = Math.max(2, Math.round(totalMs / 60000));
+
+  /* ── load the lesson and pick the voice ─────────────────────────────── */
   useEffect(() => {
-    fetch(`/api/quiz/${encodeURIComponent(quizId)}`, { cache: 'no-store' })
+    fetch(dataUrl, { cache: 'no-store' })
       .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Not found'); setView(d as View); })
       .catch((e) => setErr((e as Error).message));
-  }, [quizId]);
+    fetch(audioUrl('probe'), { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.available) setVoice('server'); })
+      .catch(() => { /* browser voice */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizId, lead]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (typeof window === 'undefined') return;
+    if (!('speechSynthesis' in window)) { setVoice((v) => (v === 'server' ? v : 'silent')); return; }
     const pick = () => {
-      const vs = window.speechSynthesis.getVoices();
-      voice.current = vs.find((v) => /en-ZA/i.test(v.lang)) || vs.find((v) => /en-GB/i.test(v.lang) && /female|natural|google/i.test(v.name)) || vs.find((v) => /^en/i.test(v.lang)) || null;
+      const vs = window.speechSynthesis.getVoices().filter((v) => rankVoice(v) > -1000);
+      speechVoice.current = vs.sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
     };
     pick();
     window.speechSynthesis.onvoiceschanged = pick;
     return () => { window.speechSynthesis.cancel(); };
   }, []);
 
-  const slides = view?.lesson?.slides || [];
-  const slide = slides[i];
-
-  const stop = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
+  /* ── the playback engine ─────────────────────────────────────────────── */
+  const stopAll = useCallback(() => {
+    runId.current += 1;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    const a = audioRef.current;
+    if (a) { a.onended = null; a.onerror = null; a.pause(); }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
   }, []);
 
-  const next = useCallback(() => {
-    stop();
-    setShown(0);
-    setI((n) => { if (n + 1 >= slides.length) { setDone(true); setPlaying(false); return n; } return n + 1; });
-  }, [slides.length, stop]);
+  const playSlide = useCallback((n0: number, opts: { muted: boolean; voice: Voice }) => {
+    stopAll();
+    const s = slides[n0];
+    if (!s) return;
+    const run = runId.current;
+    setI(n0);
+    setProgress(0);
+    setPhase('playing');
+    const c = clock.current;
+    c.start = performance.now(); c.pausedTotal = 0; c.pausedAt = 0; c.dur = estimateMs(s.say);
 
-  // Speak the current slide; reveal its points while it speaks; move on when it ends.
-  useEffect(() => {
-    if (!playing || !slide) return;
-    const reveal = setInterval(() => setShown((n) => Math.min(slide.points.length + (slide.code ? 1 : 0), n + 1)), 1600);
-    const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
-    if (canSpeak) {
-      const u = new SpeechSynthesisUtterance(slide.say);
-      if (voice.current) u.voice = voice.current;
-      u.rate = 0.98;
-      u.onend = () => { timer.current = setTimeout(next, 700); };
-      u.onerror = () => { timer.current = setTimeout(next, wordsMs(slide.say)); };
+    const next = () => {
+      if (run !== runId.current) return;
+      timerRef.current = setTimeout(() => {
+        if (run !== runId.current) return;
+        if (n0 + 1 >= slides.length) { setProgress(1); setPhase('done'); stopAll(); }
+        else playSlide(n0 + 1, opts);
+      }, 650);
+    };
+    const timed = (ms: number) => { c.mode = 'timer'; timerRef.current = setTimeout(next, ms); };
+    const speak = () => {
+      if (opts.muted || opts.voice === 'silent' || typeof window === 'undefined' || !('speechSynthesis' in window)) { timed(c.dur); return; }
+      c.mode = 'speech';
+      const parts = chunk(s.say);
       window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(u);
+      parts.forEach((p, k) => {
+        const u = new SpeechSynthesisUtterance(p);
+        if (speechVoice.current) u.voice = speechVoice.current;
+        u.rate = 1; u.pitch = 1;
+        if (k === parts.length - 1) u.onend = next;
+        u.onerror = (ev) => { if (run === runId.current && ev.error !== 'interrupted' && ev.error !== 'canceled') timed(Math.max(800, c.dur - (performance.now() - c.start))); };
+        window.speechSynthesis.speak(u);
+      });
+    };
+
+    if (opts.voice === 'server') {
+      const a = audioRef.current;
+      if (!a) { speak(); return; }
+      c.mode = 'audio';
+      a.muted = opts.muted;
+      a.src = audioUrl(n0);
+      a.onended = next;
+      a.onerror = () => { if (run !== runId.current) return; setVoice('browser'); speak(); };
+      a.play().catch(() => { if (run !== runId.current) return; speak(); });
+      // Warm the next slide's audio so there is no gap between scenes.
+      if (n0 + 1 < slides.length) {
+        const pre = preloadRef.current || (preloadRef.current = new Audio());
+        pre.preload = 'auto';
+        pre.src = audioUrl(n0 + 1);
+        pre.load();
+      }
     } else {
-      timer.current = setTimeout(next, wordsMs(slide.say));
+      speak();
     }
-    return () => { clearInterval(reveal); if (timer.current) clearTimeout(timer.current); };
-  }, [playing, slide, next]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slides, quizId, lead, stopAll]);
 
-  const play = () => { setStarted(true); setDone(false); setPlaying(true); };
-  const pause = () => { stop(); setPlaying(false); };
-  const go = (delta: number | 'start') => { stop(); setShown(0); setDone(false); setI((n) => (delta === 'start' ? 0 : Math.max(0, Math.min(slides.length - 1, n + delta)))); };
+  // One clock for progress, whatever is speaking.
+  useEffect(() => {
+    if (phase !== 'playing') return;
+    let raf = 0;
+    const tick = () => {
+      const c = clock.current;
+      const a = audioRef.current;
+      let p: number;
+      if (c.mode === 'audio' && a && Number.isFinite(a.duration) && a.duration > 0) p = a.currentTime / a.duration;
+      else p = (performance.now() - c.start - c.pausedTotal) / c.dur;
+      setProgress(Math.max(0, Math.min(1, p)));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [phase, i]);
 
-  const first = view?.learner.name.split(' ')[0];
-  const minutes = Math.max(2, Math.round(slides.reduce((n, s) => n + s.say.split(/\s+/).length, 0) / 150));
+  useEffect(() => () => stopAll(), [stopAll]);
+
+  const { whoosh } = useScore({ enabled: musicOn && !muted, playing: phase === 'playing', track: view?.music || null });
+  const cutKind = cutFor(i, slides.length, slide?.visual);
+  // Every cut gets a whoosh; the cuts into the big moments get a sweep of warm light.
+  const lastCut = useRef(-1);
+  useEffect(() => {
+    if (phase !== 'playing' || lastCut.current === i) return;
+    const first = lastCut.current === -1;
+    lastCut.current = i;
+    if (first) return;
+    whoosh();
+    if (!reduced && (cutKind === 'zoom' || cutKind === 'dip')) {
+      setLeakAt(i);
+      const t = setTimeout(() => setLeakAt(-1), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [i, phase, cutKind, whoosh, reduced]);
+  const counted = useRef(false);
+  const start = () => {
+    // A lead pressing play counts once towards how interested they are.
+    if (lead && !counted.current) {
+      counted.current = true;
+      void fetch('/api/nurture/public', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: lead, watched: true }) }).catch(() => { /* not critical */ });
+    }
+    playSlide(0, { muted, voice });
+  };
+  const pause = () => {
+    if (phase !== 'playing') return;
+    const c = clock.current;
+    c.pausedAt = performance.now();
+    if (c.mode === 'audio') audioRef.current?.pause();
+    else if (c.mode === 'speech') window.speechSynthesis.pause();
+    else if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    setPhase('paused');
+  };
+  const resume = () => {
+    if (phase !== 'paused') return;
+    const c = clock.current;
+    c.pausedTotal += performance.now() - c.pausedAt;
+    setPhase('playing');
+    if (c.mode === 'audio') { void audioRef.current?.play().catch(() => playSlide(i, { muted, voice: 'browser' })); }
+    else if (c.mode === 'speech') {
+      window.speechSynthesis.resume();
+      // Some phones drop paused speech: if nothing is speaking, restart the slide.
+      setTimeout(() => { if (!window.speechSynthesis.speaking) playSlide(i, { muted, voice }); }, 400);
+    } else {
+      const left = Math.max(400, c.dur - (performance.now() - c.start - c.pausedTotal));
+      const run = runId.current;
+      timerRef.current = setTimeout(() => { if (run === runId.current) { if (i + 1 >= slides.length) { setPhase('done'); stopAll(); } else playSlide(i + 1, { muted, voice }); } }, left);
+    }
+  };
+  const toggle = () => (phase === 'playing' ? pause() : phase === 'paused' ? resume() : start());
+  const go = (k: number) => { const t = Math.max(0, Math.min(slides.length - 1, k)); playSlide(t, { muted, voice }); };
+  const toggleMute = () => {
+    const m = !muted;
+    setMuted(m);
+    const c = clock.current;
+    if (c.mode === 'audio' && audioRef.current) audioRef.current.muted = m;
+    else if (phase === 'playing' && (c.mode === 'speech' || c.mode === 'timer')) playSlide(i, { muted: m, voice });
+  };
+
+  /* ── fullscreen (real where supported, a fixed overlay on iPhone) ───── */
+  const toggleFull = () => {
+    const el = playerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) { void document.exitFullscreen(); return; }
+    if (pseudoFull) { setPseudoFull(false); return; }
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => setPseudoFull(true));
+    else setPseudoFull(true);
+  };
+  useEffect(() => {
+    const on = () => setFull(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+
+  /* ── keyboard ─────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!view?.lesson || (e.target as HTMLElement)?.closest('input,textarea,select')) return;
+      if (e.key === ' ' || e.key === 'k') { e.preventDefault(); toggle(); }
+      else if (e.key === 'ArrowRight' && phase !== 'title') go(i + 1);
+      else if (e.key === 'ArrowLeft' && phase !== 'title') go(i - 1);
+      else if (e.key === 'm') toggleMute();
+      else if (e.key === 'c') setCc(!cc);
+      else if (e.key === 'f') toggleFull();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const elapsed = useMemo(() => slides.slice(0, i).reduce((t, s) => t + estimateMs(s.say), 0) + (slide ? estimateMs(slide.say) * progress : 0), [slides, i, slide, progress]);
+  const captions = useMemo(() => (slide ? chunk(slide.say) : []), [slide]);
+  const caption = captions[Math.min(captions.length - 1, Math.floor(progress * captions.length))] || '';
+  const brand = view?.brand || { base: '#0a1733', deep: '#5e0743', accent: '#ff7300' };
+  const cc = ccChoice ?? (muted || voice !== 'server');
+  const speaking = phase === 'playing' && !muted && voice !== 'silent';
+  const evidenceScore = typeof view?.evidence?.scorePct === 'number' ? Math.round(view.evidence.scorePct) : null;
+  const isLead = Boolean(lead);
+  const sceneFootage = (view?.footage || [])[phase === 'title' ? 0 : i] || null;
+  const ctaHref = view?.cta?.href || `/quiz/${quizId}`;
+  const ctaLabel = view?.cta?.label || `Start the ${n}-question test`;
+  const skipHref = view?.skip?.href || `/quiz/${quizId}`;
+  const skipLabel = view?.skip?.label || 'Skip to the test';
 
   return (
-    <div className="lp">
-      <header className="lp-top">
+    <div className="vl-page">
+      <header className="vl-top">
         <Logo size="sm" />
-        <span>Your lesson</span>
+        <span>{academy ? `${academy} · ` : ''}{isLead ? 'Made for you' : 'Your personal lesson'}</span>
       </header>
-      <main className="lp-main">
-        {err && <div className="lp-card"><h1>We could not find this lesson</h1><p>{err}</p></div>}
-        {!view && !err && <div className="lp-card"><p>Loading your lesson…</p></div>}
-        {view && !view.lesson && <div className="lp-card"><h1>No lesson for this quiz</h1><Link className="btn btn-cta" href={`/quiz/${quizId}`}>Go to the quiz</Link></div>}
+      <main className="vl-main">
+        {err && <div className="vl-card"><h1>We could not find this {isLead ? 'video' : 'lesson'}</h1><p>{err} If you opened this from an email, the link may be from a demo that has since been reset.</p></div>}
+        {!view && !err && <div className="vl-card vl-loading"><span className="vl-spin" aria-hidden="true" />Loading your {isLead ? 'video' : 'lesson'}…</div>}
+        {view && !view.lesson && <div className="vl-card"><h1>No video for this test</h1><p>Your study pack has everything you need.</p><a className="vl-btn vl-btn--cta" href={ctaHref}>Go to the test<ArrowRight size={16} /></a></div>}
+
         {view?.lesson && slide && (
           <>
-            <div className="lp-head">
-              <span className="lp-badge">{view.module.code} · {view.module.title}</span>
-              <h1>{view.lesson.title}</h1>
-              <span className="lp-meta">For {view.learner.name} · {slides.length} slides · about {minutes} min</span>
-            </div>
-            <div className={`lp-stage${playing ? ' is-playing' : ''}`}>
-              {!started ? (
-                <button type="button" className="lp-start" onClick={play}>
-                  <span className="lp-play"><Icon name="play" size={34} /></span>
-                  <b>Play your {minutes}-minute lesson</b>
-                  <em>{first}, turn your sound on</em>
+            <div
+              ref={playerRef}
+              className={`vl-player${full ? ' is-full' : ''}${pseudoFull ? ' is-pseudo-full' : ''}`}
+              style={{ ['--a' as string]: brand.accent, ['--a2' as string]: brand.accent, ['--base' as string]: brand.base, ['--deep' as string]: brand.deep }}
+            >
+              <div className={`vl-stage vl-bg--${phase === 'title' ? 'title' : phase === 'done' ? 'done' : slide.visual || 'concept'}${sceneFootage ? ' has-footage' : ''}`}>
+                <Backdrop footage={sceneFootage} index={phase === 'title' ? 0 : i} playing={phase === 'playing' || phase === 'title'} />
+                <LightLeak show={leakAt === i} />
+
+                {phase === 'title' && (
+                  <button type="button" className="vl-title" onClick={start} aria-label={`Play your ${minutes}-minute lesson`}>
+                    <span className="vl-chip">Made for you · {view.module.code}</span>
+                    <motion.h1 initial={reduced ? false : { opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: [0.2, 1, 0.3, 1] }}>
+                      Hey {first}
+                    </motion.h1>
+                    <motion.p initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25, duration: 0.6 }}>
+                      {tutor} made you a {minutes}-minute {isLead ? 'video' : 'lesson'} {isLead ? 'about' : 'on'} <b>{view.topic}</b>
+                      {evidenceScore !== null ? <>, after your {evidenceScore}% on {view.module.code}.</> : '.'}
+                    </motion.p>
+                    <span className="vl-bigplay"><Play size={34} fill="currentColor" /></span>
+                    <em>{isLead ? `Sound on · about ${minutes} minutes` : `Sound on · then a ${n}-question test`}</em>
+                  </button>
+                )}
+
+                {(phase === 'playing' || phase === 'paused') && (
+                  <>
+                    <div className="vl-chapter"><b>{i + 1}/{slides.length}</b>{view.module.code}</div>
+                    {/* Outgoing and incoming move together: the cut is the exit (no fade to nothing in between). */}
+                    <AnimatePresence initial={false} custom={cutKind}>
+                      <motion.div
+                        key={i}
+                        className={`vl-scene vl-scene--${slide.visual || 'concept'}`}
+                        custom={cutKind}
+                        variants={reduced ? undefined : cutVariants}
+                        initial={reduced ? { opacity: 0 } : 'enter'}
+                        animate={reduced ? { opacity: 1 } : 'center'}
+                        exit={reduced ? { opacity: 0 } : 'exit'}
+                        transition={reduced ? { duration: 0.2 } : undefined}
+                      >
+                        <Camera index={i} durMs={estimateMs(slide.say)} paused={phase === 'paused' || Boolean(reduced)}>
+                          <Scene slide={slide} progress={progress} reduced={Boolean(reduced)} first={first} n={n} pass={pass} evidenceScore={evidenceScore} missed={view.noticed || view.evidence?.missedTopics || []} tutor={tutor} tiles={view.ctaTiles} kicker={view.ctaKicker} />
+                        </Camera>
+                      </motion.div>
+                    </AnimatePresence>
+                    <div className={`vl-presenter${speaking ? ' is-speaking' : ''}`}>
+                      <span className="vl-avatar">{tutor.charAt(0)}</span>
+                      <span className="vl-who"><b>{tutor}</b><small>{speaking ? 'Speaking' : phase === 'paused' ? 'Paused' : view.presenter?.label || 'Your tutor'}</small></span>
+                      <span className="vl-wavebars" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+                    </div>
+                    {cc && caption && <p className="vl-cc" aria-live="polite">{caption}</p>}
+                    {phase === 'paused' && (
+                      <button type="button" className="vl-pausedcover" onClick={resume} aria-label="Resume"><Play size={30} fill="currentColor" /></button>
+                    )}
+                  </>
+                )}
+
+                {phase === 'done' && (
+                  <motion.div className="vl-end" initial={reduced ? false : { opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+                    <span className="vl-endicon"><Check size={30} strokeWidth={3} /></span>
+                    <h2>{isLead ? `Thanks for watching, ${first}.` : `Nice work, ${first}.`}</h2>
+                    {isLead
+                      ? <p>{view.cta?.label === 'Find my tech fit' ? <>Find out which path fits you best: <b>6 quick questions</b>, no wrong answers.</> : <>When you are ready, the next step is easy, and a person helps you all the way.</>}</p>
+                      : <p>Now show what you know: <b>{n} questions</b> on exactly this. Score {pass}% or more and your record updates straight away.</p>}
+                    <div className="vl-endbtns">
+                      <a className="vl-btn vl-btn--cta" href={ctaHref}>{ctaLabel}<ArrowRight size={16} /></a>
+                      <button type="button" className="vl-btn vl-btn--ghost" onClick={start}><RotateCcw size={15} />Watch again</button>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              <div className="vl-controls">
+                <button type="button" className="vl-ic" onClick={() => go(i - 1)} disabled={phase === 'title' || i === 0} aria-label="Previous scene"><SkipBack size={18} /></button>
+                <button type="button" className="vl-ic vl-ic--main" onClick={phase === 'done' ? start : toggle} aria-label={phase === 'playing' ? 'Pause' : 'Play'}>
+                  {phase === 'playing' ? <Pause size={20} fill="currentColor" /> : phase === 'done' ? <RotateCcw size={18} /> : <Play size={20} fill="currentColor" />}
                 </button>
-              ) : done ? (
-                <div className="lp-end">
-                  <Icon name="badgeCheck" size={40} />
-                  <b>Nice work, {first}.</b>
-                  <p>Now show what you know: 3 questions on exactly this.</p>
-                  <Link className="btn btn-cta" href={`/quiz/${quizId}`}><Icon name="play" size={14} />Take the quiz</Link>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { go('start'); play(); }}>Watch again</button>
+                <button type="button" className="vl-ic" onClick={() => go(i + 1)} disabled={phase === 'title' || i >= slides.length - 1} aria-label="Next scene"><SkipForward size={18} /></button>
+                <div className="vl-segs" role="group" aria-label="Scenes">
+                  {slides.map((s, k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={`vl-seg${k < i || phase === 'done' ? ' is-done' : ''}${k === i && phase !== 'title' && phase !== 'done' ? ' is-now' : ''}`}
+                      onClick={() => go(k)}
+                      title={`${k + 1}. ${s.heading}`}
+                      aria-label={`Scene ${k + 1}: ${s.heading}`}
+                    >
+                      <i style={k === i && phase !== 'title' && phase !== 'done' ? { width: `${progress * 100}%` } : undefined} />
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <div key={i} className="lp-slide">
-                  <span className="lp-n">{i + 1} / {slides.length}</span>
-                  <h2>{slide.heading}</h2>
-                  <ul>{slide.points.map((p, k) => <li key={k} className={k < shown ? 'on' : ''}>{p}</li>)}</ul>
-                  {slide.code && <pre className={shown > slide.points.length - 1 ? 'on' : ''}>{slide.code}</pre>}
-                </div>
-              )}
+                <span className="vl-time">{fmt(phase === 'done' ? totalMs : elapsed)} / {fmt(totalMs)}</span>
+                <button type="button" className="vl-ic" onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} aria-pressed={muted}>{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
+                <button type="button" className={`vl-ic${musicOn ? '' : ' is-off'}`} onClick={toggleMusic} aria-label={musicOn ? 'Music off' : 'Music on'} aria-pressed={musicOn} title={musicOn ? 'Music: on' : 'Music: off'}><Music size={17} /></button>
+                <button type="button" className="vl-ic" onClick={() => setCc(!cc)} aria-label="Captions" aria-pressed={cc}>{cc ? <Captions size={18} /> : <CaptionsOff size={18} />}</button>
+                <button type="button" className="vl-ic" onClick={toggleFull} aria-label={full || pseudoFull ? 'Exit full screen' : 'Full screen'}>{full || pseudoFull ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+              </div>
             </div>
-            {started && !done && <p className="lp-cap" aria-live="polite">{slide.say}</p>}
-            <div className="lp-bar" aria-hidden="true">{slides.map((_, k) => <i key={k} className={k < i || done ? 'done' : k === i && started ? 'now' : ''} />)}</div>
-            <div className="lp-ctrl">
-              <button type="button" className="iconbtn" onClick={() => go(-1)} disabled={i === 0} aria-label="Previous slide"><Icon name="arrowLeft" size={16} /></button>
-              {playing ? <button type="button" className="btn btn-outline btn-sm" onClick={pause}><Icon name="pause" size={14} />Pause</button>
-                : <button type="button" className="btn btn-cta btn-sm" onClick={play}><Icon name="play" size={14} />{started ? 'Resume' : 'Play'}</button>}
-              <button type="button" className="iconbtn" onClick={() => go(1)} disabled={i >= slides.length - 1} aria-label="Next slide"><Icon name="arrowRight" size={16} /></button>
-              <Link className="lp-skip" href={`/quiz/${quizId}`}>Skip to the quiz</Link>
+
+            <div className="vl-below">
+              <div>
+                <span className="vl-kicker">{view.module.code} · {view.module.title}</span>
+                <h1>{view.lesson.title}</h1>
+                <p>For {view.learner.name} · {slides.length} scenes · about {minutes} min · {voice === 'server' ? 'narrated' : voice === 'browser' ? 'narrated by your device' : 'captions only'}</p>
+              </div>
+              <a className="vl-btn vl-btn--outline" href={skipHref}>{skipLabel}<ArrowRight size={15} /></a>
             </div>
+            <p className="vl-keys">Space play/pause · ← → scenes · M mute · C captions · F full screen</p>
           </>
         )}
       </main>
+      {/* One persistent element: phones only let a tapped-to-start element keep playing. */}
+      <audio ref={audioRef} preload="auto" playsInline hidden />
     </div>
   );
 }

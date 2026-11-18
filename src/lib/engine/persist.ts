@@ -1,23 +1,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { WorldState } from '@/lib/types';
+import { syncWorldToDb } from '@/lib/db/postgres';
+import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
 
-/* The office remembers its archive across restarts.
- *
- * Deliverables, the sent inbox, learner statuses and the metrics are written
- * to .data/world.json a moment after they change, and read back when the
- * server boots. Avatars always start the day at their desks. Everything here
- * fails quietly: on a read-only disk the office simply forgets on restart. */
+/* Per-tenant archive across restarts (.data/world.json or .data/tenants/<id>/world.json)
+ * mirrored asynchronously to PostgreSQL when DATABASE_URL is set. */
 
 const DIR = path.join(process.cwd(), '.data');
-const FILE = path.join(DIR, 'world.json');
 
-export type Archive = Pick<WorldState, 'deliverables' | 'inbox' | 'learners' | 'metrics' | 'tasks' | 'feed'>;
+function fileFor(tenantId = currentTenantId()): string {
+  return tenantId === DEFAULT_TENANT_ID
+    ? path.join(DIR, 'world.json')
+    : path.join(DIR, 'tenants', tenantId, 'world.json');
+}
 
-export function loadArchive(): Partial<Archive> | null {
+export type Archive = Pick<WorldState, 'deliverables' | 'inbox' | 'learners' | 'metrics' | 'tasks' | 'feed' | 'pendingOutreach'>;
+
+export function loadArchive(tenantId = currentTenantId()): Partial<Archive> | null {
   try {
-    if (!fs.existsSync(FILE)) return null;
-    const raw = fs.readFileSync(FILE, 'utf8');
+    const file = fileFor(tenantId);
+    if (!fs.existsSync(file)) return null;
+    const raw = fs.readFileSync(file, 'utf8');
     const data = JSON.parse(raw) as Partial<Archive>;
     return data && typeof data === 'object' ? data : null;
   } catch {
@@ -25,11 +29,11 @@ export function loadArchive(): Partial<Archive> | null {
   }
 }
 
-let timer: NodeJS.Timeout | null = null;
-export function scheduleSave(get: () => WorldState) {
-  if (timer) return;
-  timer = setTimeout(() => {
-    timer = null;
+const timers = new Map<string, NodeJS.Timeout>();
+export function scheduleSave(get: () => WorldState, tenantId = currentTenantId()) {
+  if (timers.has(tenantId)) return;
+  const t = setTimeout(() => {
+    timers.delete(tenantId);
     try {
       const s = get();
       const archive: Archive = {
@@ -39,15 +43,22 @@ export function scheduleSave(get: () => WorldState) {
         metrics: s.metrics,
         tasks: s.tasks,
         feed: s.feed.slice(-80),
+        pendingOutreach: s.pendingOutreach || [],
       };
-      fs.mkdirSync(DIR, { recursive: true });
-      fs.writeFileSync(FILE, JSON.stringify(archive), 'utf8');
+      const file = fileFor(tenantId);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(archive), 'utf8');
+      void syncWorldToDb(archive, tenantId);
     } catch {
       /* no disk, no memory: the demo still runs */
     }
   }, 600);
+  timers.set(tenantId, t);
 }
 
-export function clearArchive() {
-  try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* ignore */ }
+export function clearArchive(tenantId = currentTenantId()) {
+  try {
+    const file = fileFor(tenantId);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch { /* ignore */ }
 }

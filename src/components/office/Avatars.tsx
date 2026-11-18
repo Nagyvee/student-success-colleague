@@ -53,9 +53,11 @@ function useFacing(path: Point[] | null) {
 const LOOK_OF: Partial<Record<AgentState['id'], number>> = { planner: 0, success: 1, learning: 2 };
 
 /** Name tags are drawn by the flat overlay (Overlay.tsx), where nothing can hide them. */
+const lookFor = (id: string) => LOOK_OF[id as AgentState['id']] ?? (id.split('').reduce((n, c) => n + c.charCodeAt(0), 0) % 3);
+
 export function AgentAvatar({ agent, speaking = false }: { agent: AgentState; speaking?: boolean }) {
   const isCoo = agent.id === 'coo';
-  const accent = isCoo ? '#e6edff' : ROOMS[agent.dept].accent;
+  const accent = agent.color || (isCoo ? '#e6edff' : ROOMS[agent.dept]?.accent || '#9fc5ff');
   const { scope, initial } = useWalk(agent.pos, agent.path, agent.walkMs);
   const facing = useFacing(agent.path);
   const walking = agent.status === 'walking';
@@ -67,7 +69,7 @@ export function AgentAvatar({ agent, speaking = false }: { agent: AgentState; sp
       <span className="walker-ring" />
       <Billboard className="bb-walker">
         {agent.carrying && <span className="carry-tag"><Icon name="file" size={9} />{agent.carrying}</span>}
-        <Figure kind={isCoo ? 'coo' : 'person'} look={LOOK_OF[agent.id] ?? 0} accent={accent} status={agent.status} walking={walking} facing={facing} carrying={Boolean(agent.carrying) || (isCoo && agent.status === 'reviewing')} />
+        <Figure kind={isCoo ? 'coo' : 'person'} look={lookFor(agent.id)} accent={accent} status={agent.status} walking={walking} facing={facing} carrying={Boolean(agent.carrying) || (isCoo && agent.status === 'reviewing')} />
       </Billboard>
     </div>
   );

@@ -1,0 +1,111 @@
+/* ══ The cinematic layer ══════════════════════════════════════════════════
+   What turns animated scenes into video: a living backdrop with depth, the
+   academy's footage graded into the brand, a camera that never stops moving,
+   and light. Sizes in cqw (the stage is the size container). */
+
+/* ── backdrop ───────────────────────────────────────────────────────────── */
+.cin-bg { position:absolute; inset:0; z-index:-1; overflow:hidden; pointer-events:none; }
+.cin-bg.is-paused, .cin-bg.is-paused * { animation-play-state:paused !important; }
+
+/* A slow colour field: the brand's navy, maroon and a touch of accent, always drifting. */
+.cin-mesh { position:absolute; inset:-25%;
+  background:
+    radial-gradient(38% 46% at 22% 30%, color-mix(in srgb, var(--deep, #5e0743) 72%, transparent), transparent 70%),
+    radial-gradient(34% 42% at 78% 72%, color-mix(in srgb, var(--a, #ff7300) 20%, transparent), transparent 70%),
+    radial-gradient(46% 50% at 62% 12%, color-mix(in srgb, #2a3d8f 34%, transparent), transparent 70%),
+    radial-gradient(40% 40% at 10% 90%, color-mix(in srgb, var(--deep, #5e0743) 40%, transparent), transparent 70%);
+  filter:blur(2cqw); animation:cinMesh 30s ease-in-out infinite alternate; will-change:transform; }
+@keyframes cinMesh {
+  0% { transform:translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  50% { transform:translate3d(-4%, 3%, 0) rotate(7deg) scale(1.08); }
+  100% { transform:translate3d(3%, -2%, 0) rotate(-5deg) scale(1.03); }
+}
+
+/* Soft lights rising slowly at different depths (near ones bigger, faster, blurrier). */
+.cin-lights i { position:absolute; bottom:-12cqw; border-radius:50%; opacity:0; mix-blend-mode:screen;
+  background:radial-gradient(circle, rgba(255,255,255,.5), rgba(255,255,255,0) 68%); animation:cinRise linear infinite; will-change:transform, opacity; }
+.cin-lights i:nth-child(1) { left:8%;  width:7cqw;  height:7cqw;  animation-duration:19s; animation-delay:-2s; }
+.cin-lights i:nth-child(2) { left:22%; width:3cqw;  height:3cqw;  animation-duration:26s; animation-delay:-11s; }
+.cin-lights i:nth-child(3) { left:37%; width:11cqw; height:11cqw; animation-duration:15s; animation-delay:-7s; filter:blur(.6cqw);
+  background:radial-gradient(circle, color-mix(in srgb, var(--a, #ff7300) 55%, transparent), transparent 68%); }
+.cin-lights i:nth-child(4) { left:51%; width:4cqw;  height:4cqw;  animation-duration:23s; animation-delay:-4s; }
+.cin-lights i:nth-child(5) { left:63%; width:8cqw;  height:8cqw;  animation-duration:18s; animation-delay:-14s; }
+.cin-lights i:nth-child(6) { left:74%; width:2.4cqw; height:2.4cqw; animation-duration:29s; animation-delay:-9s; }
+.cin-lights i:nth-child(7) { left:84%; width:13cqw; height:13cqw; animation-duration:14s; animation-delay:-1s; filter:blur(.8cqw);
+  background:radial-gradient(circle, color-mix(in srgb, var(--deep, #5e0743) 70%, #fff 10%), transparent 68%); }
+.cin-lights i:nth-child(8) { left:93%; width:5cqw;  height:5cqw;  animation-duration:21s; animation-delay:-16s; }
+.cin-lights i:nth-child(9) { left:46%; width:16cqw; height:16cqw; animation-duration:24s; animation-delay:-19s; filter:blur(1.2cqw);
+  background:radial-gradient(circle, color-mix(in srgb, var(--a, #ff7300) 30%, transparent), transparent 68%); }
+@keyframes cinRise {
+  0% { transform:translate3d(0, 0, 0) scale(.8); opacity:0; }
+  15% { opacity:.42; }
+  70% { opacity:.3; }
+  100% { transform:translate3d(4cqw, -78cqw, 0) scale(1.15); opacity:0; }
+}
+
+/* The academy's footage: full frame, a slow Ken Burns, a light grade. */
+.cin-footage { position:absolute; inset:0; overflow:hidden; }
+.cin-footage video, .cin-footage img { position:absolute; inset:-6%; width:112%; height:112%; object-fit:cover;
+  max-width:none; max-height:none; filter:saturate(.88) contrast(1.06) brightness(.92); animation:16s ease-out forwards; will-change:transform; }
+.kb-0 video, .kb-0 img { animation-name:kbIn; }
+.kb-1 video, .kb-1 img { animation-name:kbLeft; }
+.kb-2 video, .kb-2 img { animation-name:kbOut; }
+.kb-3 video, .kb-3 img { animation-name:kbRight; }
+@keyframes kbIn { from { transform:scale(1.02); } to { transform:scale(1.12); } }
+@keyframes kbOut { from { transform:scale(1.14); } to { transform:scale(1.03); } }
+@keyframes kbLeft { from { transform:scale(1.1) translate3d(2.5%, 0, 0); } to { transform:scale(1.1) translate3d(-2.5%, 0, 0); } }
+@keyframes kbRight { from { transform:scale(1.1) translate3d(-2.5%, 1%, 0); } to { transform:scale(1.1) translate3d(2.5%, -1%, 0); } }
+
+/* The grade over footage: the brand's navy from the bottom, maroon from the side, so graphics stay readable. */
+.cin-grade { position:absolute; inset:0; opacity:0; transition:opacity .9s ease;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--base, #0a1733) 30%, transparent) 0%, color-mix(in srgb, var(--base, #0a1733) 62%, transparent) 55%, color-mix(in srgb, var(--base, #0a1733) 92%, transparent) 100%),
+    linear-gradient(100deg, color-mix(in srgb, var(--deep, #5e0743) 46%, transparent) 0%, transparent 55%); }
+.cin-grade.is-on { opacity:1; }
+
+/* Film grain (moving, so it reads as film rather than texture). */
+.cin-grain { position:absolute; inset:-60%; opacity:.09; mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  animation:cinGrain .9s steps(5) infinite; }
+@keyframes cinGrain { 0% { transform:translate(0, 0); } 20% { transform:translate(-4%, 3%); } 40% { transform:translate(3%, -2%); } 60% { transform:translate(-2%, -4%); } 80% { transform:translate(4%, 2%); } 100% { transform:translate(0, 0); } }
+
+/* A lens vignette. */
+.cin-vignette { position:absolute; inset:0; background:radial-gradient(125% 95% at 50% 46%, transparent 56%, rgba(0,0,0,.5) 100%); }
+
+/* Readable on footage. */
+.vl-stage.has-footage .sc { text-shadow:0 .2cqw 1.6cqw rgba(0,0,0,.45); }
+.vl-stage.has-footage .vl-title h1, .vl-stage.has-footage .vl-title p { text-shadow:0 .2cqw 2cqw rgba(0,0,0,.5); }
+
+/* ── camera ─────────────────────────────────────────────────────────────── */
+.cin-cam { position:absolute; inset:0; transform-origin:50% 48%; animation-duration:var(--cam-dur, 8s); animation-timing-function:cubic-bezier(.33, 0, .2, 1); animation-fill-mode:both; will-change:transform; }
+.cam-push { animation-name:camPush; }
+.cam-pull { animation-name:camPull; }
+.cam-pan-l { animation-name:camPanL; }
+.cam-pan-r { animation-name:camPanR; }
+@keyframes camPush { from { transform:scale(1); } to { transform:scale(1.065); } }
+@keyframes camPull { from { transform:scale(1.07); } to { transform:scale(1.005); } }
+@keyframes camPanL { from { transform:scale(1.045) translate3d(1.4%, .4%, 0); } to { transform:scale(1.045) translate3d(-1.4%, -.4%, 0); } }
+@keyframes camPanR { from { transform:scale(1.045) translate3d(-1.4%, -.3%, 0); } to { transform:scale(1.045) translate3d(1.4%, .3%, 0); } }
+
+/* ── light ──────────────────────────────────────────────────────────────── */
+.cin-leak { position:absolute; inset:-30% -45%; z-index:4; pointer-events:none; mix-blend-mode:screen; filter:blur(3cqw);
+  background:
+    radial-gradient(26% 46% at 42% 50%, rgba(255,170,90,.8), rgba(255,115,0,.38) 40%, transparent 70%),
+    radial-gradient(18% 30% at 58% 38%, rgba(255,228,196,.65), transparent 70%),
+    radial-gradient(22% 40% at 30% 66%, color-mix(in srgb, var(--deep, #5e0743) 70%, transparent), transparent 70%); }
+
+/* Scenes overlap during a cut: the outgoing one must not catch clicks. */
+.vl-scene { will-change:transform, opacity, filter; }
+
+/* The music button reads off when off. */
+.vl-ic.is-off { opacity:.45; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cin-mesh, .cin-lights i, .cin-grain, .cin-cam, .cin-footage video, .cin-footage img { animation:none !important; }
+  .cin-lights { display:none; }
+}
+
+/* ── kinetic type ───────────────────────────────────────────────────────── */
+/* Masks need room for ascenders and descenders, or the letters get clipped. */
+.kt-mask { display:inline-block; overflow:hidden; vertical-align:bottom; padding:.08em .04em .14em; margin:-.08em -.04em -.14em; }
+.kt-word { display:inline-block; will-change:transform, opacity; }

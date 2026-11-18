@@ -1,10 +1,15 @@
+import { footageFor, musicFor } from '@/lib/nurture/media';
 import type { Deliverable, QuizResult, RemedialQuiz } from '@/lib/types';
 import { announce, bump, getState, log, patchTask, setAgent, setLearner, setRoom, setSpotlight, upsertDeliverable } from './store';
 import { resultEmail, sendMail } from '@/lib/email/send';
+import { approvalOn, holdMail } from './approvals';
 import { getLmsAdapter } from '@/lib/lms/lmsAdapter';
 import { LOCALIZED_BANK } from '@/lib/ai/simulate';
 import { sleep } from './orchestrator';
 import { writeBack } from '@/lib/lms/sheet';
+import { markFollowUpRecovered } from '@/lib/engine/followups';
+import { recordLmsEvent, recordQuizOutcome } from '@/lib/db/postgres';
+import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 
 /* The student's side of the loop.
  *
@@ -17,10 +22,31 @@ export function findQuiz(quizId: string) {
   return getState().deliverables.find((d) => d.kind === 'remedial_quiz' && (d.content as RemedialQuiz).quizId === quizId) as Deliverable<RemedialQuiz> | undefined;
 }
 
+/** The lesson's colours: Melsoft's brand (navy, maroon, one orange accent), or
+ *  another academy's own brand colour as the accent on the same calm navy. */
+export function lessonBrand(academyName: string) {
+  const melsoft = { base: '#0a1733', deep: '#5e0743', accent: '#ff7300' };
+  if (/melsoft/i.test(academyName)) return melsoft;
+  const own = (getTenantIntegrations().building?.brandColor || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(own) ? { base: '#0a1733', deep: '#1c2340', accent: own } : melsoft;
+}
+
+/** The result email: in Approval Mode it waits in the Inbox (the student already saw the result on screen). */
+async function sendResult(q: RemedialQuiz, d: Deliverable, m: { subject: string; html: string; text: string }): Promise<'held' | 'simulated' | 'smtp' | 'failed'> {
+  if (approvalOn()) {
+    holdMail({ to: q.learner.email, toName: q.learner.name, subject: m.subject, html: m.html, text: m.text, taskId: d.taskId, learnerId: q.learner.id, label: 'Learning & Assessment · test result', officeName: 'Learning & Assessment' });
+    return 'held';
+  }
+  const mail = await sendMail({ to: q.learner.email, toName: q.learner.name, ...m, link: null, taskId: d.taskId, deliverableId: d.id });
+  return mail.error ? 'failed' : mail.delivery === 'smtp' ? 'smtp' : 'simulated';
+}
+
 export function publicQuizView(d: Deliverable<RemedialQuiz>) {
   const q = d.content;
   const done = q.status === 'completed';
-  const fallbackTranslations = LOCALIZED_BANK[q.module.code] || LOCALIZED_BANK['JS-07'];
+  // Home-language refreshers only where they were written for this module.
+  const fallbackTranslations = LOCALIZED_BANK[q.module.code] || null;
+  const ac = getAcademyContext();
   return {
     quizId: q.quizId,
     status: q.status,
@@ -31,9 +57,14 @@ export function publicQuizView(d: Deliverable<RemedialQuiz>) {
     tutoringSummary: q.tutoringSummary,
     keyPoints: q.keyPoints,
     resources: q.resources || [],
-    lesson: q.lesson || null,
+    lesson: q.lesson ? { ...q.lesson, academyName: q.lesson.academyName || ac.academyName, questionCount: q.questions.length, passMark: q.passMark } : null,
+    academyName: ac.academyName,
+    brand: lessonBrand(ac.academyName),
+    footage: q.lesson ? footageFor(q.lesson.slides, q.module.title, 'lesson') : [],
+    music: musicFor(),
     localizedSummary: q.localizedSummary || null,
     allTranslations: q.allTranslations || fallbackTranslations,
+    evidence: q.evidence ? { scorePct: q.evidence.scorePct ?? null, missedTopics: q.evidence.missedTopics || [] } : null,
     passMark: q.passMark,
     questions: q.questions.map((x) => ({
       id: x.id, prompt: x.prompt, options: x.options, topicTag: x.topicTag,
@@ -59,12 +90,23 @@ export async function submitQuiz(quizId: string, answers: number[]) {
   upsertDeliverable(d);
   bump('quizzesCompleted');
   const first = d.content.learner.name.split(' ')[0];
-  log('student', 'score', `${d.content.learner.name} submitted the ${d.content.module.code} micro-quiz: ${result.score}/${result.total} (${result.pct}%) · ${result.passed ? 'passed' : 'below the pass mark'}.`, {
+  log('student', 'score', `${d.content.learner.name} submitted the ${d.content.module.code} mastery test: ${result.score}/${result.total} (${result.pct}%) · ${result.passed ? 'passed' : 'below the pass mark'}.`, {
     taskId: d.taskId,
     deliverableId: d.id,
     toolCall: { tool: 'student.submit_remedial_quiz', payload: { quizId: d.content.quizId, studentId: d.content.learner.id, score: result.score, total: result.total, pct: result.pct, passed: result.passed } },
   });
-  announce('student', `${d.content.learner.name} scored ${result.pct}% on the ${d.content.module.code} quiz · synced to the LMS`, result.passed ? 'good' : 'warn');
+  announce('student', `${d.content.learner.name} scored ${result.pct}% on the ${d.content.module.code} test · synced to the LMS`, result.passed ? 'good' : 'warn');
+  // The agent that asked for this lesson decides what happens next from the result.
+  if (d.content.learner.email) {
+    const email = d.content.learner.email;
+    void import('./agentRuns').then((m) => m.noteQuizResult(email, result.pct, result.passed)).catch(() => {});
+    void import('@/lib/data/records').then((m) => {
+      for (const r of m.findRecordsByEmail(email)) {
+        m.setRecordField(r.sourceId, r.key, 'quiz_score', String(result.pct));
+        m.setRecordField(r.sourceId, r.key, 'quiz_passed', result.passed ? 'yes' : 'no');
+      }
+    }).catch(() => {});
+  }
   void reactInOffice(d, result, first);
   return { deliverable: d, result, already: false };
 }
@@ -92,19 +134,28 @@ async function reactInOffice(d: Deliverable<RemedialQuiz>, result: QuizResult, f
     ? [`${first} is back On Track in the LMS`, 'A well-done email is on its way', 'Student Success keeps watching the next checkpoint']
     : [
         `Email ${first} the ${missed.length} question${missed.length === 1 ? '' : 's'} missed, each with the explanation`,
-        `Send the 3-minute lesson again, with the missed point first`,
+        `Send the lesson again, with the missed point first`,
         `Tutor follow-up: a 20-minute catch-up on ${q.topic}`,
         `Keep ${first} flagged as being helped and re-check in 7 days`,
       ];
   setSpotlight({
     id: `res-${q.quizId}-${result.submittedAt}`, ts: Date.now(), kind: result.passed ? 'passed' : 'failed', owner: 'success',
-    title: `${q.learner.name} took the quiz`, subject: `${q.module.code} · ${q.topic}`,
+    title: `${q.learner.name} took the ${result.total}-question test`, subject: `${q.module.code} · ${q.topic}`,
     rule: `${result.score} of ${result.total} correct · ${result.pct}% · pass mark ${q.passMark}%`,
     problem: result.passed ? 'Passed. At-Risk → On Track.' : `Below the pass mark. ${missed.length ? `Missed: ${missed.map((x) => `Q${q.questions.indexOf(x) + 1}`).join(', ')}.` : ''}`,
     before: null, after: null, steps, holdMs: 11000,
   });
 
   // 3 · Student Success reacts
+  void recordQuizOutcome(q.quizId, result.pct, result.passed);
+  void recordLmsEvent({
+    learnerId: q.learner.id,
+    eventType: result.passed ? 'remedial_quiz.passed' : 'remedial_quiz.failed',
+    source: 'thuso',
+    moduleCode: q.module.code,
+    scorePct: result.pct,
+    detail: `Quiz ${q.quizId}: ${result.score}/${result.total} (${result.pct}%)`,
+  });
   setRoom('success', 'busy', `Score in · ${first} ${result.pct}%`);
   setAgent('success', { status: 'thinking', thought: `${first} just finished the ${q.module.code} quiz: ${result.score}/${result.total}. Checking it against the pass mark…` });
   await sleep(1600);
@@ -112,6 +163,7 @@ async function reactInOffice(d: Deliverable<RemedialQuiz>, result: QuizResult, f
     const status = 'recovered';
     try { await adapter.updateStudentStatus(q.learner.id, status, `Passed ${q.module.code} remedial quiz with ${result.pct}%`); } catch { /* logged above */ }
     setLearner(q.learner.id, { status, lastEvent: `Passed ${q.module.code} remedial · ${result.pct}%`, quizAvg: Math.min(100, (getState().learners.find((l) => l.id === q.learner.id)?.quizAvg || 50) + 10), weakTopic: null, riskScore: Math.max(8, Math.round((getState().learners.find((l) => l.id === q.learner.id)?.riskScore || 60) * 0.3)) });
+    markFollowUpRecovered(q.learner.id);
     setRoom('success', 'green', `${first}: At-Risk → On Track`);
     void writeBack(q.learner.id, 'on_track', `Passed ${q.module.code} catch-up quiz with ${result.pct}%`);
     setAgent('success', { status: 'celebrating', thought: `${first} is back on track! ${q.module.code} cleared at ${result.pct}%. LMS status synced.` });
@@ -122,8 +174,8 @@ async function reactInOffice(d: Deliverable<RemedialQuiz>, result: QuizResult, f
       toolCall: { tool: 'lms_adapter.update_student_status', payload: { endpoint: `PATCH /students/${q.learner.id}/status`, studentId: q.learner.id, previousStatus: 'at_risk', newStatus: 'on_track', note: `Cleared ${q.module.code} at ${result.pct}%` } },
     });
     setAgent('learning', { status: 'celebrating', thought: `The ${q.topic} refresher landed. Nice one, ${first}.` });
-    const mail = await sendMail({ to: q.learner.email, toName: q.learner.name, ...resultEmail(q, result, []), link: null, taskId: d.taskId, deliverableId: d.id });
-    log('success', 'email', `Well-done email ${mail.delivery === 'simulated' ? 'placed in the Inbox tab' : 'sent'} to ${q.learner.name}.`, { taskId: d.taskId, deliverableId: d.id });
+    const mail = await sendResult(q, d, resultEmail(q, result, []));
+    log('success', 'email', `Well-done email ${mail === 'held' ? 'waiting for approval in the Inbox' : mail === 'simulated' ? 'placed in the Inbox tab' : 'sent'} for ${q.learner.name}.`, { taskId: d.taskId, deliverableId: d.id });
   } else {
     try { await adapter.updateStudentStatus(q.learner.id, 'intervention', `Scored ${result.pct}% on ${q.module.code} catch-up quiz; next steps sent`); } catch { /* logged above */ }
     setLearner(q.learner.id, { status: 'intervention', lastEvent: `Scored ${result.pct}% · next steps sent · tutor follow-up` });
@@ -132,8 +184,8 @@ async function reactInOffice(d: Deliverable<RemedialQuiz>, result: QuizResult, f
     setAgent('success', { status: 'working', thought: `${first} scored ${result.pct}%, under the ${q.passMark}% pass mark. Not a failure, a signal: sending the missed answers and setting up a tutor catch-up.` });
     log('success', 'info', `${q.learner.name} scored ${result.pct}% on the ${q.module.code} catch-up quiz, below the ${q.passMark}% pass mark. Next steps: the missed answers explained, the lesson again, a 20-minute tutor catch-up, re-check in 7 days.`, { taskId: d.taskId, deliverableId: d.id });
     setAgent('learning', { status: 'working', thought: `Preparing the 20-minute catch-up on ${q.topic} for ${first}.` });
-    const mail = await sendMail({ to: q.learner.email, toName: q.learner.name, ...resultEmail(q, result, missed), link: null, taskId: d.taskId, deliverableId: d.id });
-    log('success', 'email', `Next-steps email ${mail.delivery === 'simulated' ? 'placed in the Inbox tab' : 'sent'} to ${q.learner.name}: ${missed.length} missed question${missed.length === 1 ? '' : 's'} explained, lesson link, tutor catch-up.`, { taskId: d.taskId, deliverableId: d.id });
+    const mail = await sendResult(q, d, resultEmail(q, result, missed));
+    log('success', 'email', `Next-steps email ${mail === 'held' ? 'waiting for approval in the Inbox' : mail === 'simulated' ? 'placed in the Inbox tab' : 'sent'} for ${q.learner.name}: ${missed.length} missed question${missed.length === 1 ? '' : 's'} explained, lesson link, tutor catch-up.`, { taskId: d.taskId, deliverableId: d.id });
     announce('success', `${first} scored ${result.pct}% · next steps emailed, tutor catch-up set up`, 'warn');
   }
   // The plan's last step closes on the learner's own result.

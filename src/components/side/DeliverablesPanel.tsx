@@ -3,13 +3,13 @@
 import type { Deliverable, DeliverableKind, DeliverableStatus } from '@/lib/types';
 import Icon, { type IconName } from '@/components/Icon';
 
-export const KIND_ICON: Record<DeliverableKind, IconName> = { catchup_plan: 'clipboard', remedial_quiz: 'book', checkin_message: 'mail' };
-export const KIND_LABEL: Record<DeliverableKind, string> = { catchup_plan: 'Catch-up plan', remedial_quiz: 'Catch-up quiz', checkin_message: 'Check-in' };
+export const KIND_ICON: Record<DeliverableKind, IconName> = { catchup_plan: 'clipboard', remedial_quiz: 'book', checkin_message: 'mail', agent_message: 'mail' };
+export const KIND_LABEL: Record<DeliverableKind, string> = { catchup_plan: 'Catch-up plan', remedial_quiz: 'Catch-up quiz', checkin_message: 'Check-in', agent_message: 'Agent message' };
 
 export function StatusBadge({ status }: { status: DeliverableStatus }) {
   const map: Record<DeliverableStatus, { cls: string; label: string }> = {
     drafting: { cls: 'badge-mute', label: 'Drafting' }, draft: { cls: 'badge-soft', label: 'Draft' }, under_review: { cls: 'badge-gold', label: 'Under review' },
-    rejected: { cls: 'badge-bad', label: 'Sent back' }, revised: { cls: 'badge-warn', label: 'Revised · resubmitted' }, approved: { cls: 'badge-good', label: 'Approved' }, dispatched: { cls: 'badge-cta', label: 'Sent' },
+    rejected: { cls: 'badge-bad', label: 'Sent back' }, revised: { cls: 'badge-warn', label: 'Revised · resubmitted' }, approved: { cls: 'badge-good', label: 'Approved' }, awaiting_approval: { cls: 'badge-warn', label: 'Awaiting approval' }, dispatched: { cls: 'badge-cta', label: 'Sent' },
   };
   const m = map[status];
   return <span className={`badge ${m.cls}`}><span className="dot" />{m.label}</span>;

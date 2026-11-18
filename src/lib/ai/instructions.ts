@@ -12,7 +12,7 @@ import type { AgentId } from '@/lib/types';
 export const DEFAULT_INSTRUCTIONS: Record<AgentId, string> = {
   planner: 'Prioritise the learners closest to dropping out. Keep every plan to six steps and name who owns each one.',
   success: "Never tell a learner they are 'at risk'. If someone passes their quizzes but goes quiet, reach out personally before sending more work.",
-  learning: 'Use South African examples where they help. Three questions per quiz, all on the exact weak topic, each with an explanation that teaches.',
+  learning: 'Use South African examples where they help. Every test question stays on the exact weak topic and has an explanation that teaches.',
   coo: 'Be strict on topic: a question that drifts from the weak module fails. Be kind in tone and exact in the critique.',
 };
 

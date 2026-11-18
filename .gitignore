@@ -7,3 +7,9 @@ out
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+
+# Windows VPS
+backups
+logs
+deploy/windows/caddy.exe
+deploy/windows/Caddyfile
