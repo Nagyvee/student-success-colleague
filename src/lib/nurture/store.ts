@@ -22,7 +22,8 @@ export interface NurtureMeta {
   /** One-time setup steps already done (so a deleted starter is not re-added). */
   seeded: Record<string, number>;
   /** Scenes made for one hot lead, by record key. */
-  personal?: Record<string, { slides: LessonSlide[]; createdAt: number }>;
+  /** Scenes made for one lead, about one programme (they only play inside that programme's video). */
+  personal?: Record<string, { slides: LessonSlide[]; createdAt: number; programme?: string }>;
 }
 
 export const emptyStats = (): NurtureStats => ({ librarySends: 0, aiSends: 0, aiLines: 0, aiBuilds: 0, opens: 0, clicks: 0, quizzes: 0, videoViews: 0, optOuts: 0 });

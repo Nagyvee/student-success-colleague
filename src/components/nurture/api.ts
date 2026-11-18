@@ -100,6 +100,7 @@ export const AUDIENCE_INFO: Record<string, string> = {
 };
 
 export const CTA_INFO: Record<string, string> = {
+  enrol: 'Yes, I want to enrol (we call them)', call: 'Call me (we call them)',
   quiz: 'Career-fit quiz', video: 'Their programme video', apply: 'Start the application', resource: 'A guide or video from the bank', reply: 'Reply to the email', url: 'A link',
 };
 

@@ -354,7 +354,13 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
       const sheet = await fetchSheet(tab.url);
       if (!tab.mapping || !Object.keys(tab.mapping).length) { tab.mapping = autoMap(sheet.headers); tabsChanged = true; }
       const tabSource: DataSource = { ...source, mapping: tab.mapping };
-      sheet.rows.forEach((row, i) => take(rowToRecord(tabSource, sheet.headers, row, i), i + 2, t + 1));
+      // Which tab a person came from (WhatsApp, TikTok...): kept as an agent field, so it never counts as a change.
+      const label = (tab.label || '').trim();
+      sheet.rows.forEach((row, i) => {
+        const rec = rowToRecord(tabSource, sheet.headers, row, i);
+        if (label) rec.fields.agent_sheet_tab = label;
+        take(rec, i + 2, t + 1);
+      });
     }
     const urls = [source.url, ...tabs.map((x) => x.url)];
     const known = new Set(source.baselined || []);

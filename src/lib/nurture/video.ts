@@ -2,6 +2,7 @@ import type { DataRecord, Lesson, LessonSlide, SlideVisual } from '@/lib/types';
 import type { ProgrammeVideo } from './types';
 import { meta, metaDoc, bumpStat, nid } from './store';
 import { matchProgramme, leadProgramme, programmeList } from './programmes';
+import { leadProfile } from './profile';
 import { bankKnowledge } from './bank';
 import { LEAD_VISUALS, SCENE_ICONS, clampWords, cleanScene, sceneComplete, visualOf } from '@/lib/lessonScene';
 import { generateJSON, isStr, noEmoji, obj } from '@/lib/ai/llm';
@@ -9,6 +10,7 @@ import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { listCustomAgents } from '@/lib/engine/offices';
 import { log } from '@/lib/engine/store';
+import { warmLessonAudio } from '@/lib/media/tts';
 
 /* Programme videos for leads: made once, personal every time.
  *
@@ -95,35 +97,42 @@ export async function buildProgrammeVideo(programme: string): Promise<ProgrammeV
   const known = [ti.academyFocus ? `Programmes: ${ti.academyFocus}` : '', ti.agentKnowledge || '', bankKnowledge(2500)].filter(Boolean).join('\n');
   const today = new Date().toISOString().slice(0, 10);
   let validUntil: number | null = null;
+  let loanPrice: LessonSlide | null = null;
   const ai = await generateJSON<LessonSlide[]>({
-    system: `You are ${name}, an admissions consultant at ${ac.academyName} in South Africa. You script short, documentary-style videos that make someone want to study with us: real photos of our classrooms and people, the facts that matter on screen, and a warm, confident voice. Natural South African English. Never pushy. Facts: only what is written below, quoted exactly (names, NQF levels, SAQA IDs, durations, rand amounts, dates); never invent fees, salaries, statistics, dates or promises. Reply with one JSON object only.`,
+    system: `You are ${name}, an admissions consultant at ${ac.academyName} in South Africa. You script short, documentary-style videos that make someone want to study with us: real photos of our classrooms and people, the facts that matter on screen, and a warm, confident voice. Natural South African English. Never pushy. Facts: only what is written below, quoted exactly (names, NQF levels, durations, rand amounts, dates); never invent fees, salaries, statistics, dates or promises. Never mention class days or class times, SAQA IDs, accreditation numbers or credits; never say people can come to campus any time (campus days at our Rosebank campus are optional) and never mention any other campus or hub; never send people to an application form. The shared scenes are for everyone, so never assume anything about the viewer (their job, age, background, where they live or how they will pay). Reply with one JSON object only.`,
     prompt: `Today is ${today}. Script the shared part of a 3-minute video about ${topic}. A personal greeting by name is added before it for each viewer, so do not greet.
 ${known ? `What you know:\n${known}\n` : ''}
 THE GOLDEN RULE: the screen SHOWS what the voice TELLS. When the voice says a number, a qualification, a price or a job, that exact thing is on screen in that scene. On-screen words are short labels; the voice does the explaining.
 
 Ten scenes, in this order:
 1. "photo" (a real photo of our people fills the screen): the hook. Why this field, why now, why people like them can do it. scene.kicker = "${ac.academyName}", heading = a bold line (max 6 words), scene.caption = one line (max 12 words).
-2. "facts": the programme at a glance. scene.nodes = 3 or 4 tiles, each {"label": the number or short fact (max 3 words, e.g. "NQF 5", "12-18 months", "100% online"), "note": what it means (max 5 words)}.
+2. "facts": the programme at a glance. scene.nodes = 3 or 4 tiles, each {"label": the number or short fact (max 3 words, e.g. "NQF Level 5", "12-18 months", "100% online"), "note": what it means (max 5 words)}. No SAQA IDs or credits.
 3. "flow": what you learn, in order. scene.nodes = 4 or 5 stages, each {"label": a real module or tool from what you know (max 3 words), "icon"}.
-4. "photo": how classes work (live online classes, the days and times, mentors, a class you belong to). kicker, heading (max 6 words), caption (max 12 words).
+4. "photo": how classes work (live online classes, mentors, a class you belong to; optional campus days at our Rosebank campus). No days or times, no other campuses. kicker, heading (max 6 words), caption (max 12 words).
 5. "timeline": the months ahead. scene.nodes = 3 or 4 steps, each {"label": the period (e.g. "Months 1-4"), "note": what happens (max 6 words)}.
 6. "careers": the jobs this path leads to. scene.nodes = 4 to 6 job titles from what you know, each {"label": max 4 words, "icon"}.
 7. "price": what it costs and the current offers. scene.rows = 1 to 3 cards, each {"label": max 4 words (e.g. "Accredited, paid in full"), "was": the standard fee as written (e.g. "R 74 999") or omit, "now": the price they would pay (e.g. "R 37 499" or "R 3 997/month"), "note": the condition and its end date (max 7 words)}. scene.caption = one line about other ways to pay (monthly plans, student loans), max 14 words. Quote amounts exactly as written above.
 8. "photo": the people and the support (mentors, career coach, internship with a hiring partner). kicker, heading, caption.
 9. "recap": scene.nodes = 3 or 4 reasons to choose this path with us, each {"label": max 6 words, "icon"}.
-10. "cta": the next step: take the button below, or reply to the email with a question. Short and warm.
+10. "cta": the next step: tap "Yes, I want to enrol" below and a Student Advisor calls them to set everything up (or reply to the email with a question). Short and warm; never mention an application form.
 Icons: exactly from this list: ${SCENE_ICONS.join(', ')}.
 Every scene: "visual" (exactly one of: photo, facts, flow, timeline, careers, price, recap, cta), "heading" (max 6 words), "scene" (the fields named above), "points": [], "say": narration of 35 to 65 words for the ear (short sentences, contractions, talk about what is on screen; write rand amounts as "R 37 499"; no markdown, no emoji).
 If any scene mentions an offer that ends on a date, set "valid_until" to the earliest such date (YYYY-MM-DD), else null.
 
-JSON: {"valid_until": "YYYY-MM-DD" or null, "slides": [{"visual": "...", "heading": "...", "scene": {...}, "points": [], "say": "..."}]}`,
+Also write "loan_price": one extra "price" scene that replaces scene 7 for viewers who need a student loan (discounts and offers do not apply to them, so never mention them here). scene.rows = 1 or 2 cards {"label": max 4 words, "now": the fee a loan-funded learner pays as written, "note": max 7 words}; scene.caption = the lending partners or the repayment period, max 14 words; "say": how a student loan works for them (the lender pays the academy, they repay over the period written above, what they need to apply, a Student Advisor helps), 35 to 65 words. Only if what you know covers student loans; else null.
+
+JSON: {"valid_until": "YYYY-MM-DD" or null, "slides": [{"visual": "...", "heading": "...", "scene": {...}, "points": [], "say": "..."}], "loan_price": {"visual": "price", ...} or null}`,
     maxTokens: 24000,
     timeoutMs: 120000,
     model: process.env.VIDEO_SCRIPT_MODEL || 'claude-sonnet-5-5',
     effort: 'medium',
     validate: (x) => {
       const slides = parseScenes(x, { min: 6, max: 12, closing: true });
-      if (slides) validUntil = endOfDay(obj(x)?.valid_until);
+      if (slides) {
+        validUntil = endOfDay(obj(x)?.valid_until);
+        const loan = obj(x)?.loan_price ? parseScenes({ slides: [obj(x)!.loan_price] }, { min: 1, max: 1, closing: false })?.[0] : null;
+        loanPrice = loan && loan.visual === 'price' ? loan : null;
+      }
       return slides;
     },
   });
@@ -140,9 +149,14 @@ JSON: {"valid_until": "YYYY-MM-DD" or null, "slides": [{"visual": "...", "headin
     createdAt: Date.now(),
     views: prev?.views || 0,
     validUntil: ai ? validUntil : null,
+    loanPrice: ai ? loanPrice : null,
   };
   m.videos = [video, ...m.videos.filter((v) => v.id !== video.id)].slice(0, MAX_VIDEOS);
   metaDoc.save();
+  // The voice for every shared scene is made now (and the loan version of the price), so no viewer waits for it.
+  warmLessonAudio(currentTenantId(), video.id, video.slides);
+  const priceAt = video.slides.findIndex((s) => s.visual === 'price');
+  if (video.loanPrice && priceAt >= 0) warmLessonAudio(currentTenantId(), video.id, video.slides.map((s, i) => (i === priceAt ? video.loanPrice! : { say: '' })));
   log('system', 'dispatch', `Programme video ready: "${video.title}" (${video.slides.length} scenes${video.viaAi ? '' : ', from the template'})${video.validUntil ? `; it mentions an offer, so it is rewritten after ${new Date(video.validUntil).toISOString().slice(0, 10)}` : ''}. Every lead who opens it is greeted by name.`);
   return video;
 }
@@ -195,7 +209,7 @@ JSON: {"slides": [...]}`,
   bumpStat('aiBuilds');
   const m = meta();
   m.personal ||= {};
-  m.personal[rec.key] = { slides, createdAt: Date.now() };
+  m.personal[rec.key] = { slides, createdAt: Date.now(), programme: leadProgramme(rec.fields) || '' };
   // Keep the newest 300 personal videos.
   const keys = Object.entries(m.personal).sort((a, b) => b[1].createdAt - a[1].createdAt).map(([k]) => k);
   for (const k of keys.slice(300)) delete m.personal[k];
@@ -203,8 +217,14 @@ JSON: {"slides": [...]}`,
   return slides;
 }
 
-export function personalScenes(key: string): LessonSlide[] {
-  return meta().personal?.[key]?.slides || [];
+/** A lead's own scenes, only inside the video for the programme they were made about
+ *  (scenes about Software Development never play inside the Data Science video). */
+export function personalScenes(key: string, programme: string): LessonSlide[] {
+  const p = meta().personal?.[key];
+  if (!p?.slides?.length || !p.programme) return [];
+  const resolve = (x: string) => (matchProgramme(x) || x).toLowerCase();
+  const same = p.programme.toLowerCase() === programme.toLowerCase() || resolve(p.programme) === resolve(programme);
+  return same ? p.slides : [];
 }
 
 /* ── Playing it for one lead ──────────────────────────────────────────────── */
@@ -213,15 +233,18 @@ export function personalScenes(key: string): LessonSlide[] {
 export function greetingFor(rec: Pick<DataRecord, 'name' | 'fields'>, programme: string, tutor: string, academy: string): { slide: LessonSlide; noticed: string[] } {
   const first = (rec.fields.first_name || rec.name).split(/\s+/)[0] || 'there';
   const p = programme && programme !== 'general' ? programme : '';
-  const clicked = (rec.fields.last_clicked || '').replace(/["“”]/g, '').trim();
   const fit = rec.fields.fit_track || '';
+  const funding = leadProfile(rec.fields).funding || '';
+  // Only what their own record says: their programme, their quiz result, how they said they would pay.
   const bits: string[] = [];
   if (p) bits.push(`you're interested in ${p}`);
-  if (fit) bits.push(`your quiz said you're ${fit.replace(/^the /i, 'the ')}`);
-  else if (clicked && !/quiz|video/i.test(clicked)) bits.push(`you had a look at ${clicked}`);
+  if (fit) bits.push(`your quiz said you're ${fit}`);
+  const pay = funding === 'loan' ? ` You also told us you'd need a student loan, so I'll show you how that works.`
+    : funding === 'family' ? ` You mentioned your family would help with the fees, so I'll show you the options.`
+      : '';
   const noticed = bits.length ? `I noticed ${bits.join(', and ')}, so` : 'You asked about studying with us, so';
-  const say = `Hey ${first}, how are you? I'm ${tutor} from ${academy}. ${noticed} I made this short video just for you. Let me show you what it's really like.`;
-  const chips = [p, fit, rec.fields.source ? `via ${rec.fields.source}` : ''].filter(Boolean).slice(0, 3);
+  const say = `Hey ${first}, how are you? I'm ${tutor} from ${academy}. ${noticed} I made this short video just for you.${pay} Let me show you what it's really like.`;
+  const chips = [p, fit, funding === 'loan' ? 'Student loan' : ''].filter(Boolean).slice(0, 3);
   return { slide: { visual: 'greeting', heading: `Hey ${first}`, points: [], say }, noticed: chips };
 }
 
@@ -230,9 +253,12 @@ export function lessonForLead(video: ProgrammeVideo, rec: Pick<DataRecord, 'key'
   const ac = getAcademyContext();
   const programme = video.programme === 'general' ? leadProgramme(rec.fields) || 'general' : video.programme;
   const g = greetingFor(rec, programme, video.tutorName, ac.academyName);
-  const mine = personalScenes(rec.key);
+  const mine = personalScenes(rec.key, programme);
+  // A lead who needs a student loan sees the loan version of the price (the offers do not apply to them).
+  const loan = leadProfile(rec.fields).funding === 'loan' && video.loanPrice;
+  const shared = loan ? video.slides.map((s) => (s.visual === 'price' ? video.loanPrice! : s)) : video.slides;
   return {
-    lesson: { title: mine.length ? `A video for ${(rec.fields.first_name || rec.name).split(/\s+/)[0]}` : video.title, slides: [g.slide, ...mine, ...video.slides], viaAi: video.viaAi, greeting: g.slide.say, tutorName: video.tutorName, academyName: ac.academyName },
+    lesson: { title: mine.length ? `A video for ${(rec.fields.first_name || rec.name).split(/\s+/)[0]}` : video.title, slides: [g.slide, ...mine, ...shared], viaAi: video.viaAi, greeting: g.slide.say, tutorName: video.tutorName, academyName: ac.academyName },
     noticed: g.noticed,
     personal: mine.length,
   };

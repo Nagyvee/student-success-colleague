@@ -105,6 +105,13 @@ async function bootTenant(tid: string) {
   });
   // Photos for the videos, resized once the server is up (the first viewer never waits for a 10 MB original).
   setTimeout(() => { void withTenant(tid, () => import('@/lib/nurture/media').then((m) => m.warmPhotos(tid))).catch(() => {}); }, 20_000);
+  // The voice for every programme video (cached on disk: only missing scenes are made).
+  setTimeout(() => {
+    void withTenant(tid, async () => {
+      const [{ listVideos }, { warmLessonAudio }] = await Promise.all([import('@/lib/nurture/video'), import('@/lib/media/tts')]);
+      for (const v of listVideos()) warmLessonAudio(tid, v.id, v.slides);
+    }).catch(() => {});
+  }, 30_000);
 }
 
 /** Resolves once every workspace has been loaded (APIs wait for it before changing structure). */

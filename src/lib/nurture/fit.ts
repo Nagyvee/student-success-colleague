@@ -118,6 +118,20 @@ export function ensureFitQuiz(): FitQuiz | null {
   return q;
 }
 
+/** What a result page shows beyond the name: strengths, the jobs the path leads to, one free thing to try this week. */
+export interface TrackExtras { strengths: string[]; careers: string[]; tryThis: string }
+
+const EXTRAS: { test: RegExp; x: TrackExtras }[] = [
+  { test: /\b(ai|artificial|machine learning|ml)\b/i, x: { strengths: ['Curious about what comes next', 'Comfortable with new ideas', 'Thinks in possibilities'], careers: ['ML Engineer', 'AI Developer', 'Data Scientist', 'MLOps Engineer', 'AI Solutions Consultant'], tryThis: 'Ask an AI chatbot how it learned what it knows, then ask it what it often gets wrong. Notice how it answers.' } },
+  { test: /cyber|security|network/i, x: { strengths: ['Notices details others miss', 'Calm when something goes wrong', 'Thinks like an attacker, acts like a guardian'], careers: ['SOC Analyst', 'Network Security Engineer', 'Penetration Tester', 'Incident Response Analyst', 'GRC Consultant'], tryThis: 'Switch on two-step verification for your email and WhatsApp today. It is the first thing every security analyst does.' } },
+  { test: /data|analytic|science|\bbi\b/i, x: { strengths: ['Loves a good puzzle', 'Asks "why?" until it makes sense', 'Sees patterns in the noise'], careers: ['Data Analyst', 'Data Scientist', 'BI Developer', 'Reporting Specialist', 'Junior ML Engineer'], tryThis: 'Track your spending for one week in a spreadsheet, then make one chart from it. What surprised you?' } },
+  { test: /software|web|develop|program|coding|engineer|app/i, x: { strengths: ['Turns ideas into real things', 'Learns best by doing', 'Enjoys seeing it work'], careers: ['Junior Software Developer', 'Full-Stack Developer', 'Business Analyst', 'Integration Engineer'], tryThis: 'Make a one-page website about yourself with a free beginner HTML lesson on YouTube. It takes an evening.' } },
+];
+
+export function trackExtras(t: Pick<FitTrack, 'programme'>): TrackExtras {
+  return EXTRAS.find((e) => e.test.test(t.programme))?.x || { strengths: ['Curious', 'Willing to learn', 'Ready for a challenge'], careers: [], tryThis: 'Spend 20 minutes a day this week learning something new in tech, and write down what you enjoyed most.' };
+}
+
 /** Answers → the track that fits best (ties go to the first track). */
 export function scoreFit(quiz: FitQuiz, answers: Record<string, number>): { track: FitTrack; scores: Record<string, number> } {
   const scores: Record<string, number> = Object.fromEntries(quiz.tracks.map((t) => [t.id, 0]));
@@ -140,6 +154,7 @@ export async function submitFit(p: TrackPayload, answers: Record<string, number>
   setRecordField(p.s, p.k, 'fit_programme', track.programme);
   setRecordField(p.s, p.k, 'fit_done', 'yes');
   setRecordField(p.s, p.k, 'fit_at', new Date().toISOString());
+  setRecordField(p.s, p.k, 'fit_scores', JSON.stringify(scores));
   await noteEngagement(p, 'quiz', `${track.name} → ${track.programme}`);
   return { track, scores, first: (rec.fields.first_name || rec.name).split(/\s+/)[0] };
 }

@@ -71,8 +71,10 @@ export interface NurtureResource {
 /* ── The message library ──────────────────────────────────────────────────── */
 
 /** Where the main button in a message goes. */
-export type CtaTarget = 'apply' | 'quiz' | 'video' | 'resource' | 'reply' | 'url';
+export type CtaTarget = 'enrol' | 'call' | 'apply' | 'quiz' | 'video' | 'resource' | 'reply' | 'url';
 export const CTA_LABEL: Record<CtaTarget, string> = {
+  enrol: 'Yes, I want to enrol (a Student Advisor calls them)',
+  call: 'Call me (a Student Advisor calls them)',
   apply: 'Start the application',
   quiz: 'Career-fit quiz',
   video: 'Their personal programme video',
@@ -183,6 +185,8 @@ export interface ProgrammeVideo {
   views: number;
   /** The script mentions an offer that ends on this day: the video is rewritten after it. */
   validUntil?: number | null;
+  /** The price scene for viewers who need a student loan (offers do not apply to them): it replaces "price" for them. */
+  loanPrice?: LessonSlide | null;
 }
 
 /* ── Counters: how much of the nurturing AI actually wrote ────────────────── */

@@ -70,6 +70,7 @@ function emptyIntegrations(): TenantIntegrations {
     testRecipientEmail: '',
     onboardingCompleted: true,
     escalations: {},
+    handoff: {},
   };
 }
 
@@ -201,7 +202,7 @@ export default function WorkspaceClient() {
   }
 
   async function runTest(
-    kind: 'moodle' | 'sheet' | 'smtp' | 'whatsapp' | 'manychat' | 'postgres',
+    kind: 'moodle' | 'sheet' | 'smtp' | 'whatsapp' | 'manychat' | 'postgres' | 'discord' | 'dialer',
   ) {
     setBusy(`test-${kind}`);
     setNotice(null);
@@ -1011,6 +1012,81 @@ export default function WorkspaceClient() {
               onClick={() => runTest('smtp')}
             >
               {busy === 'test-smtp' ? 'Sending...' : 'Verify SMTP'}
+            </button>
+          </div>
+        </section>
+
+        {/* Qualified leads → the sales team */}
+        <section className="pg-card">
+          <div className="pg-card-h">
+            <div>
+              <h2>
+                <Icon name="phone" size={16} /> Qualified leads: Discord and the dialer
+              </h2>
+              <p className="pg-sub">
+                When a lead says yes (taps &ldquo;Yes, I want to enrol&rdquo; or &ldquo;Call me&rdquo;, or replies that they want to sign up) or reaches 8 points,
+                Thuso posts a &ldquo;call now&rdquo; card in your Discord channel and adds them to the dialer as a new lead, with a brief in the notes:
+                where they came from, what they want, how they would pay and what they did.
+              </p>
+            </div>
+            {renderTestStatus('discord')}
+            {renderTestStatus('dialer')}
+          </div>
+          <div className="pg-grid">
+            <label className="field" style={{ gridColumn: '1 / -1' }}>
+              <span>Discord webhook (Server settings → Integrations → Webhooks → New webhook → Copy webhook URL)</span>
+              <input
+                type="password"
+                value={form.handoff?.discordWebhook || ''}
+                onChange={(e) => updateField('handoff', { ...(form.handoff || {}), discordWebhook: e.target.value })}
+                placeholder="https://discord.com/api/webhooks/…"
+                autoComplete="off"
+              />
+            </label>
+            <label className="field">
+              <span>Dialer address</span>
+              <input
+                type="url"
+                value={form.handoff?.dialerUrl || ''}
+                onChange={(e) => updateField('handoff', { ...(form.handoff || {}), dialerUrl: e.target.value })}
+                placeholder="https://dialer.melsoft.org"
+              />
+            </label>
+            <label className="field">
+              <span>Dialer API key (scope: create leads)</span>
+              <input
+                type="password"
+                value={form.handoff?.dialerKey || ''}
+                onChange={(e) => updateField('handoff', { ...(form.handoff || {}), dialerKey: e.target.value })}
+                placeholder="zad_…"
+                autoComplete="off"
+              />
+            </label>
+            <label className="field toggle-field" style={{ gridColumn: '1 / -1' }}>
+              <span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.handoff?.dialerOn)}
+                  onChange={(e) => updateField('handoff', { ...(form.handoff || {}), dialerOn: e.target.checked })}
+                />{' '}
+                Send qualified leads to the dialer (the dialer calls them, so this also waits for Live Outreach; Discord only reaches your team)
+              </span>
+            </label>
+          </div>
+          <div className="pg-actions">
+            <button
+              type="button"
+              className="btn primary sm"
+              disabled={busy === 'Qualified leads'}
+              onClick={() => saveIntegrations({ handoff: form.handoff || {} }, 'Qualified leads')}
+            >
+              Save
+            </button>
+            <button type="button" className="btn ghost sm" disabled={busy === 'test-discord'} onClick={() => runTest('discord')}>
+              {busy === 'test-discord' ? 'Posting…' : 'Send a test to Discord'}
+            </button>
+            <button type="button" className="btn ghost sm" disabled={busy === 'test-dialer'} onClick={() => runTest('dialer')}>
+              {busy === 'test-dialer' ? 'Checking…' : 'Check the dialer'}
             </button>
           </div>
         </section>

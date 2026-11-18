@@ -10,6 +10,7 @@ import { writeBack } from '@/lib/lms/sheet';
 import { markFollowUpRecovered } from '@/lib/engine/followups';
 import { recordLmsEvent, recordQuizOutcome } from '@/lib/db/postgres';
 import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
+import { currentTenantId } from '@/lib/auth/tenantContext';
 
 /* The student's side of the loop.
  *
@@ -60,6 +61,7 @@ export function publicQuizView(d: Deliverable<RemedialQuiz>) {
     lesson: q.lesson ? { ...q.lesson, academyName: q.lesson.academyName || ac.academyName, questionCount: q.questions.length, passMark: q.passMark } : null,
     academyName: ac.academyName,
     brand: lessonBrand(ac.academyName),
+    logo: getTenantIntegrations(currentTenantId()).building?.logoUrl ? `/api/brand/${currentTenantId()}/logo` : null,
     footage: q.lesson ? footageFor(q.lesson.slides, q.module.title, 'lesson') : [],
     music: musicFor(),
     localizedSummary: q.localizedSummary || null,

@@ -8,11 +8,11 @@ import { liveFields } from '@/lib/data/sources';
 import { getState } from '@/lib/engine/store';
 import { lessonBrand } from '@/lib/engine/quiz';
 import { readTrack, signTrack, trackUrl } from '@/lib/nurture/track';
-import { ensureFitQuiz, submitFit } from '@/lib/nurture/fit';
+import { ensureFitQuiz, submitFit, trackExtras } from '@/lib/nurture/fit';
 import { countView, lessonForLead, videoFor } from '@/lib/nurture/video';
 import { leadProgramme } from '@/lib/nurture/programmes';
 import { noteEngagement } from '@/lib/nurture/track';
-import { slideAudio, ttsProvider } from '@/lib/media/tts';
+import { slideAudio, ttsProvider, warmLessonAudio } from '@/lib/media/tts';
 import { claimShared, dateText, findVoucher, getOffer, valueText } from '@/lib/nurture/vouchers';
 import { programmeList } from '@/lib/nurture/programmes';
 import { footageFor, musicFor } from '@/lib/nurture/media';
@@ -42,10 +42,21 @@ function linkFor(p: TrackPayload, x: TrackPayload['x']): string {
   return trackUrl(getState().caps.baseUrl, { ...p, x, r: undefined, u: undefined, m: p.m });
 }
 
+/** "melsoftacademy.com", for the scorecard's footer (from the application link). */
+function siteOf(tenantId: string): string {
+  try { return new URL(getTenantIntegrations(tenantId).applyUrl || '').host.replace(/^www\./, ''); } catch { return ''; }
+}
+
+/** The academy's logo for its public pages (white on the dark video and quiz). */
+function logoFor(tenantId: string): string | null {
+  return getTenantIntegrations(tenantId).building?.logoUrl ? `/api/brand/${tenantId}/logo` : null;
+}
+
 function nextSteps(p: TrackPayload) {
-  const apply = (getTenantIntegrations(p.t).applyUrl || '').trim();
   return {
-    apply: { href: linkFor(p, 'apply'), label: apply ? 'Start my application' : 'Help me apply' },
+    // The next step is never a form: they say yes and a Student Advisor calls them.
+    apply: { href: linkFor(p, 'enrol'), label: 'Yes, I want to enrol' },
+    call: { href: linkFor(p, 'call'), label: 'Call me first' },
     video: { href: linkFor(p, 'video'), label: 'Watch my video' },
     quiz: { href: linkFor(p, 'quiz'), label: 'Find my tech fit' },
   };
@@ -75,6 +86,7 @@ async function voucherView(code: string) {
       code: v.code, state, value: valueText(o), appliesTo: o.appliesTo, expires: dateText(v.expiresAt), shareable: o.shareable,
       from: v.leadName.split(/\s+/)[0], academy: ac.academyName, brand: lessonBrand(ac.academyName), programmes: programmeList(),
       applyUrl: (getTenantIntegrations(tid).applyUrl || '').trim() || null,
+      logo: logoFor(tid),
     });
   });
 }
@@ -94,9 +106,10 @@ export async function GET(req: Request) {
       const quiz = ensureFitQuiz();
       if (!quiz) return NextResponse.json({ error: 'The quiz is not ready yet.' }, { status: 404 });
       return NextResponse.json({
-        first, academy: ac.academyName, brand: lessonBrand(ac.academyName),
-        quiz: { title: quiz.title, intro: quiz.intro, questions: quiz.questions, tracks: quiz.tracks },
-        done: f.fit_done === 'yes' ? { track: f.fit_track, programme: f.fit_programme } : null,
+        first, academy: ac.academyName, brand: lessonBrand(ac.academyName), logo: logoFor(p.t),
+        quiz: { title: quiz.title, intro: quiz.intro, questions: quiz.questions, tracks: quiz.tracks.map((t) => ({ ...t, ...trackExtras(t) })) },
+        done: f.fit_done === 'yes' ? { track: f.fit_track, programme: f.fit_programme, scores: (() => { try { return JSON.parse(f.fit_scores || 'null'); } catch { return null; } })() } : null,
+        site: siteOf(p.t),
         next: nextSteps(p),
       });
     }
@@ -105,19 +118,22 @@ export async function GET(req: Request) {
     const video = videoFor(programme);
     if (url.searchParams.get('watch')) {
       if (!video) return NextResponse.json({ error: 'Your video is still being made. Try again in a few minutes.' }, { status: 404 });
-      const { lesson, noticed } = lessonForLead(video, rec);
+      const { lesson, noticed, personal } = lessonForLead(video, rec);
       const next = nextSteps(p);
+      // Their greeting (and any scenes made for them) is voiced now, while the page opens: no wait after they tap play.
+      warmLessonAudio(p.t, `${video.id}_${rec.key.replace(/[^a-z0-9]/gi, '').slice(0, 30)}`, lesson.slides.slice(0, personal + 1));
+      warmLessonAudio(p.t, video.id, video.slides.slice(0, 2));
       const quizDone = f.fit_done === 'yes';
       return NextResponse.json({
         learner: { name: rec.name },
         module: { code: video.programme === 'general' ? 'Tech' : video.programme, title: video.title },
         topic: video.programme === 'general' ? (programme === 'general' ? 'tech' : programme) : video.programme,
-        passMark: 0, questions: [], lesson, academyName: ac.academyName, evidence: null, brand: lessonBrand(ac.academyName),
+        passMark: 0, questions: [], lesson, academyName: ac.academyName, evidence: null, brand: lessonBrand(ac.academyName), logo: logoFor(p.t),
         noticed,
         presenter: { label: 'Admissions' },
         cta: quizDone ? next.apply : next.quiz,
         skip: quizDone ? next.apply : next.quiz,
-        ctaTiles: quizDone ? [['5 min', 'to apply'], ['Live', 'classes'], ['1:1', 'support']] : [['2 min', 'fit quiz'], ['6', 'questions'], ['0', 'wrong answers']],
+        ctaTiles: quizDone ? [['10 min', 'call with an advisor'], ['Live', 'classes'], ['1:1', 'support']] : [['2 min', 'fit quiz'], ['6', 'questions'], ['0', 'wrong answers']],
         ctaKicker: `Your next step, ${first}`,
         footage: footageFor(lesson.slides, video.programme === 'general' ? programme : video.programme, 'lead'),
         music: musicFor(),
@@ -170,6 +186,6 @@ export async function POST(req: Request) {
     const r = await submitFit(p, answers);
     if (!r) return NextResponse.json({ error: 'We could not save that. Reply to our email and we will help.' }, { status: 404 });
     // Their video link now knows their programme.
-    return NextResponse.json({ ok: true, track: r.track, scores: r.scores, first: r.first, next: nextSteps({ ...p, m: p.m }), token: signTrack(p) });
+    return NextResponse.json({ ok: true, track: { ...r.track, ...trackExtras(r.track) }, scores: r.scores, first: r.first, next: nextSteps({ ...p, m: p.m }), token: signTrack(p) });
   });
 }

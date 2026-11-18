@@ -11,7 +11,7 @@ import '../../fit/fit.css';
 
 interface View {
   code: string; state: 'valid' | 'used' | 'ended'; value: string; appliesTo: string; expires: string; shareable: boolean;
-  from: string; academy: string; brand: { base: string; deep: string; accent: string }; programmes: string[]; applyUrl: string | null;
+  from: string; academy: string; brand: { base: string; deep: string; accent: string }; programmes: string[]; applyUrl: string | null; logo?: string | null;
 }
 
 export default function VoucherClient({ code }: { code: string }) {
@@ -50,7 +50,7 @@ export default function VoucherClient({ code }: { code: string }) {
   const style = { ['--base' as string]: brand.base, ['--deep' as string]: brand.deep, ['--a' as string]: brand.accent };
   return (
     <div className="fit-page" style={style}>
-      <header className="fit-top"><b>{v?.academy || ''}</b><span>Voucher</span></header>
+      <header className="fit-top">{v?.logo ? <img className="fit-logo" src={`${v.logo}?tone=white`} alt={v.academy} /> : <b>{v?.academy || ''}</b>}<span>Voucher</span></header>
       <main className="fit-main">
         {!v && !err && <div className="fit-card fit-loading"><span className="fit-spin" aria-hidden="true" />Loading…</div>}
         {!v && err && <div className="fit-card"><h1>Voucher not found</h1><p>{err}</p></div>}

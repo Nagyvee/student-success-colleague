@@ -15,7 +15,7 @@ import { bankDoc, bumpStat, libraryDoc } from './store';
  * quiz and the video most. The score decides how warm a lead is, and a lead
  * turning hot starts the agents that give them personal attention. */
 
-const TARGETS = new Set(['apply', 'quiz', 'video', 'resource', 'reply', 'url', 'open', 'unsub', 'res']);
+const TARGETS = new Set(['enrol', 'call', 'apply', 'quiz', 'video', 'resource', 'reply', 'url', 'open', 'unsub', 'res']);
 
 export function signTrack(p: TrackPayload): string {
   const body = Buffer.from(JSON.stringify(p)).toString('base64url');
@@ -138,6 +138,12 @@ export async function noteEngagement(p: TrackPayload, kind: EngagementKind, deta
   if (kind !== 'open') {
     const what = kind === 'quiz' ? 'took the career-fit quiz' : kind === 'video' ? 'watched their programme video' : kind === 'reply' ? 'replied' : `opened ${detail ? `"${detail}"` : 'a link'}`;
     log('system', 'lms', `${rec.name} ${what}.${after !== before ? ` ${first} is now a ${after} lead.` : ''}`);
+  }
+
+  // 8 points and up: a qualified lead (the team hears on Discord, the dialer gets them with a brief).
+  if (after === 'hot' && before !== 'hot') {
+    const { qualifyLead } = await import('./qualify');
+    await qualifyLead(p.s, p.k, { reason: 'hot', detail: detail || undefined }).catch((e) => console.warn('[thuso] qualify failed:', (e as Error).message));
   }
 
   // Agents react to a lead warming up (record.changed on "engagement").

@@ -205,7 +205,7 @@ export async function POST(req: Request) {
           const brief = String(body.brief || '').trim();
           if (brief.length < 8) return bad('Tell the writer what the message is for, in a sentence.');
           const exp = typeof body.expiresAt === 'number' && body.expiresAt > Date.now() ? body.expiresAt : null;
-          const cta = typeof body.cta === 'string' && ['apply', 'quiz', 'video', 'resource', 'reply', 'url'].includes(body.cta) ? (body.cta as CtaTarget) : undefined;
+          const cta = typeof body.cta === 'string' && ['enrol', 'call', 'apply', 'quiz', 'video', 'resource', 'reply', 'url'].includes(body.cta) ? (body.cta as CtaTarget) : undefined;
           const m = await writeLibraryMessage({ brief, stage: stage(body.stage), audience: audience(body.audience), programme: typeof body.programme === 'string' ? body.programme : '', channel: channel(body.channel), cta, expiresAt: exp });
           return NextResponse.json({ ok: true, message: m });
         }

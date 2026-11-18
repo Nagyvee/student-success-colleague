@@ -22,6 +22,7 @@ interface PublicQuiz {
   resources?: { label: string; url: string; kind: 'read' | 'watch' }[];
   lesson?: { title: string; slides: { say: string }[]; tutorName?: string } | null;
   academyName?: string;
+  logo?: string | null;
   evidence?: { scorePct: number | null; missedTopics: string[] } | null;
   result: { score: number; total: number; pct: number; passed: boolean; answers: number[] } | null;
 }
@@ -62,7 +63,7 @@ export default function QuizPage({ quizId }: { quizId: string }) {
   return (
     <div className="qp mt-page">
       <header className="qp-top">
-        <b className="vl-academy">{quiz?.academyName || 'Your academy'}</b>
+        {quiz?.logo ? <img className="vl-logo" src={`${quiz.logo}?tone=white`} alt={quiz.academyName || ''} /> : <b className="vl-academy">{quiz?.academyName || 'Your academy'}</b>}
         <span className="mini" style={{ color: 'rgba(255,255,255,.7)' }}>Your study pack</span>
       </header>
       <main className="qp-wrap">

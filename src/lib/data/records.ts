@@ -55,7 +55,19 @@ export function recordKey(input: { email?: string; id?: string; row?: number }):
 export interface UpsertResult { record: DataRecord; created: boolean; changed: string[] }
 
 /** Insert or update a record. Agent-written fields survive a sheet re-read. */
+/** Agent fields the sheet reader adds (agent_sheet_tab) are also kept under their plain name, as setRecordField does. */
+function withAliases(fields: Record<string, string>): Record<string, string> {
+  const out = { ...fields };
+  for (const [k, v] of Object.entries(fields)) {
+    if (!k.startsWith(AGENT_FIELD_PREFIX)) continue;
+    const alias = k.slice(AGENT_FIELD_PREFIX.length);
+    if (!(alias in out)) out[alias] = v;
+  }
+  return out;
+}
+
 export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId' | 'firstSeenAt' | 'updatedAt'>): UpsertResult {
+  input = { ...input, fields: withAliases(input.fields) };
   const all = doc.get();
   const bucket = (all[sourceId] ||= {});
   const prev = bucket[input.key];
@@ -83,7 +95,15 @@ export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId
   if (prev.name !== input.name) changed.push('name');
   if (prev.email !== input.email) changed.push('email');
   if (prev.phone !== input.phone) changed.push('phone');
-  if (!changed.length) return { record: prev, created: false, changed };
+  if (!changed.length) {
+    // Only agent fields differ (e.g. which tab they came from): keep them, quietly.
+    const quiet = Object.entries(input.fields).filter(([k, v]) => k.startsWith(AGENT_FIELD_PREFIX) && prev.fields[k] !== v);
+    if (quiet.length) {
+      for (const [k, v] of quiet) { prev.fields[k] = v; prev.fields[k.slice(AGENT_FIELD_PREFIX.length)] ??= v; }
+      doc.save();
+    }
+    return { record: prev, created: false, changed };
+  }
   const record: DataRecord = { ...prev, ...input, fields, sourceId, updatedAt: now };
   bucket[input.key] = record;
   doc.save();

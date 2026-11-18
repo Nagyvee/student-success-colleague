@@ -360,6 +360,18 @@ export function getMaskedIntegrations(tenantId = currentTenantId()): TenantInteg
     smtpPass: mask(c.smtpPass),
     whatsappToken: mask(c.whatsappToken),
     manychatApiKey: mask(c.manychatApiKey),
+    handoff: c.handoff ? { ...c.handoff, discordWebhook: mask(c.handoff.discordWebhook), dialerKey: mask(c.handoff.dialerKey) } : c.handoff,
+  };
+}
+
+function mergeHandoff(next: TenantIntegrations['handoff'], prev: TenantIntegrations['handoff']): TenantIntegrations['handoff'] {
+  if (!next) return prev;
+  const p = prev || {};
+  return {
+    discordWebhook: mergeSecret(next.discordWebhook, p.discordWebhook),
+    dialerUrl: next.dialerUrl !== undefined ? next.dialerUrl.trim().replace(/\/$/, '') : p.dialerUrl,
+    dialerKey: mergeSecret(next.dialerKey, p.dialerKey),
+    dialerOn: typeof next.dialerOn === 'boolean' ? next.dialerOn : p.dialerOn,
   };
 }
 
@@ -426,6 +438,7 @@ export function updateTenantIntegrations(tenantId: string, patch: Partial<Tenant
     agentKnowledge: patch.agentKnowledge !== undefined ? patch.agentKnowledge.trim().slice(0, 20000) : prev.agentKnowledge,
     applyUrl: patch.applyUrl !== undefined ? patch.applyUrl.trim() : prev.applyUrl,
     escalations: patch.escalations !== undefined ? cleanRoutes(patch.escalations) : prev.escalations,
+    handoff: mergeHandoff(patch.handoff, prev.handoff),
   };
   t.integrations = next;
   saveAuth(t);

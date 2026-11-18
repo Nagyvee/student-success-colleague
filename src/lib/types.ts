@@ -444,6 +444,8 @@ export interface TenantIntegrations {
   applyUrl?: string;
   /** Who gets each kind of escalation (comma-separated emails); unset kinds go to managerEmail. */
   escalations?: Partial<Record<'admissions' | 'support' | 'academic' | 'placement' | 'finance' | 'reports', string>>;
+  /** Qualified leads go to the sales team: a Discord channel and the dialer. */
+  handoff?: { discordWebhook?: string; dialerUrl?: string; dialerKey?: string; dialerOn?: boolean };
 }
 
 export interface TenantSummary {

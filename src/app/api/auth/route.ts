@@ -234,6 +234,18 @@ export async function POST(req: Request) {
         const res = await testDbConnection();
         return NextResponse.json(res);
       }
+      if (kind === 'discord' || kind === 'dialer') {
+        const { getTenantIntegrations } = await import('@/lib/auth/accounts');
+        const real = getTenantIntegrations(tid).handoff || {};
+        const d = draft.handoff || {};
+        const secret = (v: string | undefined, saved: string | undefined) => (v && !v.startsWith('••••') ? v : saved || '');
+        const { testDialer, testDiscord } = await import('@/lib/nurture/qualify');
+        if (kind === 'discord') {
+          const hook = secret(d.discordWebhook, real.discordWebhook);
+          return NextResponse.json(hook ? await testDiscord(hook) : { ok: false, error: 'Paste the Discord webhook address first.' });
+        }
+        return NextResponse.json(await testDialer(d.dialerUrl ?? real.dialerUrl ?? '', secret(d.dialerKey, real.dialerKey)));
+      }
       return NextResponse.json({ ok: false, error: `Unknown connection kind "${kind}".` }, { status: 400 });
     });
   }

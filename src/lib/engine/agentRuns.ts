@@ -427,6 +427,12 @@ async function stepOnce(run: AgentRun, tenantId: string): Promise<boolean> {
       run.vars[field] = value;
       const wrote = rec ? await writeBackField(src, rec, field, value) : false;
       addLog(run, step, 'ok', `Set ${field} to "${value}"${wrote ? ' and wrote it to the sheet' : ''}.`);
+      // A lead marked ready to sign up is qualified: the team hears on Discord and the dialer gets them.
+      if (rec && run.record.sourceId && field === 'status' && /^ready to (apply|enrol|sign up)$/i.test(value)) {
+        const { qualifyLead } = await import('@/lib/nurture/qualify');
+        const q = await qualifyLead(run.record.sourceId, run.record.key, { reason: 'ready', note: (run.vars.last_reply || rec.fields.last_reply || '').slice(0, 400) || undefined, keepRunId: run.id }, tenantId);
+        if (q && !q.alreadyQualified) addLog(run, step, 'ok', `Qualified and handed to the sales team (Discord: ${q.discord}; dialer: ${q.dialer}).`);
+      }
       run.cursor = next();
       return true;
     }
@@ -800,16 +806,14 @@ async function sendHeldLibrary(run: AgentRun, held: NonNullable<CheckInMessage['
 async function doVideo(run: AgentRun, step: AgentStep) {
   const rec = run.record.sourceId ? getRecord(run.record.sourceId, run.record.key) : null;
   if (!rec) { addLog(run, step, 'fail', 'A personal video is for a person on a list (a lead).'); return; }
-  const { buildPersonalScenes, videoFor } = await import('@/lib/nurture/video');
+  // The programme video, reused: their greeting (name, programme, quiz result, how they pay) comes from their record.
+  // No AI scenes per lead: nothing to pay for, and nothing it could get wrong about them.
+  const { videoFor } = await import('@/lib/nurture/video');
   const { leadProgramme } = await import('@/lib/nurture/programmes');
-  const extra = [step.instructions ? `Focus: ${step.instructions}` : '', conversationText(rec)].filter(Boolean).join('\n');
-  const slides = await buildPersonalScenes({ ...rec, fields: { ...rec.fields, ...run.vars } }, extra);
   const base = videoFor(leadProgramme(rec.fields) || 'general');
-  if (!slides && !base) { addLog(run, step, 'skip', 'No video this time: there is no programme video yet (Lead Nurturing → Quiz & videos), so the next message goes without one.'); return; }
+  if (!base) { addLog(run, step, 'skip', 'No video this time: there is no programme video yet (Lead Nurturing → Quiz & videos), so the next message goes without one.'); return; }
   run.vars._video = 'yes';
-  addLog(run, step, 'ok', slides
-    ? `Made ${run.record.name.split(/\s+/)[0]} a personal video: ${slides.map((x) => `"${x.heading}"`).join(', ')}, then ${base ? base.title : 'their programme'}. The next message links to it.`
-    : `Could not write the personal scenes, so ${run.record.name.split(/\s+/)[0]} gets their programme video with a personal greeting. The next message links to it.`);
+  addLog(run, step, 'ok', `${run.record.name.split(/\s+/)[0]} gets "${base.title}" with a greeting made from their record. The next message links to it.`);
 }
 
 /* ── Lessons, calls, the team ─────────────────────────────────────────────── */
@@ -909,11 +913,11 @@ export function stopRun(runId: string): boolean {
 }
 
 /** Stop every active run about one person (they unsubscribed, or a person said so). */
-export function stopRunsFor(email: string, key: string, why: string): number {
+export function stopRunsFor(email: string, key: string, why: string, exceptRunId?: string): number {
   const e = email.trim().toLowerCase();
   let n = 0;
   for (const r of doc.get()) {
-    if (!ACTIVE.includes(r.status)) continue;
+    if (!ACTIVE.includes(r.status) || r.id === exceptRunId) continue;
     if (!((e && r.record.email.toLowerCase() === e) || r.record.key === key)) continue;
     addLog(r, null, 'info', why);
     finish(r, 'stopped', 'Stopped.');

@@ -3,7 +3,7 @@ import type { NurtureMessage, NurtureStage } from './types';
 import { libraryDoc } from './store';
 import { renderForLead, writePersonalLine, leadEmailExtras, offerMessage } from './library';
 import { issueVoucher, listOffers, offerLive } from './vouchers';
-import { buildPersonalScenes, buildProgrammeVideo, videoFor } from './video';
+import { buildProgrammeVideo, videoFor } from './video';
 import { programmeList } from './programmes';
 import { signTrack } from './track';
 import { getRecord, upsertRecord } from '@/lib/data/records';
@@ -75,12 +75,12 @@ export async function buildSampleJourney(input: { userId: string; name: string; 
   }
 
   // 5: when they turn hot, Zinhle makes them a video and writes to them herself.
-  const scenes = await buildPersonalScenes(rec, '');
+  const scenes = null; // videos are reused: the greeting comes from their record, no AI scenes per lead
   const noteStep = ZINHLE_STEPS().find((x) => x.kind === 'ai_message')!;
   const draft = await writeMessage({
     agent: { name: zinhle?.name || 'Zinhle', title: zinhle?.title || 'Admissions Consultant', persona: zinhle?.persona || '', instructions: zinhle?.instructions || '' },
     department: { name: 'Admissions', kind: 'admissions' },
-    fields: { ...liveFields(rec), lead_brief: 'Wants to move into tech while working full time; worried about evening classes and how paying works.' },
+    fields: { ...liveFields(rec), lead_brief: [`Interested in ${rec.fields.programme || 'tech'}`, rec.fields.fit_track ? `quiz result: ${rec.fields.fit_track}` : ''].filter(Boolean).join('; ') },
     history: [],
   }, noteStep);
   const extras = leadEmailExtras(rec, 'sample', { video: true });

@@ -33,6 +33,8 @@ interface View {
   evidence?: { scorePct: number | null; missedTopics: string[] } | null;
   /** The academy's colours: navy base, a deep second colour, one accent. */
   brand?: { base: string; deep: string; accent: string };
+  /** The academy's logo (shown in white on the dark player). */
+  logo?: string | null;
   /* A lead's programme video (not a lesson before a test): */
   /** What the presenter noticed about them (their programme, quiz result, where they came from). */
   noticed?: string[];
@@ -353,7 +355,7 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
     <div className="vl-page">
       {/* What the student or lead sees is the academy, not the software behind it. */}
       <header className="vl-top">
-        <b className="vl-academy">{academy || 'Your academy'}</b>
+        {view?.logo ? <img className="vl-logo" src={`${view.logo}?tone=white`} alt={academy || ''} /> : <b className="vl-academy">{academy || 'Your academy'}</b>}
         <span>{isLead ? 'Made for you' : 'Your personal lesson'}</span>
       </header>
       <main className="vl-main">

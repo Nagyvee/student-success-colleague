@@ -125,20 +125,30 @@ export function LightLeak({ show }: { show: boolean }) {
 
 /* ── Sound: a music bed and a whoosh on cuts ──────────────────────────────── */
 
-type Score = { ctx: AudioContext; master: GainNode; timer: ReturnType<typeof setInterval> | null; voices: AudioScheduledSourceNode[] };
+type Score = { ctx: AudioContext; master: GainNode; timer: ReturnType<typeof setInterval> | null; next: number; step: number; noise: AudioBuffer | null };
 
 /** MIDI note → Hz */
 const hz = (n: number) => 440 * 2 ** ((n - 69) / 12);
 
-/* Four warm chords (Am9, Fmaj9, Cadd9, G6), eight seconds each, played softly through a
- * low-pass filter that slowly breathes. Hopeful, unobtrusive, never the same as a loop. */
-const CHORDS = [[45, 57, 60, 64, 71], [41, 57, 60, 64, 67], [48, 55, 60, 62, 67], [43, 55, 59, 62, 64]];
-const BAR = 8;
+/* A light, hopeful bed in C major (C, G, Am, F), 100 beats a minute: a soft pad, a gentle
+ * plucked arpeggio, a round bass note on each bar and a quiet shaker on the off-beats.
+ * Mixed well under the voice: it should feel like a good morning, not a film score. */
+const BPM = 100;
+const STEP = 60 / BPM / 2; // one eighth note
+const STEPS_PER_CHORD = 16; // two bars per chord
+const PROGRESSION = [
+  { bass: 36, pad: [55, 60, 64], arp: [60, 64, 67, 72] }, // C
+  { bass: 43, pad: [55, 59, 62], arp: [59, 62, 67, 71] }, // G
+  { bass: 45, pad: [57, 60, 64], arp: [60, 64, 69, 72] }, // Am
+  { bass: 41, pad: [57, 60, 65], arp: [60, 65, 69, 72] }, // F
+];
+const ARP = [0, 1, 2, 3, 2, 1, 2, 3];
+const MUSIC_LEVEL = 0.16; // the whole bed (was 0.32 with louder voices: about a quarter as loud now)
+const TRACK_LEVEL = 0.07; // an uploaded track, under the voice
 
 export function useScore({ enabled, playing, track }: { enabled: boolean; playing: boolean; track?: string | null }) {
   const score = useRef<Score | null>(null);
   const trackEl = useRef<HTMLAudioElement | null>(null);
-  const chord = useRef(0);
 
   const ensure = useCallback((): Score | null => {
     if (score.current) return score.current;
@@ -148,40 +158,102 @@ export function useScore({ enabled, playing, track }: { enabled: boolean; playin
     const master = ctx.createGain();
     master.gain.value = 0;
     master.connect(ctx.destination);
-    score.current = { ctx, master, timer: null, voices: [] };
+    score.current = { ctx, master, timer: null, next: 0, step: 0, noise: null };
     return score.current;
   }, []);
 
-  /** One chord: two softly detuned voices per note, slow swell in and out. */
-  const playChord = useCallback((s: Score, at: number) => {
-    const notes = CHORDS[chord.current % CHORDS.length];
-    chord.current++;
-    const filter = s.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(700, at);
-    filter.frequency.linearRampToValueAtTime(1300, at + BAR * 0.55);
-    filter.frequency.linearRampToValueAtTime(800, at + BAR + 2);
-    filter.Q.value = 0.6;
-    filter.connect(s.master);
-    notes.forEach((n, k) => {
-      for (const detune of [-6, 6]) {
-        const o = s.ctx.createOscillator();
-        o.type = k === 0 ? 'sine' : 'triangle';
-        o.frequency.value = hz(n);
-        o.detune.value = detune;
-        const g = s.ctx.createGain();
-        const peak = (k === 0 ? 0.11 : 0.05) / (1 + k * 0.15);
-        g.gain.setValueAtTime(0, at);
-        g.gain.linearRampToValueAtTime(peak, at + 2.4);
-        g.gain.setValueAtTime(peak, at + BAR - 0.5);
-        g.gain.linearRampToValueAtTime(0, at + BAR + 2.5);
-        o.connect(g).connect(filter);
-        o.start(at);
-        o.stop(at + BAR + 2.6);
-        s.voices.push(o);
-        o.onended = () => { s.voices = s.voices.filter((v) => v !== o); };
-      }
-    });
+  /** A soft plucked note (a quick attack that rings out), like a muted marimba. */
+  const pluck = (s: Score, note: number, at: number, level: number) => {
+    const f = s.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 2600;
+    const g = s.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(level, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
+    for (const [type, mult, amt] of [['triangle', 1, 1], ['sine', 2, 0.25]] as const) {
+      const o = s.ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = hz(note) * mult;
+      const og = s.ctx.createGain();
+      og.gain.value = amt;
+      o.connect(og).connect(g);
+      o.start(at);
+      o.stop(at + 0.6);
+    }
+    g.connect(f).connect(s.master);
+  };
+
+  /** The pad: the chord held softly for two bars, swelling in and out. */
+  const pad = (s: Score, notes: number[], at: number, len: number) => {
+    const f = s.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 1500;
+    f.connect(s.master);
+    for (const n of notes) for (const detune of [-5, 5]) {
+      const o = s.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = hz(n);
+      o.detune.value = detune;
+      const g = s.ctx.createGain();
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(0.022, at + 0.6);
+      g.gain.setValueAtTime(0.022, at + len - 0.3);
+      g.gain.linearRampToValueAtTime(0, at + len + 0.4);
+      o.connect(g).connect(f);
+      o.start(at);
+      o.stop(at + len + 0.5);
+    }
+  };
+
+  /** A round bass note at the start of a bar. */
+  const bass = (s: Score, note: number, at: number) => {
+    const o = s.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = hz(note);
+    const g = s.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.07, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 1.1);
+    o.connect(g).connect(s.master);
+    o.start(at);
+    o.stop(at + 1.2);
+  };
+
+  /** A very quiet shaker on the off-beat (high noise, a few milliseconds long). */
+  const shaker = (s: Score, at: number) => {
+    if (!s.noise) {
+      const len = Math.floor(s.ctx.sampleRate * 0.08);
+      s.noise = s.ctx.createBuffer(1, len, s.ctx.sampleRate);
+      const d = s.noise.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = s.ctx.createBufferSource();
+    src.buffer = s.noise;
+    const hp = s.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 7000;
+    const g = s.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.03, at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+    src.connect(hp).connect(g).connect(s.master);
+    src.start(at);
+    src.stop(at + 0.08);
+  };
+
+  /** Schedules the next half-second of music (called every 100 ms while playing). */
+  const tick = useCallback((s: Score) => {
+    while (s.next < s.ctx.currentTime + 0.5) {
+      const c = PROGRESSION[Math.floor(s.step / STEPS_PER_CHORD) % PROGRESSION.length];
+      const i = s.step % STEPS_PER_CHORD;
+      if (i === 0) pad(s, c.pad, s.next, STEP * STEPS_PER_CHORD);
+      if (i % 8 === 0) bass(s, c.bass, s.next);
+      if (i % 8 !== 7) pluck(s, c.arp[ARP[i % 8]], s.next, i % 4 === 0 ? 0.075 : 0.05);
+      if (i % 2 === 1) shaker(s, s.next);
+      s.next += STEP;
+      s.step++;
+    }
   }, []);
 
   useEffect(() => {
@@ -198,7 +270,7 @@ export function useScore({ enabled, playing, track }: { enabled: boolean; playin
       if (on) {
         void a.play().catch(() => { /* needs a tap first */ });
         const t0 = performance.now();
-        const fade = setInterval(() => { a.volume = Math.min(0.14, ((performance.now() - t0) / 1500) * 0.14); if (a.volume >= 0.14) clearInterval(fade); }, 60);
+        const fade = setInterval(() => { a.volume = Math.min(TRACK_LEVEL, ((performance.now() - t0) / 1500) * TRACK_LEVEL); if (a.volume >= TRACK_LEVEL) clearInterval(fade); }, 60);
         return () => clearInterval(fade);
       }
       a.pause();
@@ -209,16 +281,17 @@ export function useScore({ enabled, playing, track }: { enabled: boolean; playin
     if (on) {
       void s.ctx.resume();
       s.master.gain.cancelScheduledValues(s.ctx.currentTime);
-      s.master.gain.setTargetAtTime(0.32, s.ctx.currentTime, 0.8);
+      s.master.gain.setTargetAtTime(MUSIC_LEVEL, s.ctx.currentTime, 1.2);
       if (!s.timer) {
-        playChord(s, s.ctx.currentTime + 0.05);
-        s.timer = setInterval(() => playChord(s, s.ctx.currentTime + 0.05), BAR * 1000);
+        s.next = s.ctx.currentTime + 0.05;
+        tick(s);
+        s.timer = setInterval(() => tick(s), 100);
       }
     } else {
       s.master.gain.setTargetAtTime(0, s.ctx.currentTime, 0.25);
       if (s.timer) { clearInterval(s.timer); s.timer = null; }
     }
-  }, [enabled, playing, track, ensure, playChord]);
+  }, [enabled, playing, track, ensure, tick]);
 
   // Close everything when the player goes away.
   useEffect(() => () => {
@@ -247,7 +320,7 @@ export function useScore({ enabled, playing, track }: { enabled: boolean; playin
     bp.frequency.exponentialRampToValueAtTime(2600, t + 0.55);
     const g = s.ctx.createGain();
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.09, t + 0.22);
+    g.gain.linearRampToValueAtTime(0.045, t + 0.22);
     g.gain.linearRampToValueAtTime(0, t + 0.65);
     src.connect(bp).connect(g).connect(s.ctx.destination);
     src.start(t);

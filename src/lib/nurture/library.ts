@@ -78,7 +78,7 @@ export function checkMessage(m: Pick<NurtureMessage, 'subject' | 'body' | 'chann
 
 const cleanCta = (x: unknown): NurtureMessage['cta'] => {
   const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
-  const targets: CtaTarget[] = ['apply', 'quiz', 'video', 'resource', 'reply', 'url'];
+  const targets: CtaTarget[] = ['enrol', 'call', 'apply', 'quiz', 'video', 'resource', 'reply', 'url'];
   const target = targets.includes(o.target as CtaTarget) ? (o.target as CtaTarget) : 'reply';
   const label = (typeof o.label === 'string' && o.label.trim() ? o.label.trim() : DEFAULT_CTA[target]).slice(0, 60);
   const out: NurtureMessage['cta'] = { target, label };
@@ -88,6 +88,8 @@ const cleanCta = (x: unknown): NurtureMessage['cta'] => {
 };
 
 export const DEFAULT_CTA: Record<CtaTarget, string> = {
+  enrol: 'Yes, I want to enrol',
+  call: 'Yes, call me',
   apply: 'Start my application',
   quiz: 'Find my tech fit (2 min)',
   video: 'Watch my video',
@@ -255,7 +257,10 @@ export function renderForLead(msg: NurtureMessage, rec: Pick<DataRecord, 'key' |
   const unsub = trackUrl(base, p('unsub'), 'u');
   const pixel = trackUrl(base, p('open'), 'o');
 
-  const cta = ctaHref && t !== 'video' ? `<p style="margin:6px 0 20px"><a href="${ctaHref}" style="color:#0a1733;font-weight:700;font-size:16px">${esc(msg.cta.label)}</a></p>` : '';
+  const yes = t === 'enrol' || t === 'call';
+  const cta = ctaHref && t !== 'video'
+    ? `<p style="margin:6px 0 ${yes ? '6px' : '20px'}"><a href="${ctaHref}" style="color:#0a1733;font-weight:700;font-size:16px">${esc(msg.cta.label)}${yes ? ' &rarr;' : ''}</a></p>${yes ? `<p style="margin:0 0 20px;color:#5b6475;font-size:14px">Or simply reply &ldquo;yes&rdquo; to this email and ${esc(sender.name)} will arrange it.</p>` : ''}`
+    : '';
   const html = plainLeadEmail({
     body: `${formatPlain(body)}${voucher}${cta}${video}${cards}`,
     sender: sender.name, office: sender.office, academy: ac.academyName,
@@ -265,14 +270,14 @@ export function renderForLead(msg: NurtureMessage, rec: Pick<DataRecord, 'key' |
   const text = [
     body,
     opts.voucher ? `Your voucher: ${opts.voucher.code} (${valueText(opts.voucher.offer)} ${opts.voucher.offer.appliesTo}, valid until ${dateText(opts.voucher.expiresAt)})` : '',
-    ctaHref ? `${msg.cta.label}: ${ctaHref}` : msg.cta.target === 'reply' ? msg.cta.label : '',
+    ctaHref ? `${msg.cta.label}: ${ctaHref}${yes ? '\n(Or simply reply "yes" to this email.)' : ''}` : msg.cta.target === 'reply' ? msg.cta.label : '',
     ...[...resources, ...(fresh ? [fresh] : [])].map((r) => `${r.title}: ${trackUrl(base, p('res', { r: r.id }))}`),
     `Warm regards,\n${sender.name}\n${sender.office} · ${ac.academyName}`,
     `Stop these emails: ${unsub}`,
   ].filter(Boolean).join('\n\n');
 
   const waSource = msg.waBody ? mergeText(msg.waBody, vars) : body.split(/\n\s*\n/).slice(0, 3).join('\n\n');
-  const whatsapp = `${waSource}${opts.voucher ? `\n\nYour voucher: ${opts.voucher.code}` : ''}${ctaHref ? `\n\n${msg.cta.label}: ${ctaHref}` : ''}\n\n${sender.name}, ${ac.academyName}`.slice(0, 1200);
+  const whatsapp = `${waSource}${opts.voucher ? `\n\nYour voucher: ${opts.voucher.code}` : ''}${yes ? `\n\nJust reply YES and we'll call you.` : ctaHref ? `\n\n${msg.cta.label}: ${ctaHref}` : ''}\n\n${sender.name}, ${ac.academyName}`.slice(0, 1200);
 
   return { subject, html, text, whatsapp, resources: fresh ? [...resources, fresh] : resources, ctaHref, unsub };
 }
@@ -357,7 +362,11 @@ export function pickOngoing(fields: Record<string, string>): NurtureMessage | nu
   const audience = leadAudience(fields);
   const fits = (m: NurtureMessage) => isLive(m) && (!m.programme || m.programme.toLowerCase() === programme) && (m.audience === 'everyone' || m.audience === audience) && fitsFunding(m, fields);
   const list = libraryDoc.get().filter(fits);
-  const order: NurtureStage[] = ['offer', 'learn', 'trust', 'decide', 'reengage'];
+  // Never sell twice in a row: after an offer or a "ready?" message comes something useful.
+  const lastId = (fields.nurture_sent || '').split('|').filter(Boolean).pop();
+  const last = lastId ? libraryDoc.get().find((m) => m.id === lastId) : null;
+  const sold = last && (last.stage === 'offer' || last.stage === 'decide');
+  const order: NurtureStage[] = sold ? ['learn', 'trust', 'reengage', 'offer', 'decide'] : ['offer', 'learn', 'trust', 'decide', 'reengage'];
   for (const stage of order) {
     const m = list.filter((x) => x.stage === stage && !x.repeatable && !had.has(x.id)).sort((a, b) => a.createdAt - b.createdAt)[0];
     if (m) return m;
