@@ -125,8 +125,13 @@ export default function OfficeApp() {
   const runs = useMemo(() => building?.runs || [], [building]);
   const selectedDept = departments.find((d) => d.id === selectedFloorId) || null;
   const floorNumber = selectedDept ? departments.indexOf(selectedDept) + 1 : 0;
-  // Admissions works with leads, not learners: its drawer shows the leads it is nurturing.
-  const leadsFloor = selectedDept?.kind === 'admissions';
+  // Each department's people: Admissions its leads, Finance the fees tracker, the rest the learners.
+  const peopleTab: SideTab | null = !selectedDept ? 'learners'
+    : selectedDept.kind === 'admissions' ? 'leads'
+      : selectedDept.kind === 'finance' ? 'fees'
+        : selectedDept.kind === 'b2b_sales' ? null
+          : 'learners';
+  const PEOPLE: SideTab[] = ['learners', 'leads', 'fees'];
   const isManager = role === 'owner' || role === 'admin';
 
   // ?floor=<department> (or ?office=) opens that floor; ?open=<deliverable> opens a deliverable.
@@ -253,10 +258,11 @@ export default function OfficeApp() {
     }
   }
 
+  // Moving floors with a people drawer open shows that floor's people.
   useEffect(() => {
-    if (drawer === 'leads' && !leadsFloor) setDrawer('learners');
-    else if (drawer === 'learners' && leadsFloor) setDrawer('leads');
-  }, [drawer, leadsFloor]);
+    if (drawer && PEOPLE.includes(drawer) && drawer !== peopleTab) setDrawer(peopleTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawer, peopleTab]);
 
   const viewState = floorState || state;
   const activeTask = viewState?.tasks.find((t) => t.status === 'running') || viewState?.tasks[0] || null;
@@ -277,11 +283,12 @@ export default function OfficeApp() {
       (viewState?.pendingOutreach?.filter((p) => p.status === 'pending').length || 0),
     learners: viewState?.learners.filter((l) => l.status !== 'on_track').length || 0,
     leads: 0,
+    fees: 0,
   };
   if (drawer) seen.current[drawer] = counts[drawer];
   const badge = (t: SideTab) => {
     if (t === 'plan') return activeTask?.plan ? `${counts.plan}/${activeTask.plan.steps.length}` : null;
-    if (t === 'feed' || t === 'leads') return null;
+    if (t === 'feed' || t === 'leads' || t === 'fees') return null;
     return counts[t] ? String(counts[t]) : null;
   };
   const fresh = (t: SideTab) => drawer !== t && counts[t] > (seen.current[t] ?? 0) && t !== 'feed';
@@ -303,7 +310,7 @@ export default function OfficeApp() {
     </div>
   );
 
-  const visibleTabs = TABS.filter((t) => (leadsFloor ? t.id !== 'learners' : t.id !== 'leads'));
+  const visibleTabs = TABS.filter((t) => !PEOPLE.includes(t.id) || t.id === peopleTab);
 
   const tabs = (
     <div className="cmd-group drawer-tabs" role="tablist" aria-label="Details">

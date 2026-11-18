@@ -426,3 +426,5 @@
 a.lead-row { color:inherit; text-decoration:none; }
 a.lead-row:hover { border-color:var(--line-strong, #94a3b8); }
 .lead-row.is-qualified { border-color:var(--good-line); } .lead-row.is-hot { border-color:var(--bad-line); } .lead-row.is-warm { border-color:var(--warn-line); }
+
+.fee-row.is-blocked { border-color:var(--bad-line); } .fee-row.is-behind { border-color:var(--warn-line); } .fee-row.is-paid { border-color:var(--good-line); }

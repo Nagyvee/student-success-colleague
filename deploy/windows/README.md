@@ -100,6 +100,7 @@ Only in `C:\thuso\.env.local` (never in git):
 | `PUBLIC_BASE_URL` | `https://thuso.melsoft.org`: the links in every email (quiz, video, voucher, unsubscribe). |
 | `ANTHROPIC_API_KEY` | The Claude key. |
 | `DEEPGRAM_API_KEY` | The voice for videos (optional). |
+| `DIALER_URL`, `DIALER_API_KEY` | The dialer, for qualified leads (a key with the "create leads" scope). Switch it on in Channels & API → Qualified leads. |
 | `SENDING_PAUSED` | `true` until the team is happy; then `false`, and switch Live Outreach on in Channels & API. |
 | `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | The Postgres on this VPS: `127.0.0.1`, `5432`, `student-success`, and its user and password. Everything is also kept in `.data`, which the nightly backup copies. |
 

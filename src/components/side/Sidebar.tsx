@@ -8,6 +8,7 @@ import DeliverablesPanel from './DeliverablesPanel';
 import InboxPanel from './InboxPanel';
 import LearnersPanel from './LearnersPanel';
 import LeadsPanel from './LeadsPanel';
+import FeesPanel from './FeesPanel';
 import type { CSSProperties } from 'react';
 import type { TagOf } from '@/components/office/deptScope';
 
@@ -19,7 +20,7 @@ export interface DrawerScope {
   onPick?: (id: string | null) => void;
 }
 
-export type SideTab = 'plan' | 'feed' | 'deliverables' | 'inbox' | 'learners' | 'leads';
+export type SideTab = 'plan' | 'feed' | 'deliverables' | 'inbox' | 'learners' | 'leads' | 'fees';
 
 export const TABS: { id: SideTab; label: string; icon: IconName }[] = [
   { id: 'plan', label: 'Plan', icon: 'list' },
@@ -28,6 +29,7 @@ export const TABS: { id: SideTab; label: string; icon: IconName }[] = [
   { id: 'inbox', label: 'Inbox', icon: 'inbox' },
   { id: 'learners', label: 'Learners', icon: 'graduation' },
   { id: 'leads', label: 'Leads', icon: 'target' },
+  { id: 'fees', label: 'Fees tracker', icon: 'wallet' },
 ];
 
 /* One drawer, opened from the floor's tabs only when it is wanted: the
@@ -49,7 +51,7 @@ export default function Sidebar({ state, tab, onInspect, onOpenMail, onClose, sc
         <span className="side-title"><Icon name={t.icon} size={15} />{t.label}</span>
         <button type="button" className="iconbtn" style={{ width: 30, height: 30 }} onClick={onClose} title="Close" aria-label="Close"><Icon name="x" size={16} /></button>
       </div>
-      {scope && tab !== 'learners' && tab !== 'leads' && (
+      {scope && tab !== 'learners' && tab !== 'leads' && tab !== 'fees' && (
         scope.locked ? (
           <div className="dept-filter">
             {(() => { const d = scope.departments.find((x) => x.id === scope.current); return d ? <span className="dept-only" style={{ '--c': d.color } as CSSProperties}><i />Only {d.name}</span> : null; })()}
@@ -82,6 +84,7 @@ export default function Sidebar({ state, tab, onInspect, onOpenMail, onClose, sc
         {tab === 'inbox' && <InboxPanel inbox={state?.inbox || []} pending={(state?.pendingOutreach || []).filter((p) => p.status === 'pending')} onOpen={onOpenMail} onInspect={onInspect} paused={Boolean(state?.caps.sendingPaused)} tagOf={tagOf} />}
         {tab === 'learners' && <LearnersPanel learners={state?.learners || []} />}
         {tab === 'leads' && <LeadsPanel />}
+        {tab === 'fees' && <FeesPanel />}
       </div>
     </div>
   );

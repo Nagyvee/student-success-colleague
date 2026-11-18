@@ -111,7 +111,7 @@ export async function GET(req: Request) {
       const list = listRecords(recordsOf)
         .filter((r) => !q || `${r.name} ${r.email} ${r.phone}`.toLowerCase().includes(q))
         .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 200)
+        .slice(0, Math.min(2000, Math.max(1, Number(url.searchParams.get('limit')) || 200)))
         .map((r) => ({ key: r.key, sourceId: r.sourceId, name: r.name, email: r.email, phone: r.phone, fields: liveFields(r), updatedAt: r.updatedAt }));
       return NextResponse.json({ records: list, source: getSource(recordsOf) });
     }
