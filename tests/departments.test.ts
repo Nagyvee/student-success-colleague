@@ -399,3 +399,22 @@ test('each kind of escalation goes to its own person; anything not routed goes t
   assert.ok(r.logs.some((l) => /Briefed reports@academy\.example\.com/.test(l.detail)), logs(r));
   assert.equal(mailsTo('boss@academy.example.com').length, 0, 'the manager does not get what is routed elsewhere');
 }));
+
+test('a lead who needs a student loan is welcomed with how loans work; a self-funded lead gets the quiz welcome', () => T(async () => {
+  setMode({ requireApproval: true, autoRunMode: true });
+  for (const x of m.lib.listMessages()) if (x.status === 'draft') m.lib.approveMessage(x.id, 'test');
+  const loanWelcome = m.lib.saveMessage({ name: 'Welcome (needs a student loan)', stage: 'welcome', audience: 'everyone', subject: '{{first_name}}, how a student loan works', body: 'Hi {{first_name}},\n\nYou said you would need a student loan, so here is how it works with our lending partners. You repay over a longer period, so the monthly amount is smaller, and you usually hear back within two days. A Student Advisor can help you choose a partner and get your application ready, so reply with any question.', cta: { target: 'reply', label: 'Reply with a question' }, funding: ['loan'] });
+  assert.equal(m.lib.approveMessage(loanWelcome.id, 'test').error, undefined);
+
+  const heldWelcome = async (email: string, extra: Record<string, string>) => {
+    const got = await m.trig.receiveLead({ email, first_name: email.split('@')[0], ...extra });
+    const run = m.runs.listAgentRuns({ workflowId: 'wf_naledi' }).find((r) => r.record.key === got.record.key)!;
+    const r = await settle(run.id);
+    assert.equal(r.status, 'awaiting_approval', logs(r));
+    const item = pendingFor(run.id)!;
+    return (m.store.getState().deliverables.find((d) => d.id === item.deliverableId)!.content as { library: { messageId: string } }).library.messageId;
+  };
+  assert.equal(await heldWelcome('loanlead@example.com', { how_will_you_finance_the_program: 'i_require_a_student_loan', how_much_can_you_put_towards_your_studies_each_month: 'under_r1,500_per_month' }), loanWelcome.id);
+  assert.notEqual(await heldWelcome('selflead@example.com', { how_will_you_finance_the_program: 'i_will_fund_my_self' }), loanWelcome.id);
+  assert.equal(m.rec.getRecord('src_leads', 'loanlead@example.com') && m.src.liveFields(m.rec.getRecord('src_leads', 'loanlead@example.com')!).monthly_budget, 'Under R1 500 a month');
+}));
