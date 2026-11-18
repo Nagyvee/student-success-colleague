@@ -189,6 +189,7 @@ export async function POST(req: Request) {
             stage: stage(m.stage), audience: audience(m.audience), programme: typeof m.programme === 'string' ? m.programme : '',
             channel: channel(m.channel), cta: m.cta, resourceIds: strArr(m.resourceIds, 3) || [],
             expiresAt: typeof m.expiresAt === 'number' ? m.expiresAt : null,
+            funding: Array.isArray(m.funding) ? m.funding : undefined,
           });
           return NextResponse.json({ ok: true, message: saved });
         }

@@ -228,3 +228,39 @@ test('footage goes where it fits: a welcome shot for the greeting, a celebration
     assert.deepEqual(media.footageFor(slides, 'x', 'lead'), [null, null, null, null, null], 'no footage: the animated backdrop');
   });
 });
+
+test('a lead profile in plain words, whichever form they filled in', async () => {
+  const { leadProfile, fundingOf, budgetOf } = await import('../src/lib/nurture/profile');
+  const { leadProgramme } = await import('../src/lib/nurture/programmes');
+  // Meta's affordability form
+  assert.deepEqual(leadProfile({ how_will_you_finance_the_program: 'i_require_a_student_loan', how_much_can_you_put_towards_your_studies_each_month: 'under_r1,500_per_month' }),
+    { funding: 'loan', funding_said: 'Needs a student loan', monthly_budget: 'Under R1 500 a month' });
+  assert.equal(leadProfile({ how_will_you_finance_the_program: 'a_family_or_friend_will_sponsor_me' }).funding, 'family');
+  assert.equal(leadProfile({ how_will_you_finance_the_program: 'tbd_with_student_advisor' }).funding, 'undecided');
+  assert.deepEqual(leadProfile({ how_much_can_you_put_towards_your_studies_each_month: 'i_can_pay_upfront' }), { funding: 'self', funding_said: 'Paying for themselves', monthly_budget: 'Can pay the fee upfront', pay_preference: 'upfront' });
+  assert.equal(budgetOf('r1,500_-_r3,000_per_month').band, '1500_3000');
+  assert.equal(budgetOf('r3,000+_per_month').band, '3000_plus');
+  // TikTok and the WhatsApp bot
+  assert.equal(fundingOf('I require a student loan'), 'loan');
+  assert.equal(fundingOf('TBD - Advisor to discuss'), 'undecided');
+  assert.deepEqual(leadProfile({ payment_plan: '12 installments', track: 'bootcamp' }), { funding: 'self', funding_said: 'Paying for themselves', pay_preference: '12 monthly instalments', track: 'bootcamp' });
+  assert.equal(leadProfile({ programme_id: 'cybersecurity-analyst' }).track, 'accredited');
+  assert.equal(leadProfile({ programme_id: 'cyber-security' }).track, 'bootcamp');
+  // Programme names as each form writes them
+  const list = ['Software Development', 'Data Science', 'Cybersecurity', 'AI Software Development'];
+  assert.equal(leadProgramme({ interest: 'cyber_security' }, list), 'Cybersecurity');
+  assert.equal(leadProgramme({ interest: 'data_science' }, list), 'Data Science');
+  assert.equal(leadProgramme({ programme: 'Cybersecurity 101' }, list), 'Cybersecurity');
+  assert.equal(leadProgramme({ programme_id: 'ai-software-engineering' }, list), 'AI Software Development');
+  assert.equal(leadProgramme({ interest: 'tbd_with_student_advisor' }, list), '');
+});
+
+test('a message aimed at a way of paying: Black Friday skips student-loan leads, the loan welcome goes to them', async () => {
+  const { fitsFunding } = await import('../src/lib/nurture/library');
+  const blackFriday = { funding: ['self', 'family', 'undecided'] as ('self' | 'family' | 'undecided')[] };
+  assert.equal(fitsFunding(blackFriday, { how_will_you_finance_the_program: 'i_require_a_student_loan' }), false);
+  assert.equal(fitsFunding(blackFriday, { how_will_you_finance_the_program: 'i_will_fund_my_self' }), true);
+  assert.equal(fitsFunding(blackFriday, {}), true, 'a lead who did not say still gets it');
+  assert.equal(fitsFunding({ funding: ['loan'] }, { payment_plan: 'I require a student loan' }), true);
+  assert.equal(fitsFunding({}, { funding: 'loan' }), true, 'no restriction: everyone');
+});

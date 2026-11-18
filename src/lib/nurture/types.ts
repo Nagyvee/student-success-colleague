@@ -89,6 +89,8 @@ export interface NurtureMessage {
   audience: Audience;
   /** Only for leads interested in this programme (empty = everyone). */
   programme: string;
+  /** Only for leads who pay this way (empty = everyone). A lead whose answer is unknown still gets it. */
+  funding?: ('self' | 'family' | 'loan' | 'employer' | 'undecided')[];
   channel: MessageChannel;
   /** With merge fields: {{first_name}}, {{programme}}, {{academy}}, {{sender}}. */
   subject: string;

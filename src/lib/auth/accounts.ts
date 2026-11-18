@@ -423,7 +423,7 @@ export function updateTenantIntegrations(tenantId: string, patch: Partial<Tenant
     onboardingCompleted: typeof patch.onboardingCompleted === 'boolean' ? patch.onboardingCompleted : prev.onboardingCompleted,
     building: patch.building ? { ...(prev.building || {}), ...patch.building } : prev.building,
     dataSources: patch.dataSources !== undefined ? patch.dataSources : prev.dataSources,
-    agentKnowledge: patch.agentKnowledge !== undefined ? patch.agentKnowledge.trim().slice(0, 8000) : prev.agentKnowledge,
+    agentKnowledge: patch.agentKnowledge !== undefined ? patch.agentKnowledge.trim().slice(0, 20000) : prev.agentKnowledge,
     applyUrl: patch.applyUrl !== undefined ? patch.applyUrl.trim() : prev.applyUrl,
     escalations: patch.escalations !== undefined ? cleanRoutes(patch.escalations) : prev.escalations,
   };

@@ -1,7 +1,7 @@
 import type { DataRecord, StepCondition } from '@/lib/types';
 import type { NurtureCampaign } from './types';
 import { campaignDoc, nid } from './store';
-import { isLive, resolveMessage as getMessage, sendLibraryMessage } from './library';
+import { fitsFunding, isLive, resolveMessage, resolveMessage as getMessage, sendLibraryMessage } from './library';
 import { listRecords, getRecord } from '@/lib/data/records';
 import { LEADS_SOURCE_ID, liveFields } from '@/lib/data/sources';
 import { matchesAll } from '@/lib/data/conditions';
@@ -27,8 +27,9 @@ export function listCampaigns(): NurtureCampaign[] {
 }
 
 /** Who a campaign would reach right now, and why others are left out. */
-export function segmentMembers(sourceId: string, segment: StepCondition[], messageId?: string): { members: DataRecord[]; skipped: { optedOut: number; alreadyHad: number; noContact: number; finished: number } } {
-  const skipped = { optedOut: 0, alreadyHad: 0, noContact: 0, finished: 0 };
+export function segmentMembers(sourceId: string, segment: StepCondition[], messageId?: string): { members: DataRecord[]; skipped: { optedOut: number; alreadyHad: number; noContact: number; finished: number; notForThem: number } } {
+  const skipped = { optedOut: 0, alreadyHad: 0, noContact: 0, finished: 0, notForThem: 0 };
+  const msg = messageId ? resolveMessage(messageId) : null;
   const mentionsStatus = segment.some((c) => c.field === 'status');
   const members: DataRecord[] = [];
   for (const rec of listRecords(sourceId)) {
@@ -38,6 +39,7 @@ export function segmentMembers(sourceId: string, segment: StepCondition[], messa
     if (!rec.email && !rec.phone) { skipped.noContact++; continue; }
     if (!mentionsStatus && DONE_STATUSES.test((f.status || '').trim())) { skipped.finished++; continue; }
     if (messageId && (f.nurture_sent || '').split('|').includes(messageId)) { skipped.alreadyHad++; continue; }
+    if (msg && !fitsFunding(msg, f)) { skipped.notForThem++; continue; }
     members.push(rec);
   }
   return { members, skipped };

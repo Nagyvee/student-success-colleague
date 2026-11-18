@@ -4,6 +4,7 @@ import { AUDIENCES, NURTURE_STAGES } from './types';
 import { bumpStat, libraryDoc, bankDoc, nid } from './store';
 import { getResource, leadAudience, pickResources, bankKnowledge, SHAREABLE } from './bank';
 import { leadProgramme, programmeList } from './programmes';
+import { leadProfile } from './profile';
 import { trackUrl } from './track';
 import type { VoucherOffer } from './types';
 import { dateText, expiresFor, getOffer, issueVoucher, offerLive, valueText, voucherVars } from './vouchers';
@@ -97,6 +98,7 @@ export const DEFAULT_CTA: Record<CtaTarget, string> = {
 
 /** Save (create or edit). Any edit sends an approved message back to draft: a person approves what is sent. */
 export function saveMessage(input: Partial<NurtureMessage> & { name: string; subject: string; body: string }, origin: NurtureMessage['origin'] = 'person'): NurtureMessage {
+  if (input.funding) input.funding = input.funding.filter((x) => ['self', 'family', 'loan', 'employer', 'undecided'].includes(x));
   const prev = input.id ? getMessage(input.id) : null;
   const now = Date.now();
   const stage = NURTURE_STAGES.includes(input.stage as NurtureStage) ? (input.stage as NurtureStage) : prev?.stage || 'learn';
@@ -110,6 +112,7 @@ export function saveMessage(input: Partial<NurtureMessage> & { name: string; sub
     channel,
     cta: cleanCta(input.cta ?? prev?.cta),
     programme: typeof input.programme === 'string' ? input.programme.trim().slice(0, 80) : prev?.programme || '',
+    funding: Array.isArray(input.funding) ? input.funding : prev?.funding,
     repeatable: typeof input.repeatable === 'boolean' ? input.repeatable : prev?.repeatable,
     voucherOfferId: typeof input.voucherOfferId === 'string' ? (input.voucherOfferId || undefined) : prev?.voucherOfferId,
     expiresAt: input.expiresAt === null ? null : typeof input.expiresAt === 'number' && input.expiresAt > 0 ? input.expiresAt : prev?.expiresAt ?? null,
@@ -165,6 +168,13 @@ export function deleteMessage(id: string): boolean {
 export const isLive = (m: NurtureMessage, now = Date.now()) => m.status === 'approved' && (!m.expiresAt || m.expiresAt > now);
 
 /** The best approved message of a stage this lead has not had yet. */
+/** Is this message for this lead's way of paying? (Black Friday and the Early Bird are not for student loans.) */
+export function fitsFunding(m: Pick<NurtureMessage, 'funding'>, fields: Record<string, string>): boolean {
+  if (!m.funding?.length) return true;
+  const theirs = fields.funding || leadProfile(fields).funding || '';
+  return !theirs || m.funding.includes(theirs as NonNullable<NurtureMessage['funding']>[number]);
+}
+
 export function pickMessage(fields: Record<string, string>, stage: NurtureStage): NurtureMessage | null {
   const had = new Set((fields.nurture_sent || '').split('|').filter(Boolean));
   const programme = leadProgramme(fields).toLowerCase();
@@ -173,7 +183,8 @@ export function pickMessage(fields: Record<string, string>, stage: NurtureStage)
     .filter((m) => isLive(m) && m.stage === stage && !m.repeatable && !had.has(m.id))
     .filter((m) => !m.programme || m.programme.toLowerCase() === programme)
     .filter((m) => m.audience === 'everyone' || m.audience === audience)
-    .map((m) => ({ m, score: (m.programme ? 3 : 0) + (m.audience !== 'everyone' ? 2 : 0) + (m.stats.sent >= 10 ? Math.min(2, (m.stats.clicked / m.stats.sent) * 8) : 0) }))
+    .filter((m) => fitsFunding(m, fields))
+    .map((m) => ({ m, score: (m.programme ? 3 : 0) + (m.audience !== 'everyone' ? 2 : 0) + (m.funding?.length && fields.funding && m.funding.includes(fields.funding as never) ? 3 : 0) + (m.stats.sent >= 10 ? Math.min(2, (m.stats.clicked / m.stats.sent) * 8) : 0) }))
     .sort((a, b) => b.score - a.score || a.m.createdAt - b.m.createdAt);
   return ranked[0]?.m || null;
 }
@@ -319,7 +330,7 @@ export function pickOngoing(fields: Record<string, string>): NurtureMessage | nu
   const had = new Set((fields.nurture_sent || '').split('|').filter(Boolean));
   const programme = leadProgramme(fields).toLowerCase();
   const audience = leadAudience(fields);
-  const fits = (m: NurtureMessage) => isLive(m) && (!m.programme || m.programme.toLowerCase() === programme) && (m.audience === 'everyone' || m.audience === audience);
+  const fits = (m: NurtureMessage) => isLive(m) && (!m.programme || m.programme.toLowerCase() === programme) && (m.audience === 'everyone' || m.audience === audience) && fitsFunding(m, fields);
   const list = libraryDoc.get().filter(fits);
   const order: NurtureStage[] = ['offer', 'learn', 'trust', 'decide', 'reengage'];
   for (const stage of order) {
@@ -350,6 +361,7 @@ export async function sendLibraryMessage(input: {
     if (rec.fields.opted_out === 'yes') return { ok: false, skipped: true, detail: `${rec.name} asked not to get marketing messages.` };
     if (msg.status !== 'approved') return { ok: false, skipped: true, detail: `"${msg.name}" is not approved yet.` };
     if (msg.expiresAt && msg.expiresAt <= Date.now()) return { ok: false, skipped: true, detail: `"${msg.name}" ended on ${isoDate(new Date(msg.expiresAt))}.` };
+    if (!fitsFunding(msg, rec.fields)) return { ok: false, skipped: true, detail: `"${msg.name}" is not for ${rec.name.split(/\s+/)[0]}: ${leadProfile(rec.fields).funding_said || 'their way of paying'}.` };
   }
   // A message that gives a voucher: a live offer, and a code made for this lead.
   let voucher: { code: string; expiresAt: number; offer: VoucherOffer } | undefined;

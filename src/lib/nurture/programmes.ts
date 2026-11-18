@@ -55,6 +55,7 @@ export function matchProgramme(text: string | undefined, list = programmeList())
 /** The programme to talk to a lead about: what the quiz said, else their interest. */
 export function leadProgramme(fields: Record<string, string>, list = programmeList()): string {
   if (fields.fit_programme) return fields.fit_programme;
-  const said = fields.interest || fields.programme || fields.course || '';
-  return matchProgramme(said, list) || said.trim();
+  const said = (fields.interest || fields.programme || fields.course || fields.programme_id || '').replace(/[_-]+/g, ' ').trim();
+  if (/^tbd\b|^not specified|advisor/i.test(said)) return '';
+  return matchProgramme(said, list) || said;
 }

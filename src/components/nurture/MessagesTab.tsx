@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { FUNDINGS, FUNDING_LABEL } from '@/lib/nurture/profile';
 import type { MessageChannel } from '@/lib/types';
 import type { CtaTarget, NurtureMessage } from '@/lib/nurture/types';
 import Icon from '@/components/Icon';
@@ -139,6 +140,7 @@ function MessageCard({ m, can, busy, resources, onPreview, onEdit, onApprove, on
         {m.status === 'approved' && !expired ? <Chip tone="good"><Icon name="ok" size={11} /> Approved</Chip> : expired ? <Chip tone="muted">Ended</Chip> : <Chip tone="warn">Draft</Chip>}
         {m.audience !== 'everyone' && <Chip tone="brand">{AUDIENCE_INFO[m.audience]}</Chip>}
         {m.programme && <Chip>{m.programme}</Chip>}
+        {!!m.funding?.length && <Chip title="Only for leads who pay this way">{m.funding.map((k) => FUNDING_LABEL[k].split(' (')[0]).join(' / ')}</Chip>}
         {m.channel !== 'email' && <Chip>{CHANNEL_INFO[m.channel]}</Chip>}
         {m.origin === 'ai' && <Chip tone="muted" title="Written by AI once, from a brief">AI-written</Chip>}
       </div>
@@ -215,6 +217,16 @@ function Editor({ draft, data, onClose, onSaved }: { draft: Draft; data: Overvie
             <option value="">Any programme</option>
             {data.programmes.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
+        </Field>
+        <Field label="Only for leads who pay this way (none ticked: everyone)" full hint="From their form: e.g. Black Friday and the Early Bird are not for student loans. A lead who did not say still gets it.">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            {FUNDINGS.map((k) => (
+              <label key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input type="checkbox" checked={(d.funding || []).includes(k)} onChange={(e) => set({ funding: e.target.checked ? [...(d.funding || []), k] : (d.funding || []).filter((x) => x !== k) })} />
+                {FUNDING_LABEL[k]}
+              </label>
+            ))}
+          </div>
         </Field>
         <Field label="Subject" full><input className="in" value={d.subject} onChange={(e) => set({ subject: e.target.value })} placeholder="{{first_name}}, which tech path fits you?" /></Field>
         <Field label="Message" full hint="No sign-off needed: the sender's signature is added.">

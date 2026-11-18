@@ -598,7 +598,7 @@ function KnowledgeCard({ data, isManager, onSaved }: { data: BuildingData; isMan
         <textarea
           className="know-text"
           value={text}
-          maxLength={8000}
+          maxLength={20000}
           disabled={!isManager}
           onChange={(e) => setText(e.target.value)}
           placeholder={'Full-Stack Web Development: 12 months, online live evening classes and weekend labs. R42,000, or R3,500 a month.\nData Analytics with Python & SQL: 9 months …\nNext intake: 3 February 2026. Applications close 20 January.\nPayments: EFT to … reference = student number. Arrangements: email finance@…'}

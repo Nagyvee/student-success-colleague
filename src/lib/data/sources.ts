@@ -7,6 +7,7 @@ import { findSyncedLearnerByEmailOrId, mergeLearnerPatchByEmailOrId } from '@/li
 import { generateJSON, obj } from '@/lib/ai/llm';
 import { countRecords, listRecords, recordKey, removeSourceRecords, upsertRecord } from './records';
 import { daysUntil, isoDate, parseDate, parseMoney } from './conditions';
+import { leadProfile } from '@/lib/nurture/profile';
 
 /* Data sources: where the agents read their records.
  *
@@ -284,6 +285,8 @@ export function rowToRecord(source: DataSource, headers: string[], row: string[]
 export function liveFields(rec: Pick<DataRecord, 'fields' | 'name' | 'email' | 'phone'>, now = new Date()): Record<string, string> {
   const f: Record<string, string> = { ...rec.fields, name: rec.name, email: rec.email, phone: rec.phone };
   f.first_name ||= rec.name.split(/\s+/)[0] || rec.name;
+  // How they will pay, their monthly budget, the track: the same words whichever form they filled in.
+  for (const [k, v] of Object.entries(leadProfile(f))) if (!f[k]) f[k] = v;
   const amount = parseMoney(f.amount_due);
   const due = parseDate(f.due_date);
   if (due) {
