@@ -6,7 +6,10 @@ import { completeWithImage, extractJSON, isStr, obj } from '@/lib/ai/llm';
 import { getAcademyContext } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { deleteFile, MAX_FILE_BYTES, MAX_VIDEO_BYTES, putFile } from '@/lib/files/store';
-import { log } from '@/lib/engine/store';
+import { log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 
 /* Footage and music for the videos.
  *

@@ -4,6 +4,10 @@ import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import type { InboxMail, PendingOutreach } from '@/lib/types';
 import Icon from '@/components/Icon';
+import type { CSSProperties } from 'react';
+import type { DeptTag, TagOf } from '@/components/office/deptScope';
+
+const Tag = ({ d }: { d: DeptTag | null | undefined }) => (d ? <span className="dept-tag" style={{ '--c': d.color } as CSSProperties}>{d.name}</span> : null);
 
 /* What the office has sent. Real mail via Nodemailer (SMTP) when configured;
  * the exact message it would have sent when it is not. Quiz mails carry a QR
@@ -20,7 +24,7 @@ export function useQr(text: string | null) {
   return url;
 }
 
-function MailCard({ m, onOpen, onInspect }: { m: InboxMail; onOpen: (id: string) => void; onInspect: (id: string) => void }) {
+function MailCard({ m, onOpen, onInspect, tag }: { m: InboxMail; onOpen: (id: string) => void; onInspect: (id: string) => void; tag?: DeptTag | null }) {
   const qr = useQr(m.link);
   const [copied, setCopied] = useState(false);
   return (
@@ -29,6 +33,7 @@ function MailCard({ m, onOpen, onInspect }: { m: InboxMail; onOpen: (id: string)
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
           <span className={`badge ${m.delivery !== 'simulated' ? 'badge-good' : m.error ? 'badge-bad' : 'badge-soft'}`} title={m.error || undefined}><Icon name={m.delivery !== 'simulated' ? 'send' : m.error ? 'warn' : 'mail'} size={10} />{m.delivery === 'smtp' ? 'Delivered by email' : m.error ? 'Not sent: email server unreachable' : 'Preview (not sent)'}</span>
           <span className="faint" style={{ fontSize: 11 }}>{new Date(m.ts).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
+          <Tag d={tag} />
         </div>
         <b>{m.subject}</b>
         <span>To {m.toName} · {m.to}</span>
@@ -54,6 +59,7 @@ export default function InboxPanel({
   onOpen,
   onInspect,
   paused = false,
+  tagOf,
 }: {
   inbox: InboxMail[];
   pending?: PendingOutreach[];
@@ -61,6 +67,7 @@ export default function InboxPanel({
   onInspect: (id: string) => void;
   /** The server's sending lock: approving keeps the message here instead of sending it. */
   paused?: boolean;
+  tagOf?: TagOf;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +106,9 @@ export default function InboxPanel({
     </div>
   );
 
-  const act = async (payload: { action: 'approve' | 'reject' | 'approveAll'; id?: string }) => {
+  const act = async (raw: { action: 'approve' | 'reject' | 'approveAll'; id?: string }) => {
+    // "Approve all" approves what is shown here (a department's inbox approves only that department's).
+    const payload = raw.action === 'approveAll' ? { ...raw, ids: pending.map((p) => p.id) } : raw;
     setError(null);
     setBusyId(payload.id || 'all');
     try {
@@ -166,6 +175,7 @@ export default function InboxPanel({
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
                   <span className="badge badge-soft"><Icon name="warn" size={10} />Awaiting approval &middot; {p.workflowName}</span>
                   <span className="faint" style={{ fontSize: 11 }}>{new Date(p.createdAt).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <Tag d={tagOf?.pending(p)} />
                 </div>
                 <b>{p.subject}</b>
                 <span>To {p.learnerName} · {p.learnerEmail}</span>
@@ -199,7 +209,7 @@ export default function InboxPanel({
         </>
       )}
 
-      {inbox.map((m) => <MailCard key={m.id} m={m} onOpen={onOpen} onInspect={onInspect} />)}
+      {inbox.map((m) => <MailCard key={m.id} m={m} onOpen={onOpen} onInspect={onInspect} tag={tagOf?.mail(m)} />)}
     </div>
   );
 }

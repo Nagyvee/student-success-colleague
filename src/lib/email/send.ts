@@ -11,6 +11,8 @@ import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 export interface MailInput {
   to: string; toName: string; subject: string; html: string; text: string;
   link: string | null; taskId: string; deliverableId: string | null;
+  /** The department sending it (a department id, or a kind such as "admissions"). */
+  dept?: string;
   /** The Message-ID this answers, so the reply stays in their email thread. */
   inReplyTo?: string;
   /** The person it comes from ("Naledi"): shown as "Naledi · Melsoft Academy". */
@@ -296,7 +298,7 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
   }
   const mail: InboxMail = {
     id: uid('m'), ts: Date.now(), to, toName: input.toName, from, subject: input.subject, html: input.html, text: input.text,
-    link: input.link, delivery, providerId, taskId: input.taskId, deliverableId: input.deliverableId, error,
+    link: input.link, delivery, providerId, taskId: input.taskId, deliverableId: input.deliverableId, error, ...(input.dept ? { dept: input.dept } : {}),
   };
   pushMail(mail);
   return mail;

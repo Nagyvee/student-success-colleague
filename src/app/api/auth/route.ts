@@ -244,7 +244,8 @@ export async function POST(req: Request) {
           const hook = secret(d.discordWebhook, real.discordWebhook);
           return NextResponse.json(hook ? await testDiscord(hook) : { ok: false, error: 'Paste the Discord webhook address first.' });
         }
-        return NextResponse.json(await testDialer(d.dialerUrl ?? real.dialerUrl ?? '', secret(d.dialerKey, real.dialerKey)));
+        // Settings first, else the server's DIALER_URL / DIALER_API_KEY (what the hand-off uses too).
+        return NextResponse.json(await testDialer(d.dialerUrl || real.dialerUrl || process.env.DIALER_URL || '', secret(d.dialerKey, real.dialerKey) || process.env.DIALER_API_KEY || ''));
       }
       return NextResponse.json({ ok: false, error: `Unknown connection kind "${kind}".` }, { status: 400 });
     });

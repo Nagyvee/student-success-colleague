@@ -4,7 +4,10 @@ import type { Engagement, TrackPayload } from './types';
 import { derivedKey } from '@/lib/auth/accounts';
 import { getRecord, setRecordField } from '@/lib/data/records';
 import { getSource } from '@/lib/data/sources';
-import { log } from '@/lib/engine/store';
+import { log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 import { bankDoc, bumpStat, libraryDoc } from './store';
 
 /* Tracked links and what a lead's clicks mean.

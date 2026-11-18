@@ -36,6 +36,8 @@ export interface BuildingData {
   departments: DepartmentRow[];
   sources: DataSource[];
   runs: AgentRun[];
+  /** Every run's department (run id → department id), for scoping the inbox and activity. */
+  runDepartments?: Record<string, string>;
   autopilot: boolean;
   requireApproval: boolean;
   liveOutreach: boolean;

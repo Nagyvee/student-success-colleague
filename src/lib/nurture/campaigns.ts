@@ -9,7 +9,10 @@ import { leadProgramme } from './programmes';
 import { listCustomAgents, listOffices } from '@/lib/engine/offices';
 import { getAcademyContext } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
-import { log } from '@/lib/engine/store';
+import { log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 
 /* Campaigns: one saved message to a group of leads, now or at a set time.
  *

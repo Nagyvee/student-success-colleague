@@ -3,7 +3,10 @@ import type { DataRecord } from '@/lib/types';
 import type { Voucher, VoucherOffer } from './types';
 import { offerDoc, voucherDoc, nid } from './store';
 import { getRecord, setRecordField } from '@/lib/data/records';
-import { log } from '@/lib/engine/store';
+import { log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 
 /* Vouchers: the team writes the offer once, code makes the codes.
  *

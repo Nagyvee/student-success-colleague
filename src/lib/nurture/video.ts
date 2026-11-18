@@ -9,7 +9,10 @@ import { generateJSON, isStr, noEmoji, obj } from '@/lib/ai/llm';
 import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { listCustomAgents } from '@/lib/engine/offices';
-import { log } from '@/lib/engine/store';
+import { log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 import { warmLessonAudio } from '@/lib/media/tts';
 
 /* Programme videos for leads: made once, personal every time.

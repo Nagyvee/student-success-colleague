@@ -5,7 +5,10 @@ import { programmeList, leadProgramme } from './programmes';
 import { completeWithPdf, extractJSON, generateJSON, isStr, obj } from '@/lib/ai/llm';
 import { getAcademyContext } from '@/lib/auth/accounts';
 import { deleteFile, putFile } from '@/lib/files/store';
-import { log } from '@/lib/engine/store';
+import { log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 
 /* The content bank: everything the nurturing can share or learn from.
  *

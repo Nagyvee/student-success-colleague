@@ -12,7 +12,10 @@ import { personalEmail, sendMail } from '@/lib/email/send';
 import { writeMessage } from '@/lib/ai/agentMind';
 import { listCustomAgents } from '@/lib/engine/offices';
 import { ZINHLE_STEPS } from '@/lib/engine/departments';
-import { getState, log } from '@/lib/engine/store';
+import { getState, log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 import { currentTenantId } from '@/lib/auth/tenantContext';
 
 /* "See it as a lead": the whole journey, for the person looking.
@@ -70,7 +73,7 @@ export async function buildSampleJourney(input: { userId: string; name: string; 
     if (!msg) continue;
     const line = step.stage === 'welcome' ? await writePersonalLine(rec) : null;
     const r = renderForLead(msg, rec, sender, { personalLine: line || undefined, tenantId: tid });
-    const m = await sendMail({ to: input.email, toName: input.name, subject: `[Sample ${i + 1}/${total} · ${step.label}] ${r.subject}`, html: r.html, text: r.text, link: r.ctaHref, taskId: `sample_journey_${key}`, deliverableId: null });
+    const m = await sendMail({ dept: 'admissions', to: input.email, toName: input.name, subject: `[Sample ${i + 1}/${total} · ${step.label}] ${r.subject}`, html: r.html, text: r.text, link: r.ctaHref, taskId: `sample_journey_${key}`, deliverableId: null });
     mails.push({ id: m.id, subject: m.subject });
   }
 
@@ -85,7 +88,7 @@ export async function buildSampleJourney(input: { userId: string; name: string; 
   }, noteStep);
   const extras = leadEmailExtras(rec, 'sample', { video: true });
   const mail = personalEmail({ recipientName: rec.name, subject: draft.subject, body: draft.body, ask: draft.ask, agentName: zinhle?.name || 'Zinhle', officeName: 'Admissions', extraHtml: extras.cardsHtml, extra: { footer: extras.footer } });
-  const m = await sendMail({ to: input.email, toName: input.name, fromName: zinhle?.name || 'Zinhle', subject: `[Sample ${ORDER.length + 1}/${total} · When they turn hot] ${mail.subject}`, html: mail.html, text: mail.text, link: null, taskId: `sample_journey_${key}`, deliverableId: null });
+  const m = await sendMail({ dept: 'admissions', to: input.email, toName: input.name, fromName: zinhle?.name || 'Zinhle', subject: `[Sample ${ORDER.length + 1}/${total} · When they turn hot] ${mail.subject}`, html: mail.html, text: mail.text, link: null, taskId: `sample_journey_${key}`, deliverableId: null });
   mails.push({ id: m.id, subject: m.subject });
 
   // Then their voucher: a real code for the sample lead (never counted), so the pass-it-on page works.
@@ -93,7 +96,7 @@ export async function buildSampleJourney(input: { userId: string; name: string; 
   if (offer) {
     const v = issueVoucher(offer, rec, { preview: true });
     const r = renderForLead(offerMessage(offer), rec, { name: zinhle?.name || 'Zinhle', office: 'Admissions' }, { tenantId: tid, voucher: { code: v.code, expiresAt: v.expiresAt, offer } });
-    const vm = await sendMail({ to: input.email, toName: input.name, fromName: zinhle?.name || 'Zinhle', subject: `[Sample ${total}/${total} · Their voucher${offer.status === 'active' ? '' : ' (draft offer)'}] ${r.subject}`, html: r.html, text: r.text, link: r.ctaHref, taskId: `sample_journey_${key}`, deliverableId: null });
+    const vm = await sendMail({ dept: 'admissions', to: input.email, toName: input.name, fromName: zinhle?.name || 'Zinhle', subject: `[Sample ${total}/${total} · Their voucher${offer.status === 'active' ? '' : ' (draft offer)'}] ${r.subject}`, html: r.html, text: r.text, link: r.ctaHref, taskId: `sample_journey_${key}`, deliverableId: null });
     mails.push({ id: vm.id, subject: vm.subject });
     voucherUrl = `${getState().caps.baseUrl.replace(/\/$/, '')}/v/${v.code}`;
   }

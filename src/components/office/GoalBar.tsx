@@ -14,6 +14,7 @@ export default function GoalBar({
   stage,
   onExitStage,
   right,
+  afterBrand,
   workflows = [],
   selectedFloorId = '__all__',
   onSelectFloor,
@@ -29,6 +30,8 @@ export default function GoalBar({
   stage: boolean;
   onExitStage: () => void;
   right?: ReactNode;
+  /** Next to the floor picker (e.g. the Building | List switch). */
+  afterBrand?: ReactNode;
   workflows?: FloorItem[];
   selectedFloorId?: string;
   onSelectFloor?: (id: string) => void;
@@ -77,6 +80,7 @@ export default function GoalBar({
 
   return (
     <div className="cmd-bar goal-bar" style={{ justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
       {/* Left: Clean Brand & Custom High-Contrast Floor Switcher Dropdown */}
       <div
         ref={dropdownRef}
@@ -390,6 +394,8 @@ export default function GoalBar({
             })}
           </div>
         )}
+      </div>
+      {afterBrand}
       </div>
 
       {/* Right: Workspace Tabs */}

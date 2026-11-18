@@ -732,6 +732,8 @@ export function SkyscraperBuilding({
   const TOTAL_Y = 180;
   const TOTAL_Z = 408;
   const FLOOR_H = TOTAL_Z / totalFloors;
+  /** The window bars sit exactly between departments: every department is one row of windows, never one and a half. */
+  const floorLines = Array.from({ length: totalFloors }, (_, i) => (i + 1) * FLOOR_H);
 
   const ORIGIN_X = 236;
   const ORIGIN_Y = 466;
@@ -2111,7 +2113,7 @@ export function SkyscraperBuilding({
                 />
               );
             })}
-            {[142, 204, 266, 328, 390].map((mz) => {
+            {floorLines.map((mz) => {
               const [u1, v1] = iso(116, 0, mz);
               const [u2, v2] = iso(288, 0, mz);
               return (
@@ -2440,7 +2442,7 @@ export function SkyscraperBuilding({
               const [u2, v2] = iso(436, my, 412);
               return <line key={`rg-m-${my}`} x1={u1} y1={v1} x2={u2} y2={v2} stroke="#0f172a" strokeWidth="1.8" />;
             })}
-            {[204, 266, 328, 390].map((mz) => {
+            {floorLines.filter((mz) => mz > 150 && mz < 412).map((mz) => {
               const [u1, v1] = iso(436, 0, mz);
               const [u2, v2] = iso(436, 68, mz);
               return <line key={`rg-s-${mz}`} x1={u1} y1={v1} x2={u2} y2={v2} stroke="#0f172a" strokeWidth="3.6" />;

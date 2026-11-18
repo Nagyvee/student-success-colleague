@@ -57,6 +57,7 @@ function overview(manager: boolean, role: string) {
     departments: floors,
     sources: listSources(),
     runs: runs.slice(0, 80).map(light),
+    runDepartments: Object.fromEntries(listAgentRuns({ limit: 5000 }).map((r) => [r.id, r.departmentId])),
     autopilot: Boolean(s.autoRunMode),
     requireApproval: s.requireApproval ?? ti.requireApproval !== false,
     liveOutreach: liveAllowed(ti.liveOutreachEnabled),

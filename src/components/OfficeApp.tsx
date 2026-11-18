@@ -14,12 +14,16 @@ import DeliverableModal from './inspect/DeliverableModal';
 import MailModal from './inspect/MailModal';
 import { useDepartmentWorld } from './office/departmentWorld';
 import { postDepartments, sortedFloors, useBuildingData, type DepartmentRow } from './office/buildingData';
+import DepartmentList, { type DeptCounts } from './office/DepartmentList';
+import { buildDeptIndex, deptOfFeed, deptOfMail, deptOfPending, scopeState, tagger } from './office/deptScope';
 
 /* The live office: the building from outside (one floor per department), and
  * each floor from inside (its agents at their desks and their work). Student
  * Success and Learning floors can also show the live tutoring room, where the
  * team builds lessons and tests. The drawers (plan, feed, deliverables, inbox,
- * learners) follow the floor you are on. */
+ * learners) follow the floor you are on: on the building they show every
+ * department (with a filter and a label per item), inside a department only
+ * that department's. The building can also be read as a list. */
 
 const DRAWER_W = 384;
 
@@ -96,6 +100,15 @@ export default function OfficeApp() {
   // Inside a floor: the walk-in office (default), or the floor's details.
   const [interiorTab, setInteriorTab] = useState<'office' | 'details'>('office');
   const [selectedFloorId, setSelectedFloorId] = useState<string>('__all__');
+  // The building drawn, or as a list of departments (remembered on this browser).
+  const [layout, setLayout] = useState<'building' | 'list'>('building');
+  useEffect(() => {
+    try { if (window.localStorage.getItem('thuso.buildingLayout') === 'list') setLayout('list'); } catch { /* private window */ }
+  }, []);
+  const chooseLayout = (l: 'building' | 'list') => {
+    setLayout(l);
+    try { window.localStorage.setItem('thuso.buildingLayout', l); } catch { /* private window */ }
+  };
   const [pendingEnterFloorId, setPendingEnterFloorId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
@@ -187,36 +200,30 @@ export default function OfficeApp() {
     return runs.filter((r) => r.departmentId === selectedDept.id || wfIds.has(r.workflowId));
   }, [runs, selectedDept]);
 
-  // The world, scoped to the floor you are on.
+  // Which department each task, mail, approval and activity line belongs to.
+  const deptIndex = useMemo(() => buildDeptIndex(departments, building?.runDepartments, state), [departments, building?.runDepartments, state]);
+
+  // The world, scoped to the floor you are on (everything on the building, unless a department is picked).
   const floorState = useMemo<WorldState | null>(() => {
     if (!state) return null;
     const known = new Set(state.tasks.map((t) => t.id));
-    if (!selectedDept) {
-      const runTasks = runs.filter((r) => !known.has(r.id)).map(agentRunToTask);
-      const tasks = [...state.tasks, ...runTasks].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-      return { ...state, tasks };
-    }
-    const wfIds = new Set(selectedDept.agents.map((a) => a.workflow?.id).filter(Boolean) as string[]);
-    const runIds = new Set(deptRuns.map((r) => r.id));
-    const legacyTasks = state.tasks.filter((t) => t.workflowId && wfIds.has(t.workflowId));
-    const taskIds = new Set([...runIds, ...legacyTasks.map((t) => t.id)]);
-    const tasks = [...legacyTasks, ...deptRuns.filter((r) => !known.has(r.id)).map(agentRunToTask)]
-      .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-    const prefix = `[${selectedDept.name.toLowerCase()} ·`;
-    const deliverables = state.deliverables.filter((d) => taskIds.has(d.taskId));
-    const deliverableIds = new Set(deliverables.map((d) => d.id));
-    return {
-      ...state,
-      tasks,
-      deliverables,
-      feed: state.feed.filter((f) =>
-        (f.taskId && taskIds.has(f.taskId))
-        || (f.deliverableId && deliverableIds.has(f.deliverableId))
-        || f.text.toLowerCase().startsWith(prefix)),
-      inbox: state.inbox.filter((m) => taskIds.has(m.taskId) || (m.deliverableId && deliverableIds.has(m.deliverableId))),
-      pendingOutreach: (state.pendingOutreach || []).filter((p) => (p.workflowId && wfIds.has(p.workflowId)) || taskIds.has(p.taskId)),
-    };
-  }, [state, selectedDept, deptRuns, runs]);
+    const runTasks = runs.filter((r) => !known.has(r.id)).map(agentRunToTask);
+    const all = { ...state, tasks: [...state.tasks, ...runTasks].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0)) };
+    return selectedDept ? scopeState(all, deptIndex, selectedDept.id) : all;
+  }, [state, selectedDept, runs, deptIndex]);
+
+  // What waits for each department (the list view and its counts).
+  const deptCounts = useMemo<Record<string, DeptCounts>>(() => {
+    const out: Record<string, DeptCounts> = Object.fromEntries(departments.map((d) => [d.id, { approvals: 0, inbox: 0, today: 0 }]));
+    if (!state) return out;
+    const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+    for (const p of state.pendingOutreach || []) { if (p.status !== 'pending') continue; const d = deptOfPending(deptIndex, p); if (d && out[d]) out[d].approvals++; }
+    for (const m of state.inbox) { const d = deptOfMail(deptIndex, m); if (d && out[d]) out[d].inbox++; }
+    for (const f of state.feed) { if (f.ts < dayStart.getTime()) continue; const d = deptOfFeed(deptIndex, f); if (d && out[d]) out[d].today++; }
+    return out;
+  }, [state, departments, deptIndex]);
+
+  const tagOf = useMemo(() => tagger(deptIndex, departments), [deptIndex, departments]);
 
   // The walk-in office for the floor you are on: its own agents at their desks, reception and review.
   // While the tutoring team is building a lesson for this floor, you watch them work instead.
@@ -313,6 +320,17 @@ export default function OfficeApp() {
     </div>
   );
 
+  const layoutSwitch = viewMode === 'skyscraper' && departments.length > 0 && (
+    <div className="cmd-group layout-switch" role="radiogroup" aria-label="Show the departments as">
+      <button type="button" role="radio" aria-checked={layout === 'building'} className={layout === 'building' ? 'on' : ''} onClick={() => chooseLayout('building')} title="The building">
+        <Icon name="building" size={13} /><span className="ls-l">Building</span>
+      </button>
+      <button type="button" role="radio" aria-checked={layout === 'list'} className={layout === 'list' ? 'on' : ''} onClick={() => chooseLayout('list')} title="The departments as a list">
+        <Icon name="list" size={13} /><span className="ls-l">List</span>
+      </button>
+    </div>
+  );
+
   const tabs = (
     <div className="cmd-group drawer-tabs" role="tablist" aria-label="Details">
       {TABS.map((t) => (
@@ -340,6 +358,7 @@ export default function OfficeApp() {
       stage={stage}
       onExitStage={toggleStage}
       right={<>{autopilot}{tabs}</>}
+      afterBrand={layoutSwitch || undefined}
       workflows={floorItems}
       selectedFloorId={selectedFloorId}
       onSelectFloor={selectFloor}
@@ -371,7 +390,21 @@ export default function OfficeApp() {
       <main className="office-main">
         <section className="floor-wrap">
           {viewState ? (
-            viewMode === 'skyscraper' ? (
+            viewMode === 'skyscraper' && layout === 'list' ? (
+              <DepartmentList
+                departments={departments}
+                floors={floors || []}
+                counts={deptCounts}
+                onOpen={(id) => {
+                  setSelectedFloorId(id);
+                  setInteriorTab('office');
+                  setViewMode('interior');
+                }}
+                insetRight={drawer ? DRAWER_W + 12 : 0}
+              >
+                {topGoalBar}
+              </DepartmentList>
+            ) : viewMode === 'skyscraper' ? (
               <SkyscraperBuilding
                 state={viewState}
                 workflows={[]}
@@ -441,6 +474,14 @@ export default function OfficeApp() {
                 onInspect={setOpenId}
                 onOpenMail={setOpenMail}
                 onClose={() => setDrawer(null)}
+                scope={departments.length ? {
+                  departments: departments.map((d) => ({ id: d.id, name: d.name, color: d.color || '#64748b' })),
+                  current: selectedDept?.id || null,
+                  // Inside a department, the drawer is that department's; on the building you choose.
+                  locked: viewMode === 'interior' && Boolean(selectedDept),
+                  onPick: (id) => setSelectedFloorId(id || '__all__'),
+                } : undefined}
+                tagOf={selectedDept ? undefined : tagOf}
               />
             </aside>
           )}

@@ -296,7 +296,7 @@ export function uid(prefix: string) {
 
 /* ── Mutators the engine uses ────────────────────────────────────────────── */
 
-export function log(actor: FeedActor, level: FeedLevel, text: string, extra: { taskId?: string; deliverableId?: string; toolCall?: ToolCallLog } = {}) {
+export function log(actor: FeedActor, level: FeedLevel, text: string, extra: { taskId?: string; deliverableId?: string; toolCall?: ToolCallLog; dept?: string } = {}) {
   mutate((s) => {
     s.feed.push({ id: uid('f'), ts: Date.now(), actor, level, text, ...extra });
     if (s.feed.length > 160) s.feed.splice(0, s.feed.length - 160);

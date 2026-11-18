@@ -16,7 +16,10 @@ import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
 import { emailShell, esc, formatHtmlParagraphs, sendMail, sendManyChat, sendWhatsApp, signatureBlock } from '@/lib/email/send';
 import { appendConversation, getConversation, getRecord, setRecordField } from '@/lib/data/records';
 import { isoDate } from '@/lib/data/conditions';
-import { getState, log } from '@/lib/engine/store';
+import { getState, log as storeLog } from '@/lib/engine/store';
+
+/** Lead nurturing is Admissions' work: its activity shows on that floor. */
+const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 
 /* The message library: write once, send to many.
  *
@@ -414,7 +417,7 @@ export async function sendLibraryMessage(input: {
 
   const email = input.test?.to || rec.email;
   if (channel !== 'whatsapp' && email) {
-    const m = await sendMail({ to: email, toName: rec.name, subject: input.test ? `[Test] ${r.subject}` : r.subject, html: r.html, text: r.text, link: r.ctaHref, taskId: input.taskId || `nurture_${msg.id}`, deliverableId: null, fromName: input.sender.name, headers: unsubscribeHeaders(r.unsub) });
+    const m = await sendMail({ dept: 'admissions', to: email, toName: rec.name, subject: input.test ? `[Test] ${r.subject}` : r.subject, html: r.html, text: r.text, link: r.ctaHref, taskId: input.taskId || `nurture_${msg.id}`, deliverableId: null, fromName: input.sender.name, headers: unsubscribeHeaders(r.unsub) });
     mailId = m.id;
     out.push(m.error ? `email failed (${m.error})` : m.delivery === 'smtp' ? 'email sent' : 'email kept in the Inbox (sending paused)');
     if (!m.error) delivered++;

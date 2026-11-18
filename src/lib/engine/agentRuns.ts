@@ -615,7 +615,7 @@ async function deliver(run: AgentRun, step: AgentStep | null, draft: DraftMessag
     const mailInput = { recipientName: run.record.name, subject: draft.subject, body: draft.body, ask: draft.ask, agentName: run.agentName, officeName: run.departmentName, extraHtml: extras?.cardsHtml, extra: extras ? { footer: extras.footer, pixel: extras.pixel } : undefined };
     // To a lead it is a note from one person (lands in the main inbox, reads as human); to a student, the academy's letterhead.
     const mail = extras ? personalEmail(mailInput) : workflowEmail(mailInput);
-    const m = await sendMail({ to: run.record.email, toName: run.record.name, subject: threadSubject || mail.subject, html: mail.html, text: mail.text, link: null, taskId: run.id, deliverableId, ...(replyTo ? { inReplyTo: replyTo } : {}), ...(extras ? { fromName: run.agentName, headers: unsubscribeHeaders(extras.unsub) } : {}) });
+    const m = await sendMail({ dept: run.departmentId || undefined, to: run.record.email, toName: run.record.name, subject: threadSubject || mail.subject, html: mail.html, text: mail.text, link: null, taskId: run.id, deliverableId, ...(replyTo ? { inReplyTo: replyTo } : {}), ...(extras ? { fromName: run.agentName, headers: unsubscribeHeaders(extras.unsub) } : {}) });
     sent.push(m.error ? `email failed (${m.error})` : m.delivery === 'smtp' ? 'email sent' : 'email saved to the Inbox (Safe Test Mode)');
     if (!m.error) delivered++;
   }
@@ -875,7 +875,7 @@ async function doNotify(run: AgentRun, step: AgentStep, tenantId: string) {
     return;
   }
   const mail = workflowEmail({ recipientName: 'team', subject: brief.subject, body: brief.body, agentName: run.agentName, officeName: run.departmentName });
-  const m = await sendMail({ to, toName: 'Team', subject: mail.subject, html: mail.html, text: mail.text, link: null, taskId: run.id, deliverableId: null });
+  const m = await sendMail({ dept: run.departmentId || undefined, to, toName: 'Team', subject: mail.subject, html: mail.html, text: mail.text, link: null, taskId: run.id, deliverableId: null });
   addLog(run, step, m.error ? 'fail' : 'ok', `Briefed ${to}${m.delivery === 'smtp' ? '' : ' (saved to the Inbox, Safe Test Mode)'}: ${brief.subject}.`, brief.body);
 }
 

@@ -17,7 +17,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   return runWithSessionTenant(req, async () => {
     ensureAutomation();
-    const body = (await req.json().catch(() => ({}))) as { action?: string; id?: string };
+    const body = (await req.json().catch(() => ({}))) as { action?: string; id?: string; ids?: unknown };
     const action = String(body.action || '');
 
     if (action === 'approve' && body.id) {
@@ -27,7 +27,8 @@ export async function POST(req: Request) {
     }
 
     if (action === 'approveAll') {
-      const pending = (getState().pendingOutreach || []).filter((x) => x.status === 'pending');
+      const only = Array.isArray(body.ids) ? new Set((body.ids as unknown[]).map(String)) : null;
+      const pending = (getState().pendingOutreach || []).filter((x) => x.status === 'pending' && (!only || only.has(x.id)));
       let sent = 0;
       for (const item of pending) {
         const res = await approveOutreachById(item.id);

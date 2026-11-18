@@ -72,6 +72,8 @@ export interface FeedEntry {
   taskId?: string;
   deliverableId?: string;
   toolCall?: ToolCallLog;
+  /** The department it belongs to: a department id, or a kind ("admissions") when the id is not known. */
+  dept?: string;
 }
 
 export type DeliverableKind = 'catchup_plan' | 'remedial_quiz' | 'checkin_message' | 'agent_message';
@@ -202,6 +204,8 @@ export interface InboxMail {
   error?: string | null;
   providerId: string | null;
   taskId: string;
+  /** The department that sent it: a department id, or a kind ("admissions"). */
+  dept?: string;
   deliverableId: string | null;
   replies?: Array<{ ts: number; from: string; text: string }>;
 }
