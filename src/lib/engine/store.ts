@@ -7,6 +7,7 @@ import type {
 } from '@/lib/types';
 import { AGENTS, ROOMS } from '@/lib/office/layout';
 import { loadArchive, scheduleSave, clearArchive } from './persist';
+import { officeClearedDoc } from './officeCleared';
 import { dbConfigured, loadWorldFromDb, syncWorldToDb } from '@/lib/db/postgres';
 import { sandboxLearnerCards } from '@/lib/lms/sandboxData';
 import { resetSandbox, sandboxAdapter } from '@/lib/lms/lmsAdapter';
@@ -219,6 +220,17 @@ export async function hydrateStoreFromDb(): Promise<boolean> {
     return false;
   }
   if (s.busy) return false;
+  // Nothing from before the office was last cleared comes back from the database.
+  await officeClearedDoc.hydrate().catch(() => {});
+  const cleared = officeClearedDoc.get().at || 0;
+  if (cleared) {
+    loaded.deliverables = (loaded.deliverables || []).filter((d) => (d.createdAt || 0) > cleared);
+    loaded.inbox = (loaded.inbox || []).filter((m) => (m.ts || 0) > cleared);
+    loaded.tasks = (loaded.tasks || []).filter((t) => (t.startedAt || 0) > cleared);
+    loaded.feed = (loaded.feed || []).filter((f) => f.ts > cleared);
+    if (loaded.pendingOutreach) loaded.pendingOutreach = loaded.pendingOutreach.filter((p) => (p.createdAt || 0) > cleared);
+    if (loaded.metrics) loaded.metrics = { ...ZERO };
+  }
   // Merge, never replace: the local archive and the database can each be
   // missing what the other has (a restart, a failed write), so keep the union
   // and, where both have an item, the newer copy.
@@ -277,6 +289,30 @@ export function markOutreachApproval(id: string, status: 'approved' | 'rejected'
     }
   });
   return found;
+}
+
+/** Clears the office's samples and test data: the inbox, outputs, approvals, plans, activity and
+ *  counters. Settings, learners and everything the academy set up stay. Returns what was cleared. */
+export function clearOfficeActivity(): { inbox: number; outputs: number; approvals: number; plans: number; activity: number } {
+  const at = Date.now();
+  let counts = { inbox: 0, outputs: 0, approvals: 0, plans: 0, activity: 0 };
+  mutate((s) => {
+    counts = { inbox: s.inbox.length, outputs: s.deliverables.length, approvals: (s.pendingOutreach || []).filter((p) => p.status === 'pending').length, plans: s.tasks.length, activity: s.feed.length };
+    s.inbox = [];
+    s.deliverables = [];
+    s.pendingOutreach = [];
+    s.tasks = [];
+    s.headlines = [];
+    s.spotlight = null;
+    s.visitors = [];
+    s.busy = null;
+    s.agents = freshAgents();
+    s.rooms = freshRooms();
+    s.metrics = { ...ZERO };
+    s.feed = [{ id: uid('f'), ts: at + 1, actor: 'system', level: 'system', text: 'Samples and test data cleared. The office is ready.' }];
+  });
+  officeClearedDoc.set({ at });
+  return counts;
 }
 
 export function resetWorld() {

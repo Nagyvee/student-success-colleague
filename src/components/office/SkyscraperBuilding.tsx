@@ -3087,10 +3087,15 @@ export function SkyscraperBuilding({
             setYawDeg(DEFAULT_YAW);
             setPitchDeg(DEFAULT_PITCH);
           }}
-          title="Reset camera"
+          title="Reset the view"
+          aria-label="Reset the view"
           style={{
             height: 28,
-            padding: '0 8px',
+            width: 28,
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             borderRadius: 999,
             border: 'none',
             background: 'transparent',
@@ -3100,69 +3105,10 @@ export function SkyscraperBuilding({
             cursor: 'pointer',
           }}
         >
-          Reset
+          <Icon name="reset" size={14} />
         </button>
 
-        <div style={{ width: 1, height: 16, background: isDark ? '#334155' : '#cbd5e1' }} />
-
-        {floorsBottomToTop.length > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              const sampleId =
-                floorsBottomToTop[Math.min(2, floorsBottomToTop.length - 1)]?.id ||
-                floorsBottomToTop[0].id;
-              setSimulatingRedFloorId((prev) => (prev === sampleId ? null : sampleId));
-            }}
-            title="Toggle sample red error floor illumination"
-            style={{
-              height: 28,
-              padding: '0 10px',
-              borderRadius: 999,
-              border: 'none',
-              background: simulatingRedFloorId ? 'rgba(185, 28, 28, 0.34)' : 'transparent',
-              color: simulatingRedFloorId ? '#ef4444' : isDark ? '#cbd5e1' : '#475569',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-            }}
-          >
-            <span
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: simulatingRedFloorId ? '#dc2626' : '#94a3b8',
-              }}
-            />
-            Error Sample
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => setCustomizeOpen((v) => !v)}
-          style={{
-            height: 28,
-            padding: '0 12px',
-            borderRadius: 999,
-            border: 'none',
-            background: customizeOpen ? brandColor : isDark ? '#1e293b' : '#e2e8f0',
-            color: customizeOpen ? '#ffffff' : 'inherit',
-            fontSize: 11.5,
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-          }}
-        >
-          <Icon name="gear" size={12} />
-          Edit Building
-        </button>
+        {/* Building look and feel: Settings → Building (kept off the stage so it stays clean). */}
       </div>
     </div>
   );

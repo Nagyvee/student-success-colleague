@@ -111,8 +111,6 @@ export default function OfficeApp() {
   };
   const [pendingEnterFloorId, setPendingEnterFloorId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
-  const [autoBusy, setAutoBusy] = useState(false);
-  const [autoError, setAutoError] = useState<string | null>(null);
   const params = useSearchParams();
   const appliedParams = useRef(false);
 
@@ -127,6 +125,8 @@ export default function OfficeApp() {
   const runs = useMemo(() => building?.runs || [], [building]);
   const selectedDept = departments.find((d) => d.id === selectedFloorId) || null;
   const floorNumber = selectedDept ? departments.indexOf(selectedDept) + 1 : 0;
+  // Admissions works with leads, not learners: its drawer shows the leads it is nurturing.
+  const leadsFloor = selectedDept?.kind === 'admissions';
   const isManager = role === 'owner' || role === 'admin';
 
   // ?floor=<department> (or ?office=) opens that floor; ?open=<deliverable> opens a deliverable.
@@ -253,20 +253,10 @@ export default function OfficeApp() {
     }
   }
 
-  async function toggleAutopilot() {
-    if (!building || autoBusy) return;
-    const next = !building.autopilot;
-    if (next && !window.confirm('Switch on autopilot? Agents will start by themselves on new leads, sheet changes, LMS events and their schedules.' + (building.requireApproval ? ' Messages still wait for approval in the Inbox.' : ' Approval Mode is off, so messages go out without a person checking them.'))) return;
-    setAutoBusy(true);
-    setAutoError(null);
-    try {
-      const j = await postDepartments({ action: 'setAutopilot', on: next });
-      if (j.error) setAutoError(j.error);
-      await refreshBuilding();
-    } finally {
-      setAutoBusy(false);
-    }
-  }
+  useEffect(() => {
+    if (drawer === 'leads' && !leadsFloor) setDrawer('learners');
+    else if (drawer === 'learners' && leadsFloor) setDrawer('leads');
+  }, [drawer, leadsFloor]);
 
   const viewState = floorState || state;
   const activeTask = viewState?.tasks.find((t) => t.status === 'running') || viewState?.tasks[0] || null;
@@ -286,54 +276,38 @@ export default function OfficeApp() {
       (viewState?.inbox.length || 0) +
       (viewState?.pendingOutreach?.filter((p) => p.status === 'pending').length || 0),
     learners: viewState?.learners.filter((l) => l.status !== 'on_track').length || 0,
+    leads: 0,
   };
   if (drawer) seen.current[drawer] = counts[drawer];
   const badge = (t: SideTab) => {
     if (t === 'plan') return activeTask?.plan ? `${counts.plan}/${activeTask.plan.steps.length}` : null;
-    if (t === 'feed') return null;
+    if (t === 'feed' || t === 'leads') return null;
     return counts[t] ? String(counts[t]) : null;
   };
   const fresh = (t: SideTab) => drawer !== t && counts[t] > (seen.current[t] ?? 0) && t !== 'feed';
 
-  const autopilot = building && (
-    <div
-      className="cmd-group auto-group"
-      title={autoError || (isManager ? 'Autopilot: agents start by themselves on their triggers and schedules.' : 'Only owners and admins can switch autopilot.')}
-    >
-      <span className="auto-label">
-        <b>Autopilot {building.autopilot ? 'on' : 'off'}</b>
-        <em>{building.autopilot ? 'Agents start by themselves' : 'Agents run when you press Run'}</em>
-      </span>
-      <span className="auto-flags">
-        {building.requireApproval && <span className="is-warn">Approvals on</span>}
-        {building.sendingPaused ? <span className="is-warn">Sending paused</span> : !building.liveOutreach && <span>Test mode</span>}
-      </span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={building.autopilot}
-        aria-label="Autopilot"
-        className={`auto-switch${building.autopilot ? ' on' : ''}`}
-        disabled={!isManager || autoBusy}
-        onClick={() => void toggleAutopilot()}
-      />
+  // One small switch: the picture (the building, or the department's office) or a list.
+  const inside = viewMode === 'interior' && Boolean(selectedDept);
+  const picture = inside ? interiorTab === 'office' : layout === 'building';
+  const setPicture = (on: boolean) => (inside ? setInteriorTab(on ? 'office' : 'details') : chooseLayout(on ? 'building' : 'list'));
+  const layoutSwitch = departments.length > 0 && (viewMode === 'skyscraper' || inside) && (
+    <div className="cmd-group layout-switch" role="radiogroup" aria-label={inside ? 'Show the department as' : 'Show the departments as'}>
+      <button type="button" role="radio" aria-checked={picture} className={picture ? 'on' : ''} onClick={() => setPicture(true)}
+        title={inside ? 'The office' : 'The building'} aria-label={inside ? 'The office' : 'The building'}>
+        <Icon name={inside ? 'door' : 'building'} size={14} />
+      </button>
+      <button type="button" role="radio" aria-checked={!picture} className={!picture ? 'on' : ''} onClick={() => setPicture(false)}
+        title={inside ? `${selectedDept?.name}: agents, sheets and runs` : 'The departments as a list'} aria-label={inside ? 'As a list' : 'The departments as a list'}>
+        <Icon name="list" size={14} />
+      </button>
     </div>
   );
 
-  const layoutSwitch = viewMode === 'skyscraper' && departments.length > 0 && (
-    <div className="cmd-group layout-switch" role="radiogroup" aria-label="Show the departments as">
-      <button type="button" role="radio" aria-checked={layout === 'building'} className={layout === 'building' ? 'on' : ''} onClick={() => chooseLayout('building')} title="The building">
-        <Icon name="building" size={13} /><span className="ls-l">Building</span>
-      </button>
-      <button type="button" role="radio" aria-checked={layout === 'list'} className={layout === 'list' ? 'on' : ''} onClick={() => chooseLayout('list')} title="The departments as a list">
-        <Icon name="list" size={13} /><span className="ls-l">List</span>
-      </button>
-    </div>
-  );
+  const visibleTabs = TABS.filter((t) => (leadsFloor ? t.id !== 'learners' : t.id !== 'leads'));
 
   const tabs = (
     <div className="cmd-group drawer-tabs" role="tablist" aria-label="Details">
-      {TABS.map((t) => (
+      {visibleTabs.map((t) => (
         <button
           key={t.id}
           type="button"
@@ -357,7 +331,7 @@ export default function OfficeApp() {
       state={viewState}
       stage={stage}
       onExitStage={toggleStage}
-      right={<>{autopilot}{tabs}</>}
+      right={tabs}
       afterBrand={layoutSwitch || undefined}
       workflows={floorItems}
       selectedFloorId={selectedFloorId}
@@ -372,19 +346,6 @@ export default function OfficeApp() {
 
   const pendingHere = (floorState?.pendingOutreach || []).filter((p) => p.status === 'pending').length;
   const showOffice = viewMode === 'interior' && (!selectedDept || interiorTab === 'office');
-  const detailsButton = selectedDept && (
-    <button
-      type="button"
-      className="cmd-group cmd-btn"
-      style={{ height: 32, padding: '0 12px', fontSize: 12, fontWeight: 700 }}
-      onClick={() => setInteriorTab('details')}
-      title="Agents, what starts them, the sheets this floor reads and its recent runs"
-    >
-      <Icon name="list" size={13} />
-      <span>{selectedDept.name} details</span>
-    </button>
-  );
-
   return (
     <div className={`shell is-solo${stage ? ' is-stage' : ''}`}>
       <main className="office-main">
@@ -441,7 +402,6 @@ export default function OfficeApp() {
                 roomLabels={officeState && deptWorld ? deptWorld.roomLabels : undefined}
               >
                 {topGoalBar}
-                {detailsButton}
               </Floorplan>
             ) : selectedDept ? (
               <CustomOfficeStage

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import Icon, { type IconName } from '@/components/Icon';
 import { STAGE_INFO, ago, nurturePost, pct, useNurture, type NurtureAgent, type Overview } from './api';
@@ -34,6 +34,14 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
 export default function NurtureClient() {
   const { data, error, refresh } = useNurture();
   const [tab, setTab] = useState<Tab>('journey');
+  // ?tab=leads&q=… (from the Leads drawer in the office) opens that tab with the search filled in.
+  const [initialQ, setInitialQ] = useState('');
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const t = p.get('tab');
+    if (t) setTab(t as Tab);
+    setInitialQ(p.get('q') || '');
+  }, []);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
   const [campaignFor, setCampaignFor] = useState<string | null>(null);
   const notify = useCallback((kind: 'ok' | 'bad', text: string) => setNotice({ kind, text }), []);
@@ -70,7 +78,7 @@ export default function NurtureClient() {
       {tab === 'journey' && <JourneyTab data={data} refresh={refresh} notify={notify} go={setTab} />}
       {tab === 'messages' && <MessagesTab data={data} refresh={refresh} notify={notify} onCampaign={(id) => { setCampaignFor(id); setTab('campaigns'); }} />}
       {tab === 'bank' && <BankTab data={data} refresh={refresh} notify={notify} />}
-      {tab === 'leads' && <LeadsTab data={data} refresh={refresh} notify={notify} />}
+      {tab === 'leads' && <LeadsTab data={data} refresh={refresh} notify={notify} initialQ={initialQ} />}
       {tab === 'campaigns' && <CampaignsTab data={data} refresh={refresh} notify={notify} preselect={campaignFor} />}
       {tab === 'vouchers' && <VouchersTab data={data} refresh={refresh} notify={notify} onCampaign={(id) => { setCampaignFor(id); setTab('campaigns'); }} />}
       {tab === 'quiz' && <QuizVideoTab data={data} refresh={refresh} notify={notify} />}

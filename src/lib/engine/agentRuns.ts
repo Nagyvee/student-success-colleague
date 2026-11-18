@@ -912,6 +912,13 @@ export function stopRun(runId: string): boolean {
   return true;
 }
 
+/** Clears agent runs (all of them, for a clean office after testing). Returns how many. */
+export function clearAgentRuns(): number {
+  const n = doc.get().length;
+  doc.set([]);
+  return n;
+}
+
 /** Stop every active run about one person (they unsubscribed, or a person said so). */
 export function stopRunsFor(email: string, key: string, why: string, exceptRunId?: string): number {
   const e = email.trim().toLowerCase();

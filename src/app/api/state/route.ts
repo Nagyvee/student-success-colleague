@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     ensureAutomation();
     const body = (await req.json().catch(() => ({}))) as { action?: string; settings?: Partial<Settings>; url?: string | null; goal?: string; focus?: string[] };
     const manager = MANAGER_ROLES.includes(session.role);
-    const sensitive = body.action === 'reset' || body.action === 'publicUrl' || body.action === 'sheet'
+    const sensitive = body.action === 'reset' || body.action === 'clearSamples' || body.action === 'publicUrl' || body.action === 'sheet'
       || (body.action === 'settings' && body.settings && ['requireApproval', 'autoRunMode', 'liveOutreachEnabled', 'lmsMode'].some((k) => k in (body.settings as object)));
     if (sensitive && !manager) {
       return NextResponse.json({ error: 'Only a workspace owner or admin can change sending, autopilot or data settings.' }, { status: 403 });
@@ -45,6 +45,11 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
       }
       catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+    }
+    if (body.action === 'clearSamples') {
+      if (getState().busy) return NextResponse.json({ error: 'Wait for the current run to finish first.' }, { status: 409 });
+      const { clearSamplesAndTests } = await import('@/lib/engine/clearSamples');
+      return NextResponse.json({ ok: true, cleared: clearSamplesAndTests() });
     }
     if (body.action === 'reset') {
       if (getState().busy) return NextResponse.json({ error: 'Wait for the current run to finish before resetting.' }, { status: 409 });

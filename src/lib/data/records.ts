@@ -110,6 +110,17 @@ export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId
   return { record, created: false, changed: [...new Set(changed)] };
 }
 
+/** Removes the records a test left behind (preview leads). Returns how many. */
+export function removeRecords(match: (r: DataRecord) => boolean): number {
+  const all = doc.get();
+  let n = 0;
+  for (const bucket of Object.values(all)) {
+    for (const [key, r] of Object.entries(bucket)) if (match(r)) { delete bucket[key]; n++; }
+  }
+  if (n) doc.save();
+  return n;
+}
+
 /** An agent writes a field on a record (stored as agent_<field> unless it is a sheet column). */
 export function setRecordField(sourceId: string | null, key: string, field: string, value: string): DataRecord | null {
   const rec = getRecord(sourceId, key);

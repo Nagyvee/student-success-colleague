@@ -95,10 +95,13 @@ export default function GoalBar({
               onSelectFloor?.('__all__');
               onToggleViewMode?.('skyscraper');
             }}
-            title="Return to full 3D Skyscraper view"
+            title="Back to the building"
+            aria-label="Back to the building"
             style={{
               height: 28,
-              padding: '0 10px',
+              width: 30,
+              padding: 0,
+              justifyContent: 'center',
               fontSize: 11.5,
               fontWeight: 700,
               display: 'inline-flex',
@@ -106,8 +109,7 @@ export default function GoalBar({
               gap: 5,
             }}
           >
-            <Icon name="building" size={13} />
-            <span>← Skyscraper</span>
+            <Icon name="building" size={15} />
           </button>
         )}
 
@@ -144,16 +146,11 @@ export default function GoalBar({
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.2 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.2, whiteSpace: 'nowrap' }} title="Switch floor">
               {selectedWf && viewMode === 'interior'
-                ? `Floor ${selectedFloorIdx + 1} · ${selectedWf.name}`
-                : `${companyName} · ${workflows.length || 1} ${floorNoun}`}
+                ? `F${selectedFloorIdx + 1} · ${selectedWf.name}`
+                : `${companyName} · ${workflows.length || 1} ${floorNoun.toLowerCase()}`}
             </span>
-            <em style={{ fontSize: 10.5, fontStyle: 'normal', color: '#64748b' }}>
-              {selectedWf && viewMode === 'interior'
-                ? `${selectedWf.officeName} · Click to switch floor`
-                : 'Click to jump to any floor or interior'}
-            </em>
           </div>
           <span
             style={{

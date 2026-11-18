@@ -94,6 +94,16 @@ export default function SettingsClient() {
   const a = state?.automation;
   const say = (t: string) => { setMsg(t); setTimeout(() => setMsg(null), 4000); };
   async function set(patch: Partial<Settings>) { try { await post('/api/state', { action: 'settings', settings: patch }); } catch (e) { say((e as Error).message); } }
+  const [clearing, setClearing] = useState(false);
+  async function clearSamples() {
+    if (!window.confirm('Clear all samples and test data? The inbox, outputs, approvals, plans, activity and test agent runs are removed, with the preview leads and their vouchers. Settings, real leads and students, messages, videos and the quiz stay.')) return;
+    setClearing(true);
+    try {
+      const r = await post('/api/state', { action: 'clearSamples' }) as { cleared?: Record<string, number> };
+      const c = r.cleared || {};
+      say(`Cleared: ${c.inbox ?? 0} emails, ${c.outputs ?? 0} outputs, ${c.approvals ?? 0} approvals, ${c.runs ?? 0} agent runs, ${c.previewLeads ?? 0} preview leads.`);
+    } catch (e) { say((e as Error).message); } finally { setClearing(false); }
+  }
   async function saveAgent(id: AgentId) {
     if (!teach) return;
     await fetch('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [id]: teach[id] }) });
@@ -396,6 +406,13 @@ export default function SettingsClient() {
       <section className="set-sec">
         <div className="set-h"><h2>Delivery, Safety &amp; Preferences</h2></div>
         <div className="set-cards">
+          <div className="set-card">
+            <h3><Icon name="trash" size={15} />Samples &amp; test data</h3>
+            <p>Before a demo or going live: removes everything made while testing (the inbox, outputs, approvals, plans, activity, agent runs, preview leads and their vouchers). Settings, real leads and students, messages, videos and the quiz stay.</p>
+            <button type="button" className="btn btn-outline btn-sm" disabled={clearing} onClick={() => void clearSamples()}>
+              <Icon name="trash" size={13} />{clearing ? 'Clearing…' : 'Clear samples & test data'}
+            </button>
+          </div>
           <div className="set-card">
             <h3>
               <Icon name="shield" size={15} />Outreach Environment{' '}

@@ -21,6 +21,7 @@ import { addLink, addNote, deleteResource, importWhatsApp, importYouTube, listRe
 import { approveMessage, deleteMessage, getMessage, listMessages, previewMessage, resolveMessage, saveMessage, sendLibraryMessage, setMessageStatus, writeLibraryMessage, writeStarterSet } from '@/lib/nurture/library';
 import { cancelCampaign, campaignSender, createCampaign, listCampaigns, segmentMembers } from '@/lib/nurture/campaigns';
 import { buildFitQuiz, ensureFitQuiz } from '@/lib/nurture/fit';
+import { leadChannel } from '@/lib/nurture/qualify';
 import { buildMissingVideos, buildProgrammeVideo, listVideos } from '@/lib/nurture/video';
 import { leadProgramme, programmeList } from '@/lib/nurture/programmes';
 import { engagementFor, signTrack } from '@/lib/nurture/track';
@@ -54,6 +55,7 @@ function leadRow(r: DataRecord) {
     opens: Number(f.nurture_opens || 0), clicks: Number(f.nurture_clicks || 0), sent: Number(f.nurture_count || 0),
     lastClicked: f.last_clicked || '', fit: f.fit_track ? `${f.fit_track} → ${f.fit_programme}` : '', optedOut: f.opted_out === 'yes',
     firstSeenAt: r.firstSeenAt, lastEngagedAt: f.last_engaged_at || '',
+    qualified: f.qualified === 'yes', channel: leadChannel(f), dialer: f.dialer_status || '',
   };
 }
 
@@ -133,12 +135,17 @@ export async function GET(req: Request) {
     if (url.searchParams.get('leads')) {
       const q = (url.searchParams.get('q') || '').trim().toLowerCase();
       const want = url.searchParams.get('stage') || '';
-      const rows = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes').map(leadRow)
+      const all = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes').map(leadRow);
+      // Every lead by stage (the list below is the 300 most engaged that match).
+      const stageOf = (r: ReturnType<typeof leadRow>) => (r.optedOut ? 'opted_out' : r.qualified ? 'qualified' : r.engagement);
+      const counts: Record<string, number> = { all: all.length, qualified: 0, hot: 0, warm: 0, cold: 0, opted_out: 0 };
+      for (const r of all) counts[stageOf(r)]++;
+      const rows = all
         .filter((r) => !q || `${r.name} ${r.email} ${r.phone} ${r.programme} ${r.source}`.toLowerCase().includes(q))
-        .filter((r) => !want || (want === 'opted_out' ? r.optedOut : want === 'applied' ? DONE.test(r.status) : r.engagement === want && !r.optedOut && !DONE.test(r.status)))
+        .filter((r) => !want || (want === 'opted_out' ? r.optedOut : want === 'applied' ? DONE.test(r.status) : want === 'qualified' ? r.qualified && !r.optedOut : r.engagement === want && !r.optedOut && !DONE.test(r.status)))
         .sort((a, b) => b.score - a.score || b.firstSeenAt - a.firstSeenAt)
         .slice(0, 300);
-      return NextResponse.json({ leads: rows });
+      return NextResponse.json({ leads: rows, counts });
     }
 
     const leadKey = url.searchParams.get('lead');

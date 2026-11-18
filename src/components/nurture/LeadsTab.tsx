@@ -15,9 +15,9 @@ const FILTERS: { id: string; label: string }[] = [
 
 const heat = (e: LeadRow['engagement']) => (e === 'hot' ? 'hot' : e === 'warm' ? 'warm' : 'cold');
 
-export function LeadsTab({ data, notify, refresh }: { data: Overview; notify: (k: 'ok' | 'bad', t: string) => void; refresh: () => Promise<void> }) {
+export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overview; notify: (k: 'ok' | 'bad', t: string) => void; refresh: () => Promise<void>; initialQ?: string }) {
   const [filter, setFilter] = useState('');
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(initialQ);
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
