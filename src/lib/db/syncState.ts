@@ -1,7 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/* Which copy is newer: the .data files on this machine, or the database?
+/* Which copy to load on start: the .data files on this machine, or the database?
+ *
+ * Today: the local files, whenever they exist (one server writes everything; the
+ * database is its backup and the source only when a file is missing, e.g. a new
+ * server). The rest of this note is the comparison used with THUSO_PREFER_DB=true.
+ *
  *
  * Every store is kept in two places: a file under .data (always written) and
  * Postgres (when it can be reached). When the database is unreachable, for
@@ -58,6 +63,11 @@ const SLACK_MS = 2000;
  */
 export function localWins(localMs: number | null, confirmedMs: number | null, dbMs: number | null): boolean {
   if (localMs == null) return false;
+  // One server (the VPS) writes everything: its own files are always the latest, the database is the
+  // backup. Comparing times could load an outdated database copy over newer work (a lead's score, an
+  // agent's progress), so the local copy wins whenever it exists. THUSO_PREFER_DB=true brings back the
+  // comparison, for a setup where more than one machine writes to the same database.
+  if (!/^(1|true|yes|on)$/i.test((process.env.THUSO_PREFER_DB || '').trim())) return true;
   if (confirmedMs != null) return localMs > confirmedMs + SLACK_MS;
   if (dbMs == null) return true;
   return localMs > dbMs + SLACK_MS;

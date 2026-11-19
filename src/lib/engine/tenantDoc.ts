@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
-import { kvGetRow, kvSet } from '@/lib/db/postgres';
+import { kvGetRow, kvSetJson } from '@/lib/db/postgres';
+import { serialWriter } from '@/lib/db/serialWriter';
 import { confirmedAt, fileTime, localWins, markSynced } from '@/lib/db/syncState';
 
 /* One persisted document per workspace.
@@ -51,10 +52,20 @@ export function tenantDoc<T>(name: string, init: () => T): TenantDoc<T> {
     } catch { /* read-only disk: the database copy still holds it */ }
   }
 
+  // One copy at a time to the database, the newest last (see serialWriter); "synced" is the time of the
+  // copy the database actually holds, so a later change that reached only the file wins on the next start.
+  const pushers = new Map<string, ReturnType<typeof serialWriter<string>>>();
+  function pushUp(tid: string) {
+    let push = pushers.get(tid);
+    if (!push) {
+      push = serialWriter<string>((json) => kvSetJson(name, json, tid), (takenAt) => markSynced(mark, tid, takenAt));
+      pushers.set(tid, push);
+    }
+    void push(() => JSON.stringify(slot(tid).value));
+  }
   function flush(tid: string) {
     writeFile(tid);
-    // Remember when the database has it: a change that reached only the file wins on the next start.
-    void kvSet(name, slot(tid).value, tid).then((ok) => { if (ok) markSynced(mark, tid); });
+    pushUp(tid);
   }
 
   return {
@@ -75,7 +86,7 @@ export function tenantDoc<T>(name: string, init: () => T): TenantDoc<T> {
       const local = fileTime(fileFor(tid));
       if (row === null || localWins(local, confirmedAt(mark, tid), row.updatedAt)) {
         // Nothing in the database yet, or this copy changed while the database was unreachable: send it up.
-        if (local != null || row === null) void kvSet(name, s.value, tid).then((ok) => { if (ok) markSynced(mark, tid); });
+        if (local != null || row === null) pushUp(tid);
         return;
       }
       s.value = row.value;

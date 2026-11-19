@@ -1343,6 +1343,11 @@ export async function kvGetRow<T>(key: string, tenantId = currentTenantId()): Pr
 }
 
 export async function kvSet(key: string, value: unknown, tenantId = currentTenantId()): Promise<boolean> {
+  return kvSetJson(key, JSON.stringify(value), tenantId);
+}
+
+/** kvSet with the value already turned into JSON (a copy taken at one moment, sent later). */
+export async function kvSetJson(key: string, json: string, tenantId = currentTenantId()): Promise<boolean> {
   if (!(await ensureDbReady())) return false;
   const h = getPool();
   if (!h) return false;
@@ -1350,7 +1355,7 @@ export async function kvSet(key: string, value: unknown, tenantId = currentTenan
     await h.pool.query(
       `INSERT INTO tenant_kv (tenant_id, key, value, updated_at) VALUES ($1, $2, $3::jsonb, NOW())
        ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-      [tenantId, key, JSON.stringify(value)],
+      [tenantId, key, json],
     );
     return true;
   } catch (e) {
