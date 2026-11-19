@@ -202,7 +202,7 @@ export default function WorkspaceClient() {
   }
 
   async function runTest(
-    kind: 'moodle' | 'sheet' | 'smtp' | 'whatsapp' | 'manychat' | 'postgres' | 'discord' | 'dialer',
+    kind: 'moodle' | 'sheet' | 'smtp' | 'whatsapp' | 'manychat' | 'postgres' | 'discord' | 'dialer' | 'report',
   ) {
     setBusy(`test-${kind}`);
     setNotice(null);
@@ -1026,11 +1026,13 @@ export default function WorkspaceClient() {
               <p className="pg-sub">
                 When a lead says yes (taps &ldquo;Yes, I want to enrol&rdquo; or &ldquo;Call me&rdquo;, or replies that they want to sign up) or reaches 8 points,
                 Thuso posts a &ldquo;call now&rdquo; card in your Discord channel and adds them to the dialer as a new lead, with a brief in the notes:
-                where they came from, what they want, how they would pay and what they did.
+                where they came from, what they want, how they would pay and what they did. Every weekday at 17:00 the Admissions report
+                (what happened since the last one) posts in the same channel.
               </p>
             </div>
             {renderTestStatus('discord')}
             {renderTestStatus('dialer')}
+            {renderTestStatus('report')}
           </div>
           <div className="pg-grid">
             <label className="field" style={{ gridColumn: '1 / -1' }}>
@@ -1089,6 +1091,9 @@ export default function WorkspaceClient() {
             </button>
             <button type="button" className="btn ghost sm" disabled={busy === 'test-dialer'} onClick={() => runTest('dialer')}>
               {busy === 'test-dialer' ? 'Checking…' : 'Check the dialer'}
+            </button>
+            <button type="button" className="btn ghost sm" disabled={busy === 'test-report'} onClick={() => runTest('report')} title="The Admissions report posts in Discord every weekday at 17:00">
+              {busy === 'test-report' ? 'Posting…' : 'Preview the daily report'}
             </button>
           </div>
         </section>

@@ -312,6 +312,8 @@ function tick() {
     if (!h.lastScheduleCheck || Date.now() - h.lastScheduleCheck >= 60_000) {
       h.lastScheduleCheck = Date.now();
       void runScheduledAgents().catch(() => { /* next minute */ });
+      // The Admissions daily report in Discord: weekdays at 17:00 (South African time).
+      void import('@/lib/nurture/report').then((r) => r.maybeSendNurtureReport(tid)).catch(() => { /* next minute */ });
     }
   }
   // The tutoring team (sweeps, follow-ups, learner-sheet and Moodle triggers) works for Student Success and Learning:

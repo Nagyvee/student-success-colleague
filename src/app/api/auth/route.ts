@@ -234,6 +234,10 @@ export async function POST(req: Request) {
         const res = await testDbConnection();
         return NextResponse.json(res);
       }
+      if (kind === 'report') {
+        const { previewNurtureReport } = await import('@/lib/nurture/report');
+        return NextResponse.json(await previewNurtureReport(tid));
+      }
       if (kind === 'discord' || kind === 'dialer') {
         const { getTenantIntegrations } = await import('@/lib/auth/accounts');
         const real = getTenantIntegrations(tid).handoff || {};

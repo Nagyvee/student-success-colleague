@@ -136,7 +136,12 @@ async function releaseInDialer(s: ReturnType<typeof handoffSettings>, rowId: str
   }
 }
 
-const isDiscordHook = (u: string) => /^https:\/\/(?:canary\.|ptb\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(u);
+/** The team's Discord webhook (Settings, else DISCORD_LEADS_WEBHOOK), or ''. */
+export function discordWebhook(tenantId = currentTenantId()): string {
+  return handoffSettings(tenantId).discordWebhook;
+}
+
+export const isDiscordHook = (u: string) => /^https:\/\/(?:canary\.|ptb\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(u);
 
 /** Posts a card in the team's Discord channel. Only the team sees it. */
 export async function postDiscord(webhook: string, card: { title: string; text: string; urgent: boolean; test?: boolean }): Promise<{ ok: boolean; error?: string }> {
