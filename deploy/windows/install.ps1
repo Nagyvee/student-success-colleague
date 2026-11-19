@@ -29,6 +29,8 @@ Need node 'Install Node.js 20 LTS or newer from https://nodejs.org, then open a 
 Need git 'Install Git from https://git-scm.com/download/win.'
 $major = [int]((node -v).TrimStart('v').Split('.')[0])
 if ($major -lt 20) { throw "Node.js $((node -v)) is too old; install Node.js 20 LTS or newer." }
+# The task runs as SYSTEM, which may not have this Node.js on its PATH: give it the exact node.exe.
+$NodeExe = (Get-Command node).Source
 
 # Settings: secrets live only in .env.local on this machine (never in git).
 $envFile = Join-Path $AppDir '.env.local'
@@ -60,7 +62,7 @@ if (-not $SkipBuild) {
 }
 
 # The app: at boot, as SYSTEM, restarted by run-thuso.ps1 if it stops.
-$run = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSScriptRoot\run-thuso.ps1`" -AppDir `"$AppDir`" -Port $Port" -WorkingDirectory $AppDir
+$run = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSScriptRoot\run-thuso.ps1`" -AppDir `"$AppDir`" -Port $Port -Node `"$NodeExe`"" -WorkingDirectory $AppDir
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable
 $system = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 Register-ScheduledTask -TaskName 'Thuso' -Action $run -Trigger (New-ScheduledTaskTrigger -AtStartup) -Settings $settings -Principal $system -Force | Out-Null
