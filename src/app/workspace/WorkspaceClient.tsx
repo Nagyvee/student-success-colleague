@@ -1062,14 +1062,16 @@ export default function WorkspaceClient() {
                 autoComplete="off"
               />
             </label>
-            <label className="field toggle-field" style={{ gridColumn: '1 / -1' }}>
-              <span>
-                <input
-                  type="checkbox"
-                  checked={Boolean(form.handoff?.dialerOn)}
-                  onChange={(e) => updateField('handoff', { ...(form.handoff || {}), dialerOn: e.target.checked })}
-                />{' '}
-                Send qualified leads to the dialer (the dialer calls them, so this also waits for Live Outreach; Discord only reaches your team)
+            <label className="switch" style={{ gridColumn: '1 / -1', alignItems: 'flex-start', lineHeight: 1.45 }}>
+              <input
+                type="checkbox"
+                checked={Boolean(form.handoff?.dialerOn)}
+                onChange={(e) => updateField('handoff', { ...(form.handoff || {}), dialerOn: e.target.checked })}
+              />
+              <i />
+              <span style={{ display: 'block' }}>
+                <b style={{ color: 'var(--ink)' }}>Send qualified leads to the dialer</b><br />
+                The dialer calls them, so this also waits for Live Outreach. Discord only reaches your team.
               </span>
             </label>
           </div>

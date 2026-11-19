@@ -400,10 +400,10 @@ async function fetchNurturing(tenantId: string): Promise<{ id: string; source: s
   const rows: Awaited<ReturnType<typeof fetchNurturing>> = [];
   for (let page = 1; page <= 60; page++) {
     const res = await fetch(`${url}/api/v1/nurture?page=${page}&per=500`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000), cache: 'no-store' });
-    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: typeof rows; total?: number; per?: number };
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: typeof rows; total?: number; per?: number; more?: boolean };
     if (!res.ok || !j.ok) throw new Error(res.status === 404 ? 'The dialer does not have the Thuso update yet (deploy it, and run its 2026-11-19 migration).' : j.error || `The dialer answered HTTP ${res.status}.`);
     rows.push(...(j.rows || []));
-    if (!j.rows?.length || (j.rows.length < (j.per || 500)) || rows.length >= (j.total || 0)) break;
+    if (typeof j.more === 'boolean' ? !j.more : (!j.rows?.length || j.rows.length < (j.per || 500) || rows.length >= (j.total || 0))) break;
   }
   return rows;
 }
