@@ -81,7 +81,7 @@ export default function Sidebar({ state, tab, onInspect, onOpenMail, onClose, sc
           : <div className="feed-empty">No plan yet. Give the colleague a goal and the Planner writes one here.</div>)}
         {tab === 'feed' && <AuditFeed feed={state?.feed || []} onInspect={onInspect} tagOf={tagOf?.feed} />}
         {tab === 'deliverables' && <DeliverablesPanel deliverables={state?.deliverables || []} onInspect={onInspect} tagOf={tagOf?.deliverable} />}
-        {tab === 'inbox' && <InboxPanel inbox={state?.inbox || []} pending={(state?.pendingOutreach || []).filter((p) => p.status === 'pending')} onOpen={onOpenMail} onInspect={onInspect} paused={Boolean(state?.caps.sendingPaused)} live={!state?.caps.sendingPaused && Boolean(state?.settings.liveOutreachEnabled)} tagOf={tagOf} />}
+        {tab === 'inbox' && <InboxPanel inbox={state?.inbox || []} pending={(state?.pendingOutreach || []).filter((p) => p.status === 'pending')} onOpen={onOpenMail} onInspect={onInspect} paused={Boolean(state?.caps.sendingPaused)} live={!state?.caps.sendingPaused && Boolean(state?.settings.liveOutreachEnabled)} liveOutreach={Boolean(state?.settings.liveOutreachEnabled)} tagOf={tagOf} />}
         {tab === 'learners' && <LearnersPanel learners={state?.learners || []} />}
         {tab === 'leads' && <LeadsPanel />}
         {tab === 'fees' && <FeesPanel />}

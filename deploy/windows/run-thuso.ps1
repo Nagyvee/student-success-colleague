@@ -35,8 +35,20 @@ function Find-Dist {
   return '.next'
 }
 
+# Notepad on Windows Server saves UTF-8 with a byte-order mark, which hides the first setting in
+# .env.local from the app (e.g. SENDING_PAUSED=false would be ignored). Remove it before each start.
+function Repair-EnvFile {
+  $file = Join-Path $AppDir '.env.local'
+  if (-not (Test-Path $file)) { return }
+  $bytes = [IO.File]::ReadAllBytes($file)
+  if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+    [IO.File]::WriteAllBytes($file, $bytes[3..($bytes.Length - 1)])
+  }
+}
+
 while ($true) {
   $log = Join-Path $logDir ("thuso-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
+  try { Repair-EnvFile } catch { }
   $env:CZ_DIST = Find-Dist
   $nodeExe = Find-Node
   if (-not $nodeExe) {

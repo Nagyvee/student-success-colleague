@@ -65,6 +65,7 @@ export default function InboxPanel({
   onInspect,
   paused = false,
   live = false,
+  liveOutreach = true,
   tagOf,
 }: {
   inbox: InboxMail[];
@@ -75,6 +76,8 @@ export default function InboxPanel({
   paused?: boolean;
   /** Sending is live (unlocked on the server and Live Outreach on): previews approved earlier can be sent. */
   live?: boolean;
+  /** The workspace's Live Outreach switch (Settings). */
+  liveOutreach?: boolean;
   tagOf?: TagOf;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -159,11 +162,16 @@ export default function InboxPanel({
     );
   }
 
-  const pauseNote = paused && (
+  // Which switch keeps emails as previews, and how to turn it on.
+  const pauseNote = (paused || !liveOutreach) && (
     <div className="mail" style={{ borderColor: '#d97706', background: 'rgba(217,119,6,.07)' }}>
       <div className="mail-t" style={{ display: 'grid', gap: 4 }}>
-        <b style={{ fontSize: 12.5 }}><Icon name="shield" size={12} /> Sending is paused (test phase)</b>
-        <span style={{ fontSize: 12, opacity: 0.85 }}>Nothing goes to students. Approving a draft marks it approved and keeps the email here so you can read it.</span>
+        <b style={{ fontSize: 12.5 }}><Icon name="shield" size={12} /> {paused ? 'Sending is locked on the server' : 'Live Outreach is off'}</b>
+        <span style={{ fontSize: 12, opacity: 0.85 }}>
+          {paused
+            ? <>Emails stay here as previews. On the VPS, set <code>SENDING_PAUSED=false</code> in <code>.env.local</code> and restart Thuso (<code>Stop-ScheduledTask Thuso; Start-ScheduledTask Thuso</code>).{!liveOutreach ? ' Then turn Live Outreach on in Settings.' : ''}</>
+            : <>Emails stay here as previews. Turn it on in Settings → Outreach Environment; then send the ones kept here with Send now.</>}
+        </span>
       </div>
     </div>
   );
