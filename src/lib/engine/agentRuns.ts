@@ -273,6 +273,21 @@ function finish(run: AgentRun, status: 'completed' | 'stopped' | 'failed', note:
   log('system', status === 'failed' ? 'error' : 'approve', `${tag(run)} ${status === 'completed' ? 'Finished' : status === 'stopped' ? 'Stopped' : 'Failed'} for ${run.record.name}.`);
 }
 
+/* Nurturing never crowds a lead: at most one email in NURTURE_SPACING_HOURS (24 by default). A step that
+ * would send sooner waits until then. Answers to something they just wrote (a reply) are not held back. */
+export const spacingHours = () => Math.max(0, Number(process.env.NURTURE_SPACING_HOURS ?? 24) || 0);
+const SENDING_STEPS = new Set<AgentStep['kind']>(['ai_message', 'send_library', 'send_voucher']);
+
+/** When this lead may get their next nurturing email, if it is not yet (else null). */
+export function nextEmailAllowedAt(fields: Record<string, string>, trigger: string, now = Date.now(), hours = spacingHours()): number | null {
+  if (!hours || /reply/i.test(trigger)) return null;
+  const t = (v: string | undefined) => { const n = v ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : 0; };
+  const last = Math.max(t(fields.nurture_delivered_at), t(fields.nurture_last_sent_at));
+  if (!last) return null;
+  const at = last + hours * 3_600_000;
+  return at > now ? at : null;
+}
+
 function waitFor(run: AgentRun, hours: number, next: string | null, step: AgentStep, why: string) {
   const ms = Math.max(60_000 / WAIT_SCALE, (hours * 3_600_000) / WAIT_SCALE);
   run.status = 'waiting';
@@ -280,6 +295,17 @@ function waitFor(run: AgentRun, hours: number, next: string | null, step: AgentS
   run.cursor = next;
   const when = new Date(run.resumeAt).toLocaleString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   addLog(run, step, 'wait', `${why} Carrying on ${when}.`);
+}
+
+/** A lead who had a nurturing email less than a day ago: this step waits (and runs again then). */
+function holdForSpacing(run: AgentRun, step: AgentStep): boolean {
+  if (!SENDING_STEPS.has(step.kind) || run.record.sourceId !== LEADS_SOURCE_ID) return false;
+  const rec = getRecord(run.record.sourceId, run.record.key);
+  const at = rec ? nextEmailAllowedAt(rec.fields, run.trigger || '') : null;
+  if (!at) return false;
+  const first = run.record.name.split(/\s+/)[0];
+  waitFor(run, (at - Date.now()) / 3_600_000, step.id, step, `${first} had an email less than ${spacingHours()} hours ago; nurturing never sends two in a day.`);
+  return true;
 }
 
 /** Runs one step. Returns false when the run pauses (waiting, approval) or ends. */
@@ -364,6 +390,7 @@ async function stepOnce(run: AgentRun, tenantId: string): Promise<boolean> {
     }
 
     case 'ai_message': {
+      if (holdForSpacing(run, step)) return false;
       await doMessage(run, step);
       if (run.status === 'awaiting_approval') { run.cursor = next(); return false; }
       run.cursor = next();
@@ -371,6 +398,7 @@ async function stepOnce(run: AgentRun, tenantId: string): Promise<boolean> {
     }
 
     case 'send_library': {
+      if (holdForSpacing(run, step)) return false;
       const end = await doLibrary(run, step);
       if (end) { finish(run, 'completed', end); return false; }
       run.cursor = next();
@@ -396,6 +424,7 @@ async function stepOnce(run: AgentRun, tenantId: string): Promise<boolean> {
     }
 
     case 'send_voucher': {
+      if (holdForSpacing(run, step)) return false;
       await doVoucher(run, step);
       run.cursor = next();
       return run.status !== 'awaiting_approval';
@@ -515,7 +544,11 @@ async function doMessage(run: AgentRun, step: AgentStep) {
     return;
   }
   const mind = mindFor(run);
-  let draft = await writeMessage(mind, step);
+  // A note that would offer the video, to someone who has just watched it: talk about what they did instead.
+  const said = run.vars._video_watched === 'yes' && /video/i.test(step.instructions || '')
+    ? { ...step, instructions: `${step.instructions}\nIMPORTANT: they have already watched their programme video, so do not send, offer or mention a new video. Speak to what they did (their quiz result, the programme they watched) and ask for the next step.` }
+    : step;
+  let draft = await writeMessage(mind, said);
   const first = (f.first_name || run.record.name).split(/\s+/)[0];
   const dept = mind.department?.kind;
 
@@ -812,6 +845,12 @@ async function doVideo(run: AgentRun, step: AgentStep) {
   const { leadProgramme } = await import('@/lib/nurture/programmes');
   const base = videoFor(leadProgramme(rec.fields) || 'general');
   if (!base) { addLog(run, step, 'skip', 'No video this time: there is no programme video yet (Lead Nurturing → Quiz & videos), so the next message goes without one.'); return; }
+  // They have watched it already: the note does not send it again (or say it is new).
+  if (/(^|\|)video:/.test(rec.fields.nurture_seen || '')) {
+    run.vars._video_watched = 'yes';
+    addLog(run, step, 'skip', `${run.record.name.split(/\s+/)[0]} has already watched "${base.title}", so the next message does not send it again.`);
+    return;
+  }
   run.vars._video = 'yes';
   addLog(run, step, 'ok', `${run.record.name.split(/\s+/)[0]} gets "${base.title}" with a greeting made from their record. The next message links to it.`);
 }

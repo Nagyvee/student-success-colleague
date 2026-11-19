@@ -220,14 +220,8 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
   const s = handoffSettings(tenantId);
   const academy = getAcademyContext().academyName;
 
-  // 1. Discord (the team only).
-  let discord = 'not connected';
-  if (s.discordWebhook) {
-    const r = await postDiscord(s.discordWebhook, { title: `${preview ? '[TEST] ' : ''}${rec.name}: ${QUALIFY_REASON[q.reason].said}`, text: `${brief}\n\nPhone: ${clean(q.phone || rec.phone, 30) || 'none'}${rec.email ? `\nEmail: ${rec.email}` : ''}\n${academy} · Thuso`, urgent: QUALIFY_REASON[q.reason].now, test: false });
-    discord = r.ok ? 'sent' : `failed: ${r.error}`;
-  }
-
-  // 2. The dialer (it rings real people: only with Live Outreach on, never for a preview).
+  // 1. The dialer first (it rings real people: only with Live Outreach on, never for a preview),
+  //    so the Discord card can tell the team whether the lead is already there.
   let dialer = 'not connected';
   if (preview) dialer = 'skipped: a preview lead';
   else if (!s.dialerUrl || !s.dialerKey) dialer = 'not connected';
@@ -240,6 +234,17 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
     if (r.id) setRecordField(sourceId, key, 'dialer_lead_id', r.id);
   }
   setRecordField(sourceId, key, 'dialer_status', dialer);
+  const inDialer = /^(moved to New|already)/.test(dialer);
+  const dialerLine = inDialer
+    ? `In the dialer: ${dialer.replace(/ in the dialer$/, '')}. ${QUALIFY_REASON[q.reason].now ? 'Call now, or the dialer calls them.' : 'Call today, or the dialer calls them.'}`
+    : `Not in the dialer (${dialer}): call from here.`;
+
+  // 2. Discord (the team only).
+  let discord = 'not connected';
+  if (s.discordWebhook) {
+    const r = await postDiscord(s.discordWebhook, { title: `${preview ? '[TEST] ' : ''}${rec.name}: ${QUALIFY_REASON[q.reason].said}`, text: `${brief}\n\n${dialerLine}\nPhone: ${clean(q.phone || rec.phone, 30) || 'none'}${rec.email ? `\nEmail: ${rec.email}` : ''}\n${academy} · Thuso`, urgent: QUALIFY_REASON[q.reason].now, test: false });
+    discord = r.ok ? 'sent' : `failed: ${r.error}`;
+  }
 
   // 3. Once they said yes, the marketing journey stops: a person takes it from here.
   if (QUALIFY_REASON[q.reason].now && !preview) {

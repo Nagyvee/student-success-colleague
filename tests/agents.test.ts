@@ -13,6 +13,8 @@ import path from 'node:path';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thuso-agents-'));
 process.chdir(dir);
 for (const k of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'DATABASE_URL', 'PGHOST', 'SMTP_HOST', 'DIALER_URL']) delete process.env[k];
+// These tests walk whole journeys in seconds; the one-email-a-day spacing has its own test below.
+process.env.NURTURE_SPACING_HOURS = '0';
 
 type M = {
   ctx: typeof import('../src/lib/auth/tenantContext');
@@ -256,3 +258,14 @@ test('every job has unique step ids (a repeat would send a run to the wrong step
     assert.equal(new Set(ids).size, ids.length, `${w.name} repeats a step id`);
   }
 }));
+
+test('nurturing never crowds a lead: one email a day, but an answer to their reply goes at once', async () => {
+  const { nextEmailAllowedAt } = await import('../src/lib/engine/agentRuns');
+  const now = Date.parse('2026-11-19T16:00:00Z');
+  const justEmailed = { nurture_delivered_at: '2026-11-19T15:50:00Z' };
+  assert.equal(nextEmailAllowedAt(justEmailed, 'lead turned hot', now, 24), Date.parse('2026-11-20T15:50:00Z'), 'the next one waits a day');
+  assert.equal(nextEmailAllowedAt(justEmailed, 'a reply', now, 24), null, 'an answer to their reply is not held back');
+  assert.equal(nextEmailAllowedAt({ nurture_delivered_at: '2026-11-18T10:00:00Z' }, 'lead turned hot', now, 24), null, 'a day later it goes');
+  assert.equal(nextEmailAllowedAt({}, 'new row', now, 24), null, 'the welcome goes at once');
+  assert.equal(nextEmailAllowedAt(justEmailed, 'lead turned hot', now, 0), null, 'spacing switched off: nothing waits');
+});
