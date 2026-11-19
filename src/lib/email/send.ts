@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { liveAllowed, sendingPaused } from './pause';
 import type { CheckInMessage, InboxMail, QuizQuestion, QuizResult, RemedialQuiz } from '@/lib/types';
-import { log, publicUrl, pushMail, uid } from '@/lib/engine/store';
+import { getState, log, mutate, publicUrl, pushMail, uid } from '@/lib/engine/store';
 import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
 import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 
@@ -13,6 +13,8 @@ export interface MailInput {
   link: string | null; taskId: string; deliverableId: string | null;
   /** The department sending it (a department id, or a kind such as "admissions"). */
   dept?: string;
+  /** Send with this exact From line (a preview sent later keeps the sender it was written with). */
+  fromLine?: string;
   /** The Message-ID this answers, so the reply stays in their email thread. */
   inReplyTo?: string;
   /** The person it comes from ("Naledi"): shown as "Naledi · Melsoft Academy". */
@@ -261,7 +263,7 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
   const live = liveAllowed(ti.liveOutreachEnabled);
   const cfg = smtpConfig();
   const ac = getAcademyContext(tid);
-  const from = input.fromName ? personalFrom(senderAddress(cfg), input.fromName, ac.academyName) : senderAddress(cfg);
+  const from = input.fromLine || (input.fromName ? personalFrom(senderAddress(cfg), input.fromName, ac.academyName) : senderAddress(cfg));
   const replyTo = ac.replyTo || cfg.user || undefined;
   const safeRedirect = clean(ti.testRecipientEmail) || (tid === DEFAULT_TENANT_ID ? clean(process.env.DEMO_RECIPIENT_EMAIL) : '');
   const to = safeRedirect || input.to;
@@ -302,6 +304,28 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
   };
   pushMail(mail);
   return mail;
+}
+
+/** Emails approved while sending was paused (or Live Outreach was off) stay in the Inbox as previews.
+ *  Once sending is live, these send them as they were written (samples and tests are never sent),
+ *  skipping anyone who has since asked us to stop. The preview is replaced by the sent email. */
+export async function sendHeldPreviews(ids?: string[]): Promise<{ sent: number; failed: number; skipped: number; error?: string }> {
+  const tid = currentTenantId();
+  if (!liveAllowed(getTenantIntegrations(tid).liveOutreachEnabled)) {
+    return { sent: 0, failed: 0, skipped: 0, error: sendingPaused() ? 'Sending is still paused on the server (SENDING_PAUSED).' : 'Live Outreach is off (Settings).' };
+  }
+  const { findRecordsByEmail } = await import('@/lib/data/records');
+  const want = ids?.length ? new Set(ids) : null;
+  const held = getState().inbox.filter((m) => m.delivery === 'simulated' && !m.error && (!want || want.has(m.id)) && !/^\[(sample|test)/i.test(m.subject) && !/@(example\.com|local)$/i.test(m.to));
+  let sent = 0, failed = 0, skipped = 0;
+  for (const m of held) {
+    if (findRecordsByEmail(m.to).some((r) => r.fields.opted_out === 'yes')) { skipped++; continue; }
+    const out = await sendMail({ to: m.to, toName: m.toName, subject: m.subject, html: m.html, text: m.text, link: m.link, taskId: m.taskId, deliverableId: m.deliverableId, dept: m.dept, fromLine: m.from });
+    if (out.delivery === 'smtp') sent++; else failed++;
+    // The sent copy (or the failed attempt, with its reason) takes the preview's place.
+    mutate((s) => { s.inbox = s.inbox.filter((x) => x.id !== m.id); });
+  }
+  return { sent, failed, skipped };
 }
 
 /* ── Templates ────────────────────────────────────────────────────────────── */

@@ -24,7 +24,9 @@ export function useQr(text: string | null) {
   return url;
 }
 
-function MailCard({ m, onOpen, onInspect, tag }: { m: InboxMail; onOpen: (id: string) => void; onInspect: (id: string) => void; tag?: DeptTag | null }) {
+const isSample = (m: InboxMail) => /^\[(sample|test)/i.test(m.subject) || /@(example\.com|local)$/i.test(m.to);
+
+function MailCard({ m, onOpen, onInspect, tag, onSendNow, sending }: { m: InboxMail; onOpen: (id: string) => void; onInspect: (id: string) => void; tag?: DeptTag | null; onSendNow?: (id: string) => void; sending?: boolean }) {
   const qr = useQr(m.link);
   const [copied, setCopied] = useState(false);
   return (
@@ -38,6 +40,9 @@ function MailCard({ m, onOpen, onInspect, tag }: { m: InboxMail; onOpen: (id: st
         <b>{m.subject}</b>
         <span>To {m.toName} · {m.to}</span>
         <div className="mail-acts">
+          {onSendNow && m.delivery === 'simulated' && !m.error && !isSample(m) && (
+            <button type="button" className="btn btn-cta btn-sm" disabled={sending} onClick={() => onSendNow(m.id)}><Icon name="send" size={12} />{sending ? 'Sending…' : 'Send now'}</button>
+          )}
           <button type="button" className="btn btn-outline btn-sm" onClick={() => onOpen(m.id)}><Icon name="eye" size={12} />Open email</button>
           {m.link && <a className="btn btn-cta btn-sm" href={m.link} target="_blank" rel="noreferrer"><Icon name="external" size={12} />Open as the student</a>}
           {m.link && (
@@ -59,6 +64,7 @@ export default function InboxPanel({
   onOpen,
   onInspect,
   paused = false,
+  live = false,
   tagOf,
 }: {
   inbox: InboxMail[];
@@ -67,6 +73,8 @@ export default function InboxPanel({
   onInspect: (id: string) => void;
   /** The server's sending lock: approving keeps the message here instead of sending it. */
   paused?: boolean;
+  /** Sending is live (unlocked on the server and Live Outreach on): previews approved earlier can be sent. */
+  live?: boolean;
   tagOf?: TagOf;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -105,6 +113,20 @@ export default function InboxPanel({
       </div>
     </div>
   );
+
+  const sendPreviews = async (ids: string[]) => {
+    setError(null);
+    setBusyId(ids.length === 1 ? `send:${ids[0]}` : 'send:all');
+    try {
+      const res = await fetch('/api/approvals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sendPreviews', ids }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) setError(j.error || 'Could not send.');
+      else if (j.failed || j.skipped) setError(`Sent ${j.sent}. ${j.failed ? `${j.failed} could not be sent (see the email for why). ` : ''}${j.skipped ? `${j.skipped} skipped: they asked us to stop.` : ''}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const held = live ? inbox.filter((m) => m.delivery === 'simulated' && !m.error && !isSample(m)) : [];
 
   const act = async (raw: { action: 'approve' | 'reject' | 'approveAll'; id?: string }) => {
     // "Approve all" approves what is shown here (a department's inbox approves only that department's).
@@ -149,6 +171,15 @@ export default function InboxPanel({
   return (
     <div className="list">
       {pauseNote}
+      {held.length > 0 && (
+        <div className="mail" style={{ borderColor: 'var(--cta, #ff7300)' }}>
+          <div className="mail-t" style={{ display: 'grid', gap: 6 }}>
+            <b style={{ fontSize: 12.5 }}><Icon name="send" size={12} /> {held.length} approved email{held.length === 1 ? ' was' : 's were'} kept as preview{held.length === 1 ? '' : 's'}</b>
+            <span style={{ fontSize: 12, opacity: 0.85 }}>{held.length === 1 ? 'It was' : 'They were'} approved while sending was paused. Sending is live now: send {held.length === 1 ? 'it' : 'them'} as written (anyone who asked us to stop is skipped).</span>
+            <div><button type="button" className="btn btn-cta btn-sm" disabled={busyId !== null} onClick={() => void sendPreviews(held.map((m) => m.id))}><Icon name="send" size={12} />{busyId === 'send:all' ? 'Sending…' : `Send ${held.length === 1 ? 'it' : `all ${held.length}`} now`}</button></div>
+          </div>
+        </div>
+      )}
       {sampleBar}
       {error && (
         <div className="mail" style={{ borderColor: '#dc2626' }}>
@@ -209,7 +240,7 @@ export default function InboxPanel({
         </>
       )}
 
-      {inbox.map((m) => <MailCard key={m.id} m={m} onOpen={onOpen} onInspect={onInspect} tag={tagOf?.mail(m)} />)}
+      {inbox.map((m) => <MailCard key={m.id} m={m} onOpen={onOpen} onInspect={onInspect} tag={tagOf?.mail(m)} onSendNow={live ? (id) => void sendPreviews([id]) : undefined} sending={busyId === `send:${m.id}`} />)}
     </div>
   );
 }

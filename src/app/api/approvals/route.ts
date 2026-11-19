@@ -26,6 +26,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, ...res, pendingOutreach: getState().pendingOutreach || [] });
     }
 
+    // Approved while sending was paused: send them now that it is live.
+    if (action === 'sendPreviews') {
+      const { sendHeldPreviews } = await import('@/lib/email/send');
+      const r = await sendHeldPreviews(Array.isArray(body.ids) ? (body.ids as unknown[]).map(String) : undefined);
+      return r.error ? NextResponse.json({ error: r.error }, { status: 409 }) : NextResponse.json({ ok: true, ...r });
+    }
+
     if (action === 'approveAll') {
       const only = Array.isArray(body.ids) ? new Set((body.ids as unknown[]).map(String)) : null;
       const pending = (getState().pendingOutreach || []).filter((x) => x.status === 'pending' && (!only || only.has(x.id)));
