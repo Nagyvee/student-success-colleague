@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { FeedActor, FeedEntry, FeedLevel } from '@/lib/types';
 import { AGENT_BY_ID } from '@/lib/office/layout';
 import Icon, { type IconName } from '@/components/Icon';
+import type { CSSProperties } from 'react';
+import type { DeptTag } from '@/components/office/deptScope';
 
 /* Every thought, draft, critique, fix and dispatch, as it happens. */
 
@@ -21,7 +23,7 @@ const LEVEL_TAG: Partial<Record<FeedLevel, string>> = { plan: 'Plan', error: 'Se
 
 const fmt = (ts: number) => new Date(ts).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-export default function AuditFeed({ feed, onInspect }: { feed: FeedEntry[]; onInspect: (id: string) => void }) {
+export default function AuditFeed({ feed, onInspect, tagOf }: { feed: FeedEntry[]; onInspect: (id: string) => void; tagOf?: (f: FeedEntry) => DeptTag | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
   const [filter, setFilter] = useState<'all' | 'coo' | 'issues'>('all');
@@ -66,6 +68,7 @@ export default function AuditFeed({ feed, onInspect }: { feed: FeedEntry[]; onIn
                 <Icon name={LEVEL_ICON[f.level]} size={12} strokeWidth={2.4} />
                 <span>{f.actor in AGENT_BY_ID ? `${AGENT_BY_ID[f.actor as keyof typeof AGENT_BY_ID].name} · ${ACTOR_LABEL[f.actor]}` : ACTOR_LABEL[f.actor]}</span>
                 {LEVEL_TAG[f.level] && <span className="fi-tag">{LEVEL_TAG[f.level]}</span>}
+                {(() => { const d = tagOf?.(f); return d ? <span className="dept-tag" style={{ '--c': d.color } as CSSProperties}>{d.name}</span> : null; })()}
               </div>
               <div className="fi-text">{linkify(f.text)}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

@@ -1,7 +1,9 @@
 import fs from 'node:fs';
+import { sendingPaused } from '@/lib/email/pause';
 import path from 'node:path';
-import type { LearnerStatus } from '@/lib/types';
+import type { LearnerStatus, MissedQuestion } from '@/lib/types';
 import { MODULES, SEED, roughRisk } from './sandboxData';
+import { MoodleLmsAdapter, moodleConfigured } from './moodleAdapter';
 
 /* The LMS · the integration layer.
  *
@@ -34,12 +36,15 @@ export interface StudentProfile {
   programmeCode: string;
   enrolledAt: string;
   status: LearnerStatus;
+  /** Moodle groups (intakes) the student is in. */
+  groups?: string[];
 }
 
 export interface EngagementMetrics {
   studentId: string;
   loginStreakDays: number;
   daysSinceLastLogin: number;
+  neverLoggedIn?: boolean;
   modulesCompleted: number;
   modulesTotal: number;
   completionPct: number;
@@ -47,6 +52,27 @@ export interface EngagementMetrics {
   hoursThisWeek: number;
   forumPosts: number;
   lastActivityAt: string;
+  attendancePct?: number;
+  missedClasses?: number;
+  missedAssignments?: number;
+  overdueAssignments?: number;
+  paymentStatus?: 'ok' | 'overdue' | 'arrangement';
+  courses?: {
+    id: number;
+    code: string;
+    name: string;
+    progressPct: number | null;
+    completedActivities: number;
+    totalActivities: number;
+  }[];
+  incompleteActivities?: {
+    name: string;
+    type: string;
+    course: string;
+    dueAt?: string;
+  }[];
+  /** Assignments not submitted yet whose due date is still ahead, soonest first. */
+  upcoming?: { name: string; course: string; dueAt: string }[];
 }
 
 export interface AssessmentRecord {
@@ -60,6 +86,9 @@ export interface AssessmentRecord {
   passed: boolean;
   takenAt: string;
   weakTopics: string[];
+  missedQuestions?: MissedQuestion[];
+  feedback?: string;
+  courseName?: string;
   kind: 'quiz' | 'project' | 'remedial';
 }
 
@@ -98,14 +127,15 @@ export interface LmsAdapter {
   listStudents(): Promise<StudentProfile[]>;
   getStudent(id: string): Promise<StudentProfile | null>;
   getEngagement(id: string): Promise<EngagementMetrics | null>;
-  getAssessments(id: string): Promise<AssessmentRecord[]>;
+  getAssessments(id: string, opts?: { includeMissedQuestions?: boolean }): Promise<AssessmentRecord[]>;
   getModule(code: string): Promise<ModuleSyllabus | null>;
   recordRemedialQuiz(record: RemedialQuizRecord): Promise<{ ok: boolean; syncedAt: string }>;
   updateStudentStatus(id: string, status: LearnerStatus, note: string): Promise<{ ok: boolean }>;
 }
 
 export class LmsError extends Error {
-  constructor(message: string, public readonly cause?: unknown) { super(message); this.name = 'LmsError'; }
+  readonly cause?: unknown;
+  constructor(message: string, cause?: unknown) { super(message); this.name = 'LmsError'; this.cause = cause; }
 }
 
 /* ── Risk, the same for every adapter ─────────────────────────────────────── */
@@ -114,22 +144,30 @@ export function assessRisk(e: EngagementMetrics, assessments: AssessmentRecord[]
   const sorted = [...assessments].sort((a, b) => a.takenAt.localeCompare(b.takenAt));
   const latest = sorted[sorted.length - 1];
   const failed = [...sorted].reverse().find((a) => !a.passed) || null;
-  const score = roughRisk(e.daysSinceLastLogin, e.completionPct, latest?.scorePct ?? 70, e.loginStreakDays);
+  let score = roughRisk(e.daysSinceLastLogin, e.completionPct, latest?.scorePct ?? 70, e.loginStreakDays);
+  if ((e.missedClasses ?? 0) >= 2) score = Math.min(100, score + 18);
+  if ((e.missedAssignments ?? 0) >= 1) score = Math.min(100, score + 12);
+  if (e.paymentStatus === 'overdue') score = Math.min(100, Math.max(score, 62));
   const signals: string[] = [];
-  if (e.daysSinceLastLogin >= 5) signals.push(`${e.daysSinceLastLogin} days since last login`);
-  if (e.loginStreakDays === 0) signals.push('login streak broken');
+  if (e.neverLoggedIn) signals.push('no recorded LMS activity yet');
+  else if (e.daysSinceLastLogin >= 5) signals.push(`${e.daysSinceLastLogin} days since last activity`);
+  if (e.loginStreakDays === 0) signals.push('activity streak broken');
   if (e.hoursThisWeek < 2) signals.push(`${e.hoursThisWeek.toFixed(1)} h of study this week`);
-  if (e.completionPct < 60) signals.push(`${e.completionPct}% of the programme complete, cohort median 66%`);
-  if (failed) signals.push(`${failed.moduleCode} checkpoint scored ${failed.scorePct}% against a ${failed.passMark}% pass mark`);
-  if (e.currentModule.progressPct < 50) signals.push(`${e.currentModule.code} stalled at ${e.currentModule.progressPct}%`);
+  if (e.completionPct < 60) signals.push(`${e.completionPct}% activity completion (${e.modulesCompleted}/${e.modulesTotal})`);
+  if ((e.missedClasses ?? 0) >= 2) signals.push(`missed ${e.missedClasses} recent live classes`);
+  if ((e.missedAssignments ?? 0) >= 1) signals.push(`${e.missedAssignments} overdue/missing assignment${e.missedAssignments === 1 ? '' : 's'}`);
+  if (e.paymentStatus === 'overdue') signals.push('tuition / admin check-in flagged on billing sheet');
+  if (failed) signals.push(`${failed.title || failed.moduleCode} scored ${failed.scorePct}% (pass mark ${failed.passMark}%)`);
+  if (e.currentModule.progressPct < 50) signals.push(`${e.currentModule.title || e.currentModule.code} stalled at ${e.currentModule.progressPct}%`);
   const weakCode = failed?.moduleCode || (e.currentModule.progressPct < 50 ? e.currentModule.code : null);
   const mod = weakCode ? modules.find((m) => m.code === weakCode) || null : null;
+  const fallbackTopic = failed?.weakTopics[0] || e.incompleteActivities?.[0]?.name || mod?.topics[0] || null;
   return {
     score,
     band: score >= 60 ? 'at_risk' : score >= 35 ? 'watch' : 'on_track',
     signals,
     weakModule: mod ? { code: mod.code, title: mod.title } : weakCode ? { code: weakCode, title: failed?.moduleTitle || e.currentModule.title } : null,
-    weakTopic: failed?.weakTopics[0] || mod?.topics[0] || null,
+    weakTopic: fallbackTopic,
     topicKeywords: mod?.keywords || [],
   };
 }
@@ -137,7 +175,15 @@ export function assessRisk(e: EngagementMetrics, assessments: AssessmentRecord[]
 /* ── Sandbox ──────────────────────────────────────────────────────────────── */
 
 /** A change made in the sandbox LMS console, as an LMS would report it. */
-export interface LmsEdit { checkpoint?: number; daysQuiet?: number; at: number }
+export interface LmsEdit {
+  checkpoint?: number;
+  daysQuiet?: number;
+  missedClasses?: number;
+  missedAssignments?: number;
+  paymentStatus?: 'ok' | 'overdue' | 'arrangement';
+  missedQuestions?: MissedQuestion[];
+  at: number;
+}
 
 export class SandboxLmsAdapter implements LmsAdapter {
   readonly mode = 'sandbox' as const;
@@ -163,11 +209,23 @@ export class SandboxLmsAdapter implements LmsAdapter {
   private overrides = new Map<string, Partial<StudentProfile>>();
   private extras = new Map<string, { profile: StudentProfile; engagement: Omit<EngagementMetrics, 'studentId'>; assessments: typeof SEED[number]['assessments'] }>();
   private hidden = new Set<string>();
+  private readonly tenantId: string;
 
-  constructor() { this.load(); }
+  constructor(tenantId = currentTenantId()) {
+    this.tenantId = tenantId;
+    this.load();
+  }
+  private includeSeed(): boolean {
+    return getTenantIntegrations(this.tenantId).lmsProvider === 'sandbox';
+  }
+  private dataFile(): string {
+    return this.tenantId === DEFAULT_TENANT_ID
+      ? path.join(process.cwd(), '.data', 'learners.json')
+      : path.join(process.cwd(), '.data', 'tenants', this.tenantId, 'learners.json');
+  }
   private load() {
     try {
-      const d = JSON.parse(fs.readFileSync(PEOPLE, 'utf8')) as { overrides?: [string, Partial<StudentProfile>][]; extras?: [string, never][]; hidden?: string[] };
+      const d = JSON.parse(fs.readFileSync(this.dataFile(), 'utf8')) as { overrides?: [string, Partial<StudentProfile>][]; extras?: [string, never][]; hidden?: string[] };
       for (const [k, v] of d.overrides || []) this.overrides.set(k, v);
       for (const [k, v] of d.extras || []) this.extras.set(k, v);
       for (const id of d.hidden || []) this.hidden.add(id);
@@ -175,15 +233,61 @@ export class SandboxLmsAdapter implements LmsAdapter {
   }
   private save() {
     try {
-      fs.mkdirSync(path.dirname(PEOPLE), { recursive: true });
-      fs.writeFileSync(PEOPLE, JSON.stringify({ overrides: [...this.overrides], extras: [...this.extras], hidden: [...this.hidden] }, null, 2));
+      const file = this.dataFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ overrides: [...this.overrides], extras: [...this.extras], hidden: [...this.hidden] }, null, 2));
     } catch { /* read-only disk: keep in memory */ }
   }
 
   override(id: string, patch: Partial<StudentProfile>) { this.overrides.set(id, { ...(this.overrides.get(id) || {}), ...patch }); this.save(); }
   carryProfiles(from: SandboxLmsAdapter) { for (const [k, v] of from.overrides) this.overrides.set(k, v); for (const [k, v] of from.extras) this.extras.set(k, v); for (const id of from.hidden) this.hidden.add(id); }
-  knows(id: string) { return SEED.some((x) => x.profile.id === id) || this.extras.has(id); }
+  knows(id: string) { return (this.includeSeed() && SEED.some((x) => x.profile.id === id)) || this.extras.has(id); }
   isHidden(id: string) { return this.hidden.has(id); }
+
+  /** Upsert a real learner received from an external webhook or CSV sync. */
+  upsertExternalLearner(row: {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string;
+    cohort?: string;
+    programme?: string;
+    moduleCode?: string;
+    checkpoint?: number | null;
+    daysSinceLogin?: number | null;
+    missedClasses?: number | null;
+    missedAssignments?: number | null;
+    paymentStatus?: 'ok' | 'overdue' | 'arrangement' | null;
+  }) {
+    if (!this.extras.has(row.id) && !(this.includeSeed() && SEED.some((x) => x.profile.id === row.id))) {
+      this.addLearner({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        cohort: row.cohort || 'Active Cohort',
+        programme: row.programme || 'Enrolled Programme',
+        module: row.moduleCode,
+        checkpoint: row.checkpoint ?? null,
+        daysSinceLogin: row.daysSinceLogin ?? 0,
+      });
+    } else if (row.email || row.phone || row.cohort || row.programme || row.name) {
+      this.override(row.id, {
+        ...(row.name ? { name: row.name } : {}),
+        ...(row.email ? { email: row.email } : {}),
+        ...(row.phone ? { phone: row.phone } : {}),
+        ...(row.cohort ? { cohort: row.cohort } : {}),
+        ...(row.programme ? { programme: row.programme } : {}),
+      });
+    }
+    const patch: Omit<LmsEdit, 'at'> = {};
+    if (typeof row.checkpoint === 'number') patch.checkpoint = row.checkpoint;
+    if (typeof row.daysSinceLogin === 'number') patch.daysQuiet = row.daysSinceLogin;
+    if (typeof row.missedClasses === 'number') patch.missedClasses = row.missedClasses;
+    if (typeof row.missedAssignments === 'number') patch.missedAssignments = row.missedAssignments;
+    if (row.paymentStatus) patch.paymentStatus = row.paymentStatus;
+    if (Object.keys(patch).length) this.edit(row.id, patch);
+  }
 
   /** Add one of your own learners, with their starting mark and logins. */
   addLearner(row: { id: string; name: string; email: string; phone?: string; cohort: string; programme?: string; module?: string; checkpoint?: number | null; daysSinceLogin?: number | null }) {
@@ -222,7 +326,7 @@ export class SandboxLmsAdapter implements LmsAdapter {
   }
 
   private seedOf(id: string) {
-    const s = SEED.find((x) => x.profile.id === id);
+    const s = this.includeSeed() ? SEED.find((x) => x.profile.id === id) : undefined;
     if (s) return { profile: { ...s.profile, ...(this.overrides.get(id) || {}) }, engagement: s.engagement, assessments: s.assessments };
     const x = this.extras.get(id);
     return x ? { profile: { ...x.profile, ...(this.overrides.get(id) || {}) }, engagement: x.engagement, assessments: x.assessments || [] } : null;
@@ -230,7 +334,8 @@ export class SandboxLmsAdapter implements LmsAdapter {
 
   async listStudents() {
     await tick();
-    const ids = [...this.extras.keys(), ...SEED.map((s) => s.profile.id)].filter((id) => !this.hidden.has(id));
+    const seedIds = this.includeSeed() ? SEED.map((s) => s.profile.id) : [];
+    const ids = [...this.extras.keys(), ...seedIds].filter((id) => !this.hidden.has(id));
     return ids.map((id) => this.seedOf(id)!).map((s) => ({ ...s.profile, status: this.statuses.get(s.profile.id) || s.profile.status }));
   }
   async getStudent(id: string) {
@@ -250,23 +355,28 @@ export class SandboxLmsAdapter implements LmsAdapter {
       e.hoursThisWeek = ed.daysQuiet >= 7 ? 0 : e.hoursThisWeek;
       e.lastActivityAt = new Date(Date.now() - ed.daysQuiet * 86_400_000).toISOString();
     }
+    if (ed?.missedClasses !== undefined) e.missedClasses = ed.missedClasses;
+    if (ed?.missedAssignments !== undefined) e.missedAssignments = ed.missedAssignments;
+    if (ed?.paymentStatus !== undefined) e.paymentStatus = ed.paymentStatus;
     return e;
   }
   async getAssessments(id: string) {
     await tick();
     const s = this.seedOf(id);
     if (!s) return [];
-    let base = s.assessments.map((a, i) => ({ id: `${id}-A${i + 1}`, studentId: id, ...a }));
+    let base: AssessmentRecord[] = s.assessments.map((a, i) => ({ id: `${id}-A${i + 1}`, studentId: id, ...a }));
     const ed = this.edits.get(id);
     if (ed?.checkpoint !== undefined) {
       // The console's mark replaces the checkpoint on the learner's current module.
       const cur = s.engagement.currentModule;
       const mod = MODULES.find((m) => m.code === cur.code);
       const passed = ed.checkpoint >= 60;
-      const rec = {
+      const rec: AssessmentRecord = {
         id: `${id}-C1`, studentId: id, moduleCode: cur.code, moduleTitle: cur.title, title: `${cur.code} Checkpoint Quiz`,
         scorePct: ed.checkpoint, passMark: 60, passed, takenAt: new Date(ed.at).toISOString(),
-        weakTopics: passed ? [] : (mod?.topics.slice(0, 2) || []), kind: 'quiz' as const,
+        weakTopics: passed ? [] : (mod?.topics.slice(0, 2) || []),
+        ...(ed.missedQuestions?.length ? { missedQuestions: ed.missedQuestions } : {}),
+        kind: 'quiz' as const,
       };
       base = [...base.filter((a) => !(a.moduleCode === cur.code && a.kind === 'quiz')), rec];
     }
@@ -295,7 +405,12 @@ const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 
 export class HttpLmsAdapter implements LmsAdapter {
   readonly mode = 'live' as const;
-  constructor(private baseUrl: string, private apiKey: string) {}
+  private baseUrl: string;
+  private apiKey: string;
+  constructor(baseUrl: string, apiKey: string) {
+    this.baseUrl = baseUrl;
+    this.apiKey = apiKey;
+  }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const ctrl = new AbortController();
@@ -325,6 +440,7 @@ export class HttpLmsAdapter implements LmsAdapter {
     return { ok: true, syncedAt: new Date().toISOString() };
   }
   async updateStudentStatus(id: string, status: LearnerStatus, note: string) {
+    if (sendingPaused()) return { ok: true };
     await this.call('PATCH', `/students/${encodeURIComponent(id)}/status`, { status, note });
     return { ok: true };
   }
@@ -332,31 +448,79 @@ export class HttpLmsAdapter implements LmsAdapter {
 
 /* ── Choosing ─────────────────────────────────────────────────────────────── */
 
-const g = globalThis as unknown as { __czSandbox?: SandboxLmsAdapter };
-const PEOPLE = path.join(process.cwd(), '.data', 'learners.json');
+import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
+import { getTenantIntegrations } from '@/lib/auth/accounts';
+
+const g = globalThis as unknown as {
+  __czSandboxes?: Map<string, SandboxLmsAdapter>;
+  __thusoMoodleAdapters?: Map<string, MoodleLmsAdapter>;
+};
 
 export function sandboxAdapter() {
-  // A hot reload keeps the old object; replace it if it predates the current class.
-  if (!g.__czSandbox || typeof (g.__czSandbox as Partial<SandboxLmsAdapter>).setDemoHidden !== 'function') g.__czSandbox = new SandboxLmsAdapter();
-  return g.__czSandbox;
+  const tid = currentTenantId();
+  if (!g.__czSandboxes) g.__czSandboxes = new Map();
+  const existing = g.__czSandboxes.get(tid);
+  if (!existing || typeof (existing as Partial<SandboxLmsAdapter>).upsertExternalLearner !== 'function') {
+    g.__czSandboxes.set(tid, new SandboxLmsAdapter(tid));
+  }
+  return g.__czSandboxes.get(tid)!;
 }
 
 /** A clean cohort: forget every status change and synced score from earlier runs. */
 export function resetSandbox() {
-  // Marks and logins start fresh; names and emails set in the records are kept.
-  const old = g.__czSandbox;
-  g.__czSandbox = new SandboxLmsAdapter();
-  if (old && typeof (old as Partial<SandboxLmsAdapter>).carryProfiles === 'function') g.__czSandbox.carryProfiles(old);
+  const tid = currentTenantId();
+  if (!g.__czSandboxes) g.__czSandboxes = new Map();
+  const old = g.__czSandboxes.get(tid);
+  const fresh = new SandboxLmsAdapter(tid);
+  g.__czSandboxes.set(tid, fresh);
+  if (old && typeof (old as Partial<SandboxLmsAdapter>).carryProfiles === 'function') fresh.carryProfiles(old);
 }
 
 export function liveConfigured() {
-  return Boolean(process.env.LMS_API_URL && process.env.LMS_API_KEY);
+  const tid = currentTenantId();
+  const ti = getTenantIntegrations(tid);
+  if (ti.moodleUrl && ti.moodleToken) return true;
+  if (ti.lmsApiUrl && ti.lmsApiKey) return true;
+  return tid === DEFAULT_TENANT_ID && (moodleConfigured() || Boolean(process.env.LMS_API_URL && process.env.LMS_API_KEY));
 }
 
-/** The adapter for the mode the office is in. Live needs both env vars. */
+/** The adapter for the mode and tenant workspace. Prefers tenant Moodle / REST config. */
 export function getLmsAdapter(mode: 'sandbox' | 'live'): LmsAdapter {
-  if (mode === 'live' && liveConfigured()) {
-    return new HttpLmsAdapter(process.env.LMS_API_URL as string, process.env.LMS_API_KEY as string);
+  const tid = currentTenantId();
+  const ti = getTenantIntegrations(tid);
+  if (ti.lmsProvider !== 'sandbox') {
+    const mUrl = (ti.moodleUrl || (tid === DEFAULT_TENANT_ID ? process.env.MOODLE_URL : '') || '').trim();
+    const mTok = (ti.moodleToken || (tid === DEFAULT_TENANT_ID ? process.env.MOODLE_TOKEN : '') || '').trim();
+    const mCoursesRaw = ti.moodleCourseIds || (tid === DEFAULT_TENANT_ID ? process.env.MOODLE_COURSE_IDS : '') || '';
+    const mCourses = mCoursesRaw
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const mCourseGroups: Record<number, number[]> = {};
+    if (ti.moodleCourseGroups && typeof ti.moodleCourseGroups === 'object') {
+      for (const [k, vals] of Object.entries(ti.moodleCourseGroups)) {
+        const cid = Number(k);
+        if (Number.isFinite(cid) && cid > 0 && Array.isArray(vals) && vals.length) {
+          mCourseGroups[cid] = vals.map(Number).filter((gId) => Number.isFinite(gId) && gId > 0);
+        }
+      }
+    }
+    const groupsSig = JSON.stringify(mCourseGroups);
+    if ((ti.lmsProvider === 'moodle' || (!ti.lmsProvider && mUrl && mTok)) && mUrl && mTok) {
+      if (!g.__thusoMoodleAdapters) g.__thusoMoodleAdapters = new Map();
+      const cacheKey = `${tid}|${mUrl}|${mTok}|${mCourses.join(',')}|${groupsSig}`;
+      let adapter = g.__thusoMoodleAdapters.get(cacheKey);
+      if (!adapter || typeof (adapter as Partial<MoodleLmsAdapter>).forceRefresh !== 'function') {
+        adapter = new MoodleLmsAdapter(mUrl, mTok, mCourses.length ? mCourses : undefined, Object.keys(mCourseGroups).length ? mCourseGroups : undefined);
+        g.__thusoMoodleAdapters.set(cacheKey, adapter);
+      }
+      return adapter;
+    }
+    if (mode === 'live') {
+      const rUrl = ti.lmsApiUrl || (tid === DEFAULT_TENANT_ID ? process.env.LMS_API_URL : undefined);
+      const rKey = ti.lmsApiKey || (tid === DEFAULT_TENANT_ID ? process.env.LMS_API_KEY : undefined);
+      if (rUrl && rKey) return new HttpLmsAdapter(rUrl, rKey);
+    }
   }
   return sandboxAdapter();
 }

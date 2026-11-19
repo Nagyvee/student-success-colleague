@@ -1,12 +1,14 @@
 import type {
-  CatchUpPlan, Cause, CheckInMessage, GoalPlan, InterventionPlan, LearnerCase, PlanStep, QuizQuestion, RemedialQuiz, StageKey, TutorLanguage,
+  CatchUpPlan, Cause, CheckInMessage, GoalPlan, InterventionPlan, LearnerCase, MissedQuestion, PlanStep, QuizQuestion, RemedialQuiz, StageKey, TutorLanguage,
 } from '@/lib/types';
 import type { AssessmentRecord, EngagementMetrics, ModuleSyllabus, RiskAssessment, StudentProfile } from '@/lib/lms/lmsAdapter';
 import { complete, generateJSON, isNum, isStr, obj, strArr } from './llm';
-import { COHORTS, STAGE_OWNER, fixQuiz, readScope, simApproval, simCheckIn, simCritique, simGoalPlan, simLesson, simQuiz } from './simulate';
-import type { Lesson } from '@/lib/types';
+import { COHORTS, STAGE_OWNER, clampPassMark, clampQuestions, fixQuiz, noticedLine, readScope, simApproval, simCheckIn, simCritique, simGoalPlan, simLesson, simQuiz } from './simulate';
+import type { Lesson, LessonEvidence, LessonSlide, SlideVisual } from '@/lib/types';
+import { SCENE_ICONS, SCENE_VISUALS, clampWords, cleanScene, sceneComplete, visualOf } from '@/lib/lessonScene';
 import { auditCheckIn, auditRemedialQuiz } from '@/lib/engine/audit';
 import { teach } from './instructions';
+import { getAcademyContext } from '@/lib/auth/accounts';
 
 /* The agents' minds.
  *
@@ -14,9 +16,35 @@ import { teach } from './instructions';
  * it hard, and falls back to the simulation when the model is off, slow or
  * wrong. Every result carries viaAi so the feed can say which it was. */
 
-const ACADEMY = `The academy Thuso works for is a South African tech academy (Johannesburg) that trains career-changers through live online evening classes: Full-Stack Web Development (cohort FSWD-2026-Q3), Data Analytics with Python & SQL (DA-2026-Q3) and Cybersecurity Essentials (CYB-2026-Q3). Voice: warm, confident, specific, South African English, never preachy.`;
+function academyContextPrompt() {
+  const ac = getAcademyContext();
+  return {
+    ...ac,
+    voice: `The academy you work for is ${ac.academyName}. Always refer to ${ac.academyName} by name (never generic 'the academy'). Sign student-facing outreach as ${ac.senderName} (${ac.senderTitle} at ${ac.academyName}). Voice: warm, confident, practical, South African English, never preachy or guilt-tripping.`,
+  };
+}
 
-const JSON_ONLY = 'Reply with one JSON object only. No markdown, no code fences, no commentary before or after. Inside string values never use double quotes (use single quotes if you must quote) and keep each value on one line.';
+function normalizeEmailBody(raw: string, first: string, ac: { academyName: string; senderName: string; senderTitle: string }): string {
+  let txt = raw.replace(/\r\n/g, '\n').trim();
+  // Ensure greeting starts on its own paragraph
+  txt = txt.replace(new RegExp(`^(Hi|Hello|Hey)\\s+${first}[,!.]?\\s+`, 'i'), `$1 ${first},\n\n`);
+  // Split signature if glued to sentence end
+  txt = txt.replace(/\s+(Warm regards|Kind regards|Best regards|Best|Cheers),?\s+/i, '\n\n$1,\n');
+  // If body still has no paragraph breaks and is >220 chars, break after sentence ~2
+  if (!txt.includes('\n\n') && txt.length > 220) {
+    const parts = txt.split(/(?<=[.!?])\s+/);
+    if (parts.length >= 3) {
+      const mid = Math.ceil(parts.length / 2);
+      txt = `${parts.slice(0, mid).join(' ')}\n\n${parts.slice(mid).join(' ')}`;
+    }
+  }
+  if (!new RegExp(ac.senderName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(txt)) {
+    txt = `${txt}\n\nWarm regards,\n${ac.senderName}\n${ac.senderTitle} · ${ac.academyName}`;
+  }
+  return txt;
+}
+
+const JSON_ONLY = 'Reply with one JSON object only. No markdown, no code fences, no commentary before or after. Inside string values never use double quotes (use single quotes if you must quote). You may use \\n\\n inside email body strings for clean paragraph breaks.';
 
 export interface AiResult<T> { value: T; viaAi: boolean }
 
@@ -26,8 +54,9 @@ const STAGES: StageKey[] = ['scan', 'diagnose', 'act', 'review', 'deliver', 'fol
 
 export async function planGoal(goal: string): Promise<AiResult<GoalPlan>> {
   const fallback = simGoalPlan(goal);
+  const ac = academyContextPrompt();
   const ai = await generateJSON<GoalPlan>({
-    system: `You are Zanele, the Planner agent in the academy's student success team. A person gives you an outcome; you turn it into a plan the team can run without asking anyone again. Your team: Bongani (Student Success: reads the LMS, diagnoses why a learner is behind, writes personal check-ins), Lindiwe (Learning & Assessment: writes catch-up quizzes and tutoring), Musa (Reviewer: audits every output and sends back anything wrong). ${ACADEMY} ${JSON_ONLY}${teach('planner')}`,
+    system: `You are Zanele, the Planner agent in ${ac.academyName}'s student success team. A person gives you an outcome; you turn it into a plan the team can run without asking anyone again. Your team: ${ac.senderName} (${ac.senderTitle}: reads the LMS, diagnoses why a learner is behind, writes personal check-ins), Lindiwe (Learning & Assessment: writes catch-up quizzes and tutoring), Musa (Reviewer: audits every output and sends back anything wrong). ${ac.voice} ${JSON_ONLY}${teach('planner')}`,
     prompt: `The goal, in the person's words: "${goal}"
 
 Cohorts that exist: ${COHORTS.join(', ')}.
@@ -64,15 +93,36 @@ JSON shape:
 
 /* ── Student Success: diagnosis ───────────────────────────────────────────── */
 
-export interface Evidence { student: StudentProfile; e: EngagementMetrics; a: AssessmentRecord[]; risk: RiskAssessment }
+export interface Evidence { student: StudentProfile; e: EngagementMetrics; a: AssessmentRecord[]; risk: RiskAssessment; memory?: string }
 
 /** One call for the whole caseload: the cause and the reason, per learner. */
 export async function diagnose(list: Evidence[], fallback: LearnerCase[]): Promise<AiResult<LearnerCase[]>> {
   if (!list.length) return { value: [], viaAi: false };
+  const ac = academyContextPrompt();
   const ai = await generateJSON<{ id: string; cause: Cause; why: string }[]>({
-    system: `You are Bongani, the Student Success agent in the academy. Before anyone acts, you work out why each learner is behind, from the LMS evidence only. ${ACADEMY} ${JSON_ONLY}${teach('success')}`,
+    system: `You are ${ac.senderName}, the ${ac.senderTitle} agent at ${ac.academyName}. Before anyone acts, you work out why each learner is behind, from the concise LMS gradebook summary and memory only. ${ac.voice} ${JSON_ONLY}${teach('success')}`,
     prompt: `Learners flagged by the scan:
-${list.map(({ student, e, a, risk }) => JSON.stringify({ id: student.id, name: student.name, cohort: student.cohort, daysSinceLastLogin: e.daysSinceLastLogin, loginStreakDays: e.loginStreakDays, hoursThisWeek: e.hoursThisWeek, completionPct: e.completionPct, currentModule: e.currentModule, assessments: a.map((x) => ({ module: x.moduleCode, score: x.scorePct, passMark: x.passMark, passed: x.passed, weakTopics: x.weakTopics })), signals: risk.signals })).join('\n')}
+${list
+  .map(({ student, e, a, risk, memory }) => {
+    const failed = a
+      .filter((x) => !x.passed || x.scorePct < x.passMark)
+      .slice(0, 4)
+      .map((x) => ({ title: x.title, module: x.moduleCode, score: x.scorePct, passMark: x.passMark, weakTopics: x.weakTopics }));
+    const passedCount = a.filter((x) => x.passed).length;
+    return JSON.stringify({
+      id: student.id,
+      name: student.name,
+      cohort: student.cohort,
+      daysSinceLastLogin: e.daysSinceLastLogin,
+      completionPct: e.completionPct,
+      currentModule: e.currentModule.code,
+      passedQuizzes: passedCount,
+      flaggedAssessments: failed,
+      signals: risk.signals.slice(0, 4),
+      pastMemory: memory || undefined,
+    });
+  })
+  .join('\n')}
 
 For each learner decide the cause:
 - "topic_gap": they failed a checkpoint on a specific topic; re-teaching it is the fastest way back.
@@ -116,56 +166,117 @@ export function reviseCatchUpPlan(plan: CatchUpPlan, evidenceCases: LearnerCase[
 
 /* ── Student Success: the personal check-in ───────────────────────────────── */
 
-export async function draftCheckIn(c: LearnerCase, e: EngagementMetrics, notes: string[] = []): Promise<AiResult<CheckInMessage>> {
-  const base = simCheckIn(c, e.daysSinceLastLogin);
+export async function draftCheckIn(c: LearnerCase, e: EngagementMetrics, notes: string[] = [], workflowInstructions?: string, memory?: string): Promise<AiResult<CheckInMessage>> {
+  const ac = academyContextPrompt();
+  const base = simCheckIn(c, e.daysSinceLastLogin, ac);
   const first = c.learner.name.split(' ')[0];
+  const extra = workflowInstructions?.trim() ? `\nWorkflow instructions: ${workflowInstructions.trim()}` : '';
+  const memLine = memory?.trim() ? `\nPast memory for this learner (avoid repeating old advice): ${memory.trim()}` : '';
   const ai = await generateJSON<CheckInMessage>({
-    system: `You are Bongani, the Student Success agent in the academy. You write short, human check-ins to learners who have gone quiet. You never label a learner (no 'at risk', 'flagged', 'failing'); you say what you noticed and offer help. ${ACADEMY} ${JSON_ONLY}${teach('success')}`,
-    prompt: `Learner: ${c.learner.name} (${c.learner.cohort}). Evidence: ${c.signals.join('; ')}. Why we think they are behind: ${c.why}
+    system: `You are ${ac.senderName} (${ac.senderTitle}) at ${ac.academyName}. You write clean, well-spaced, human check-in emails to learners who need support (missed classes, quiet logins, overdue work, or account check-ins). Never label a learner ('at risk', 'flagged', 'failing'); refer to ${ac.academyName} by name instead of generic 'the academy'. Break the body into 3 short paragraphs separated by \\n\\n for comfortable reading. ${ac.voice} ${JSON_ONLY}${teach('success')}${extra}`,
+    prompt: `Learner: ${c.learner.name} (Cohort / Group: ${c.learner.cohort}). Evidence: ${c.signals.join('; ')}. Context: ${c.why}${memLine}
 ${notes.length ? `\nThe Reviewer sent your last draft back:\n- ${notes.join('\n- ')}\nFix exactly that.\n` : ''}
-Write the check-in email. Use ${first}'s first name in the body, sign as Bongani, 60 to 120 words, warm, no guilt, and one small specific ask they can do today. JSON shape: {"subject": "under 8 words", "body": "the email body, one paragraph", "ask": "the one small thing we ask, one sentence"}`,
+Write a warm, well-formatted check-in email (70 to 130 words). Format "body" with blank lines (\\n\\n) between paragraphs:
+1) Greeting ("Hi ${first},")
+2) 1-2 short warm sentences noting we work together at ${ac.academyName} and what we noticed without guilt
+3) 1 short helpful offer of support + sign-off ("Warm regards,\\n${ac.senderName}\\n${ac.senderTitle} · ${ac.academyName}")
+
+JSON shape: {"subject": "under 9 words", "body": "well-spaced paragraphs separated by \\n\\n", "ask": "the one small thing we ask, one sentence"}`,
     maxTokens: 6000,
     timeoutMs: 16000,
     validate: (x) => {
       const o = obj(x); if (!o || !isStr(o.subject) || !isStr(o.body) || !isStr(o.ask)) return null;
-      return { learner: base.learner, subject: o.subject.trim(), body: o.body.trim(), ask: o.ask.trim() };
+      return { learner: base.learner, subject: o.subject.trim(), body: normalizeEmailBody(o.body, first, ac), ask: o.ask.trim() };
     },
   });
   return ai ? { value: ai, viaAi: true } : { value: base, viaAi: false };
 }
 
-export async function reviseCheckIn(c: LearnerCase, e: EngagementMetrics, notes: string[]): Promise<AiResult<CheckInMessage>> {
-  const r = await draftCheckIn(c, e, notes);
+export async function reviseCheckIn(c: LearnerCase, e: EngagementMetrics, notes: string[], workflowInstructions?: string, memory?: string): Promise<AiResult<CheckInMessage>> {
+  const r = await draftCheckIn(c, e, notes, workflowInstructions, memory);
   if (auditCheckIn(r.value).pass) return r;
   return { value: simCheckIn(c, e.daysSinceLastLogin), viaAi: false };
 }
 
-/* ── Learning & Assessment: remedial quiz ─────────────────────────────────── */
+/* ── Learning & Assessment: the mastery test ──────────────────────────────── */
 
-function validateQuestions(x: unknown, min = 3, max = 5): QuizQuestion[] | null {
+function validateQuestions(x: unknown, min = 3, max = 15): QuizQuestion[] | null {
   if (!Array.isArray(x) || x.length < min || x.length > max) return null;
   const out: QuizQuestion[] = [];
+  const seen = new Set<string>();
   for (let i = 0; i < x.length; i++) {
     const q = obj(x[i]); if (!q) return null;
     const options = strArr(q.options, 3);
     if (!isStr(q.prompt) || !options || options.length > 5 || !isNum(q.answerIndex) || !isStr(q.explanation)) return null;
-    if (q.answerIndex < 0 || q.answerIndex >= options.length) return null;
-    out.push({ id: `q${i + 1}`, prompt: q.prompt, options, answerIndex: Math.round(q.answerIndex), explanation: q.explanation, topicTag: isStr(q.topicTag) ? q.topicTag : '' });
+    const answerIndex = Math.round(q.answerIndex);
+    if (answerIndex < 0 || answerIndex >= options.length) return null;
+    const key = q.prompt.trim().toLowerCase();
+    if (seen.has(key)) return null;
+    seen.add(key);
+    out.push({ id: `q${i + 1}`, prompt: q.prompt.trim(), options, answerIndex, explanation: q.explanation.trim(), topicTag: isStr(q.topicTag) ? q.topicTag.trim() : '' });
   }
   return out;
 }
 
-export async function draftRemedialQuiz(student: StudentProfile, plan: InterventionPlan, mod: ModuleSyllabus, quizId: string, tutorLanguage: TutorLanguage = 'en'): Promise<AiResult<RemedialQuiz>> {
-  const base = simQuiz(student, plan, mod, quizId, tutorLanguage);
+function formatMissed(missed?: MissedQuestion[]) {
+  if (!missed?.length) return '';
+  const rows = missed.slice(0, 8).map((q, i) =>
+    `${i + 1}. ${q.prompt}${q.topic ? ` [topic: ${q.topic}]` : ''}${q.givenAnswer ? ` | learner answered: ${q.givenAnswer}` : ''}${q.correctAnswer ? ` | expected: ${q.correctAnswer}` : ''}`
+  );
+  return `\nExact quiz questions the learner missed in the LMS:\n${rows.join('\n')}\nAddress these specific misconceptions directly in the tutoring and questions.\n`;
+}
+
+/** What the tutor knows about this learner's result, in one line for the prompt. */
+function evidenceLine(e: LessonEvidence | null | undefined) {
+  if (!e) return '';
+  const bits = [
+    typeof e.scorePct === 'number' ? `scored ${Math.round(e.scorePct)}%${e.passMark ? ` (pass mark ${e.passMark}%)` : ''}${e.assessmentTitle ? ` on "${e.assessmentTitle}"` : ''}` : '',
+    e.missedTopics?.length ? `missed questions on: ${e.missedTopics.slice(0, 4).join(', ')}` : '',
+    typeof e.daysSinceLogin === 'number' && e.daysSinceLogin >= 3 ? `${e.daysSinceLogin} days since last login` : '',
+  ].filter(Boolean);
+  return bits.length ? `\nWhat we noticed: ${bits.join('; ')}.` : '';
+}
+
+export interface PackDraftOptions { questionCount?: number; passMark?: number; evidence?: LessonEvidence | null }
+
+export async function draftRemedialQuiz(
+  student: StudentProfile,
+  plan: InterventionPlan,
+  mod: ModuleSyllabus,
+  quizId: string,
+  tutorLanguage: TutorLanguage = 'en',
+  missedQuestions?: MissedQuestion[],
+  workflowInstructions?: string,
+  memory?: string,
+  opts: PackDraftOptions = {},
+): Promise<AiResult<RemedialQuiz>> {
+  const n = clampQuestions(opts.questionCount);
+  const base = simQuiz(student, plan, mod, quizId, tutorLanguage, opts);
   const langName = tutorLanguage === 'zu' ? 'isiZulu' : tutorLanguage === 'st' ? 'Sesotho' : null;
+  const ac = academyContextPrompt();
+  const extra = workflowInstructions?.trim() ? `\nWorkflow instructions: ${workflowInstructions.trim()}` : '';
+  const memLine = memory?.trim() ? `\nPast memory for this learner (build on previous attempts cleanly): ${memory.trim()}` : '';
   const ai = await generateJSON<Pick<RemedialQuiz, 'tutoringSummary' | 'keyPoints' | 'questions'> & { localizedSummary?: { summary: string; keyPoints: string[] } }>({
-    system: `You are Lindiwe, the Learning & Assessment agent in the academy. You write targeted remedial micro-quizzes and short tutoring guides${langName ? ` with grounded South African ${langName} explanations alongside English` : ''}. ${ACADEMY} ${JSON_ONLY}${teach('learning')}`,
-    prompt: `Learner ${student.name} (${student.cohort}) failed the ${mod.code} checkpoint. Weak topic: "${plan.weakTopic}". Module: ${mod.title}. Syllabus topics: ${mod.topics.join('; ')}.\n\nWrite a 3-question multiple-choice remedial micro-quiz that tests ONLY this module and topic, plus a tutoring summary that re-teaches it in plain language.${langName ? ` Also provide a natural, accurate ${langName} translation of the tutoring summary and key points so the learner can study in their home language alongside English.` : ''} Each question: 4 options, exactly one correct, and an explanation that teaches. JSON shape:\n{"tutoringSummary": "120-220 words", "keyPoints": ["4 to 5 short points"],${langName ? ` "localizedSummary": {"summary": "${langName} translation (80-160 words)", "keyPoints": ["4 short points in ${langName}"]},` : ''} "questions": [{"prompt": "...", "options": ["...","...","...","..."], "answerIndex": 0-3, "explanation": "...", "topicTag": "sub-topic"}]}`,
-    maxTokens: 22000,
-    timeoutMs: 34000,
+    system: `You are Lindiwe, the Learning & Assessment specialist at ${ac.academyName}. You write targeted mastery tests and short tutoring guides${langName ? ` with grounded South African ${langName} explanations alongside English` : ''}. Every question is accurate, unambiguous and has exactly one correct option. ${ac.voice} ${JSON_ONLY}${teach('learning')}${extra}`,
+    prompt: `Learner ${student.name} (${student.cohort}) is behind on ${mod.code} ${mod.title}. Weak topic: "${plan.weakTopic}". Syllabus topics: ${mod.topics.join('; ')}.${evidenceLine(opts.evidence)}${memLine}${formatMissed(missedQuestions)}
+
+Write a ${n}-question multiple-choice mastery test that tests ONLY this module and topic, plus a tutoring summary that re-teaches it in plain language.${langName ? ` Also provide a natural, accurate ${langName} translation of the tutoring summary and key points so the learner can study in their home language alongside English.` : ''}
+Rules for the questions:
+- Exactly ${n} questions, ordered from easy (recall the idea) to harder (apply it, predict the output, spot the bug).
+- Cover every missed sub-topic above at least once, then the rest of the weak topic.
+- 4 options each, exactly one correct, plausible distractors based on real misconceptions, no "all of the above".
+- Every question names the module's own vocabulary (for example: ${mod.keywords.slice(0, 6).join(', ')}).
+- The explanation teaches why the answer is right in 1 to 2 sentences.
+- No two questions test the same fact.
+- The test length here (${n} questions) overrides any question count in your standing instructions.
+
+JSON shape:
+{"tutoringSummary": "120-220 words", "keyPoints": ["4 to 5 short points"],${langName ? ` "localizedSummary": {"summary": "${langName} translation (80-160 words)", "keyPoints": ["4 short points in ${langName}"]},` : ''} "questions": [{"prompt": "...", "options": ["...","...","...","..."], "answerIndex": 0-3, "explanation": "...", "topicTag": "sub-topic"}]}`,
+    maxTokens: 28000,
+    timeoutMs: 60000,
     validate: (x) => {
       const o = obj(x); if (!o) return null;
-      const questions = validateQuestions(o.questions, 3, 3);
+      const questions = validateQuestions(o.questions, n, n);
       const keyPoints = strArr(o.keyPoints, 3);
       if (!isStr(o.tutoringSummary) || !keyPoints || !questions) return null;
       const loc = obj(o.localizedSummary);
@@ -180,48 +291,119 @@ export async function draftRemedialQuiz(student: StudentProfile, plan: Intervent
     ? (ai.localizedSummary ? { language: tutorLanguage, label: langName as string, ...ai.localizedSummary } : base.localizedSummary)
     : null;
   const merged: RemedialQuiz = { ...base, tutoringSummary: ai.tutoringSummary, keyPoints: ai.keyPoints, questions: ai.questions, localizedSummary };
-  // A model quiz that already fails the rubric is not a useful draft; use the bank.
-  return auditRemedialQuiz(merged, mod.keywords).pass ? { value: merged, viaAi: true } : { value: base, viaAi: false };
+  // A model test that already fails the rubric is not a useful draft: keep the
+  // good questions and top up from the bank, or fall back to the bank.
+  const audit = auditRemedialQuiz(merged, mod.keywords);
+  if (audit.pass) return { value: merged, viaAi: true };
+  const onlyTopicIssues = audit.badIds.length > 0 && audit.badIds.length <= Math.ceil(n / 3);
+  if (onlyTopicIssues) {
+    const topped = fixQuiz(merged, audit.badIds);
+    if (auditRemedialQuiz(topped, mod.keywords).pass) return { value: topped, viaAi: true };
+  }
+  return { value: base, viaAi: false };
 }
 
-/* ── Learning & Assessment: the 3-minute video lesson ─────────────────────── */
+/* ── Learning & Assessment: the personalised video lesson ─────────────────── */
 
-export async function draftLesson(student: StudentProfile, mod: ModuleSyllabus, topic: string): Promise<AiResult<Lesson>> {
-  const fallback = simLesson(student.name, mod, topic);
+const VISUALS: SlideVisual[] = SCENE_VISUALS;
+
+export interface LessonDraftOptions extends PackDraftOptions { tutorName?: string }
+
+export async function draftLesson(
+  student: StudentProfile,
+  mod: ModuleSyllabus,
+  topic: string,
+  missedQuestions?: MissedQuestion[],
+  workflowInstructions?: string,
+  memory?: string,
+  opts: LessonDraftOptions = {},
+): Promise<AiResult<Lesson>> {
+  const ac = academyContextPrompt();
+  const n = clampQuestions(opts.questionCount);
+  const pass = clampPassMark(opts.passMark);
+  const tutorName = opts.tutorName || 'Lindiwe';
+  const fallback = simLesson(student.name, mod, topic, { ...opts, tutorName, academyName: ac.academyName });
   const first = student.name.split(' ')[0];
+  const noticed = noticedLine(opts.evidence, mod, topic);
+  const extra = workflowInstructions?.trim() ? `\nWorkflow instructions: ${workflowInstructions.trim()}` : '';
+  const memLine = memory?.trim() ? `\nPast memory for this learner: ${memory.trim()}` : '';
   const ai = await generateJSON<Lesson>({
-    system: `You are Lindiwe, the Learning & Assessment agent in the academy. You make short narrated slide lessons that re-teach one topic to one learner, warmly and clearly, in South African English. ${ACADEMY} ${JSON_ONLY}${teach('learning')}`,
-    prompt: `Make a 3-minute video lesson for ${student.name} (${student.cohort}) on ${mod.code} ${mod.title}, weak topic "${topic}". Syllabus topics: ${mod.topics.join('; ')}.
+    system: `You are ${tutorName}, the Learning & Assessment tutor at ${ac.academyName}, and you script short animated explainer videos (think a great YouTube explainer, not a slide deck) that re-teach one topic to one learner. You speak to the learner directly, like a warm, upbeat tutor on a video call, in natural South African English. ${ac.voice} ${JSON_ONLY}${teach('learning')}${extra}`,
+    prompt: `Script a 3-minute personal explainer video for ${student.name} (${student.cohort}) on ${mod.code} ${mod.title}, weak topic "${topic}". Syllabus topics: ${mod.topics.join('; ')}.${evidenceLine(opts.evidence)}${memLine}${formatMissed(missedQuestions)}
 
-8 slides. Slide 1 greets ${first} by name and says what we will fix. Slides 2 to 6 teach the topic step by step, with one small code example where it helps. Slide 7 recaps. Slide 8 sends ${first} to a 3-question quiz on exactly this.
-Each slide: a short heading, 1 to 3 short on-screen points, an optional code snippet (max 6 lines), and the narration the voice reads ("say"): 45 to 70 words, spoken style, no markdown, never read the code symbol by symbol.
+THE GOLDEN RULE: the screen SHOWS, the voice TELLS. Every scene is an animation (icons, arrows, a split screen, typed code, one big number). On-screen words are tiny labels, never sentences. The explaining happens in the narration.
 
-JSON shape: {"title": "short lesson title", "slides": [{"heading": "...", "points": ["..."], "code": "optional", "say": "..."}]}`,
-    maxTokens: 14000,
-    timeoutMs: 34000,
+8 scenes, in this order of purpose (choose the visual that best SHOWS each idea):
+1. "greeting": narration opens exactly "Hey ${first}, how are you?", then what you noticed (${noticed}) kindly and without labels, then "so I made this lesson just for you", introduce yourself as ${tutorName}, say what you'll fix together.
+2 to 6. Teach the topic, one idea per scene, fixing the exact misconceptions above. Use at least 4 DIFFERENT visuals from:
+   - "flow": something moving through 3 to 5 stages in order (each stage leads to the next). scene.nodes = [{"label": "max 3 words", "icon": "...", "note": "optional, max 5 words"}].
+   - "branch": one thing that ends one of two ways (succeeds or fails, matches or not, true or false). scene.from, scene.yes, scene.no (each {"label", "icon"}). Use this, not "flow", when there are two possible outcomes.
+   - "compare": the common mistake vs the fix. scene.left = the mistake, scene.right = the fix (each {"label": "max 6 words", "icon", "code": "optional, max 3 lines"}).
+   - "code": only if the subject is code: "code" (max 8 lines), scene.highlight = [line numbers to point at], scene.caption = "max 8 words".
+   - "analogy": an everyday South African thing ≈ the concept. scene.left = the everyday thing, scene.right = the concept (each {"label": "max 3 words", "icon"}), scene.caption = "max 10 words".
+   - "big": one number or short phrase that sticks, e.g. "3 states" or "Always return". scene.value (max 3 words), scene.caption (max 10 words).
+7. "recap": scene.nodes = 3 to 4 things to remember, each {"label": "max 6 words", "icon"}.
+8. "cta": send ${first} to the ${n}-question test (pass mark ${pass}%), short and encouraging.
+
+Labels must make sense on their own: a short noun phrase ("First taxi", "Promise.race"), never a cut-off sentence.
+Icons: pick from exactly this list: ${SCENE_ICONS.join(', ')}.
+
+Every scene: "visual", "heading" (max 5 words, a title not a sentence), "scene" (as above), "points": [] (leave empty), and "say": the narration, 40 to 70 words. Write "say" for the ear: short sentences, contractions (you'll, it's, let's), a friendly rhythm, point at what's on screen ("see how the arrow splits here?"), never read the labels or code out symbol by symbol, never say "at risk" or "failing", no markdown, no emoji.
+
+JSON shape: {"title": "short lesson title", "slides": [{"visual": "flow", "heading": "...", "scene": {...}, "points": [], "code": "only for code scenes", "say": "..."}]}`,
+    maxTokens: 18000,
+    timeoutMs: 50000,
     validate: (x) => {
-      const o = obj(x); if (!o || !isStr(o.title) || !Array.isArray(o.slides) || o.slides.length < 5 || o.slides.length > 10) return null;
-      const slides = (o.slides as unknown[]).map((v) => {
+      const o = obj(x); if (!o || !isStr(o.title) || !Array.isArray(o.slides) || o.slides.length < 5 || o.slides.length > 12) return null;
+      const slides = (o.slides as unknown[]).map((v, i, all) => {
         const q = obj(v); if (!q || !isStr(q.heading) || !isStr(q.say)) return null;
-        const points = strArr(q.points, 1) || [];
-        return { heading: q.heading.trim(), points: points.slice(0, 3), code: isStr(q.code) ? q.code.slice(0, 400) : undefined, say: q.say.trim() };
+        const wanted = visualOf(q);
+        let visual: SlideVisual = wanted && VISUALS.includes(wanted) ? wanted : (isStr(q.code) ? 'code' : 'big');
+        if (i === 0) visual = 'greeting';
+        if (i === all.length - 1) visual = 'cta';
+        // The scene before the call to action is the recap, whatever the model called it.
+        if (i === all.length - 2 && (visual === 'flow' || /recap|remember|summary|wrap/i.test(q.heading))) visual = 'recap';
+        let scene = cleanScene(visual, q.scene);
+        const code = isStr(q.code) ? q.code.replace(/\r\n/g, '\n').split('\n').slice(0, 10).join('\n').slice(0, 520) : undefined;
+        if (visual === 'code' && !code) visual = 'big';
+        // A scene the model left half-drawn becomes one big line instead of an empty screen.
+        if (!sceneComplete(visual, scene)) {
+          visual = visual === 'greeting' || visual === 'cta' || visual === 'code' ? visual : 'big';
+          scene = visual === 'big' ? { value: clampWords(q.heading, 5), caption: scene?.caption } : scene;
+        }
+        return { heading: clampWords(q.heading, 6), points: [], code, say: q.say.trim(), visual, scene } as LessonSlide;
       });
-      if (slides.some((x) => !x)) return null;
-      return { title: o.title.trim(), slides: slides as Lesson['slides'], viaAi: true };
+      if (slides.some((s) => !s)) return null;
+      return { title: o.title.trim(), slides: slides as LessonSlide[], viaAi: true };
     },
   });
-  return ai ? { value: ai, viaAi: true } : { value: fallback, viaAi: false };
+  if (!ai) return { value: fallback, viaAi: false };
+  // The greeting is the point of the video: make sure it is personal, whatever the model wrote.
+  const [open, ...rest] = ai.slides;
+  const greeting = fallback.greeting as string;
+  const say = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(open.say)
+    ? open.say
+    : `${greeting} ${open.say}`;
+  const slides: LessonSlide[] = [
+    { ...open, visual: 'greeting', heading: /\b(hey|hi|hello|sawubona|dumela)\b/i.test(open.heading) ? open.heading : `Hey ${first}`, say },
+    ...rest,
+  ];
+  return {
+    value: { ...ai, slides, greeting, tutorName, academyName: ac.academyName, questionCount: n, passMark: pass, viaAi: true },
+    viaAi: true,
+  };
 }
 
 export async function reviseRemedialQuiz(quiz: RemedialQuiz, notes: string[], badIds: string[], mod: ModuleSyllabus): Promise<AiResult<RemedialQuiz>> {
+  const n = quiz.questions.length;
   const ai = await generateJSON<RemedialQuiz>({
-    system: `You are Lindiwe, the Learning & Assessment agent in the academy. The Reviewer rejected a question in your remedial quiz. Replace exactly the flagged question(s) with new ones on ${mod.code} ${quiz.topic}; keep the others and the summary unchanged. ${JSON_ONLY}${teach('learning')}`,
-    prompt: `Reviewer critique:\n- ${notes.join('\n- ')}\n\nFlagged question ids: ${badIds.join(', ')}\nModule keywords the Reviewer checks for: ${mod.keywords.slice(0, 12).join(', ')}\n\nYour draft questions:\n${JSON.stringify(quiz.questions, null, 2)}\n\nReturn {"questions": [all questions in order, same ids, flagged ones replaced]}`,
-    maxTokens: 16000,
-    timeoutMs: 22000,
+    system: `You are Lindiwe, the Learning & Assessment agent in the academy. The Reviewer rejected question(s) in your mastery test. Replace exactly the flagged question(s) with new ones on ${mod.code} ${quiz.topic}; keep the others and the summary unchanged. ${JSON_ONLY}${teach('learning')}`,
+    prompt: `Reviewer critique:\n- ${notes.join('\n- ')}\n\nFlagged question ids: ${badIds.join(', ')}\nModule keywords the Reviewer checks for: ${mod.keywords.slice(0, 12).join(', ')}\n\nYour draft questions:\n${JSON.stringify(quiz.questions, null, 2)}\n\nReturn {"questions": [all ${n} questions in order, same ids, flagged ones replaced]}`,
+    maxTokens: 20000,
+    timeoutMs: 40000,
     validate: (x) => {
       const o = obj(x); if (!o) return null;
-      const questions = validateQuestions(o.questions, quiz.questions.length, quiz.questions.length);
+      const questions = validateQuestions(o.questions, n, n);
       return questions ? { ...quiz, questions } : null;
     },
   });
@@ -286,4 +468,117 @@ function tidy(text: string): string | null {
   if (!t || t.length < 12) return null;
   if (/\[(specific|insert|name|detail)/i.test(t) || /don'?t have (the )?details|in front of me|slots for/i.test(t)) return null;
   return t.length > 420 ? `${t.slice(0, 417).trimEnd()}…` : t;
+}
+
+/* ── Persistent follow-ups ────────────────────────────────────────────────── */
+
+export async function draftFollowUp(input: {
+  learnerName: string;
+  cohort: string;
+  attempt: number;
+  reason: string;
+  workflowName: string;
+  moduleCode: string | null;
+  topic: string | null;
+  hasLink: boolean;
+  memory?: string;
+}): Promise<AiResult<{ subject: string; body: string; ask: string }>> {
+  const first = input.learnerName.split(' ')[0];
+  const ac = academyContextPrompt();
+  const fallback = {
+    subject: input.attempt <= 2
+      ? `${first}, quick check-in on ${input.moduleCode || input.cohort}`
+      : `${first}, ${ac.academyName} is still in your corner`,
+    body: input.hasLink
+      ? [
+          `Hi ${first},`,
+          `It's ${ac.senderName} from ${ac.academyName} checking back in. We shared your ${input.moduleCode || ''} catch-up pack${input.topic ? ` on ${input.topic}` : ''} earlier and haven't seen it opened yet.`,
+          `No pressure at all — it only takes about 3 minutes and updates your progress straight away.`,
+          `Warm regards,\n${ac.senderName}\n${ac.senderTitle} · ${ac.academyName}`,
+        ].join('\n\n')
+      : [
+          `Hi ${first},`,
+          `It's ${ac.senderName} (${ac.senderTitle}) at ${ac.academyName}, following up from ${input.workflowName} (${input.reason}).`,
+          `Life gets busy and we are happy to work around whatever got in the way so you stay on track in ${input.cohort}.`,
+          `Warm regards,\n${ac.senderName}\n${ac.senderTitle} · ${ac.academyName}`,
+        ].join('\n\n'),
+    ask: input.hasLink
+      ? 'Open the study pack link today, or reply with one line if you want a 15-minute tutor call instead.'
+      : 'Reply with one line on what would help most right now (a recap, a call, or a flexible plan).',
+  };
+
+  const ai = await generateJSON<{ subject: string; body: string; ask: string }>({
+    system: `You are ${ac.senderName} (${ac.senderTitle}) at ${ac.academyName}. You write follow-up #${input.attempt} to a learner who has not yet responded or completed their catch-up step. Never label them ('at risk', 'flagged', 'failing') and never guilt-trip. Use clean paragraph spacing (\\n\\n) and mention ${ac.academyName} by name. ${ac.voice} ${JSON_ONLY}${teach('success')}`,
+    prompt: `Learner: ${input.learnerName} (${input.cohort}). Workflow: ${input.workflowName}. Follow-up attempt: #${input.attempt}. Original context: ${input.reason}. ${input.moduleCode ? `Module: ${input.moduleCode} (${input.topic || ''}).` : ''} ${input.hasLink ? 'They have a direct link to their personal video lesson and mastery test in this email.' : 'No quiz link; invite a quick reply or 1:1 session.'}${input.memory ? `\nLearner memory from DB: ${input.memory}` : ''}
+JSON shape: {"subject": "under 8 words", "body": "well-spaced paragraphs separated by \\n\\n, signed ${ac.senderName}", "ask": "one small specific action they can do today"}`,
+    maxTokens: 4000,
+    timeoutMs: 14000,
+    validate: (x) => {
+      const o = obj(x);
+      if (!o || !isStr(o.subject) || !isStr(o.body) || !isStr(o.ask)) return null;
+      const combined = `${o.subject} ${o.body} ${o.ask}`;
+      if (/\bat[- ]risk\b|risk score|\bflagged\b|\bfailing\b/i.test(combined)) return null;
+      return { subject: o.subject.trim(), body: normalizeEmailBody(o.body, first, ac), ask: o.ask.trim() };
+    },
+  });
+  return ai ? { value: ai, viaAi: true } : { value: fallback, viaAi: false };
+}
+
+export async function draftInboundReplyContinuation(input: {
+  learnerName: string;
+  cohort: string;
+  replyText: string;
+  previousContext: string;
+  memory?: string;
+}): Promise<AiResult<{ outcome: 'resolved' | 'needs_support' | 'handoff'; summary: string; subject: string; body: string; ask: string }>> {
+  const first = input.learnerName.split(' ')[0];
+  const ac = academyContextPrompt();
+  const isPositive = /done|completed|submitted|paid|sorted|back on|will do tonight|finished|passed|thank/i.test(input.replyText);
+  const needsHuman = /refund|cancel|drop out|hospital|emergency|complaint|call me|human|manager/i.test(input.replyText);
+
+  const fallback = {
+    outcome: (needsHuman ? 'handoff' : isPositive ? 'resolved' : 'needs_support') as 'resolved' | 'needs_support' | 'handoff',
+    summary: needsHuman
+      ? `${first} requested personal/urgent assistance in their reply — flagged for human follow-up.`
+      : isPositive
+        ? `${first} confirmed progress in their reply — continuing encouragement.`
+        : `${first} shared what is getting in the way — tailored next support step drafted.`,
+    subject: isPositive ? `Great to hear from you, ${first}` : `Re: Supporting you in ${input.cohort}`,
+    body: normalizeEmailBody(
+      isPositive
+        ? `Hi ${first},\n\nThank you for letting us know! We have updated your support record at ${ac.academyName} and we are cheering you on in ${input.cohort}.\n\nReach out anytime if anything else comes up.\n\nWarm regards,\n${ac.senderName}\n${ac.senderTitle} · ${ac.academyName}`
+        : `Hi ${first},\n\nThank you for replying and letting us know what is going on. At ${ac.academyName}, we want to work around real life so you can succeed in ${input.cohort}.\n\nWe will align your next step based on your note so there is no overwhelm.\n\nWarm regards,\n${ac.senderName}\n${ac.senderTitle} · ${ac.academyName}`,
+      first,
+      ac,
+    ),
+    ask: isPositive
+      ? 'Keep going with your next module activity when you are ready.'
+      : 'Let us know which day this week works best for a quick 15-minute check-in or lighter catch-up schedule.',
+  };
+
+  const ai = await generateJSON<{ outcome: 'resolved' | 'needs_support' | 'handoff'; summary: string; subject: string; body: string; ask: string }>({
+    system: `You are ${ac.senderName} (${ac.senderTitle}) at ${ac.academyName}. A student just replied to an outreach email. Analyze their reply, decide whether the case is "resolved" (student completed/sorted it), "needs_support" (continue coaching with a tailored helpful email), or "handoff" (needs human staff attention), and write a warm, well-spaced continuation email. ${ac.voice} ${JSON_ONLY}${teach('success')}`,
+    prompt: `Learner: ${input.learnerName} (${input.cohort}).
+Context: ${input.previousContext}.
+${input.memory ? `Past memory: ${input.memory}` : ''}
+Student's email reply: "${input.replyText.slice(0, 1200)}"
+
+JSON shape: {"outcome": "resolved|needs_support|handoff", "summary": "1-sentence internal summary of what the student said", "subject": "Re: concise subject", "body": "well-spaced reply paragraphs separated by \\n\\n, signed ${ac.senderName}", "ask": "clear single next step"}`,
+    maxTokens: 5000,
+    timeoutMs: 16000,
+    validate: (x) => {
+      const o = obj(x);
+      if (!o || !isStr(o.summary) || !isStr(o.subject) || !isStr(o.body) || !isStr(o.ask)) return null;
+      const outcome = (o.outcome === 'resolved' || o.outcome === 'handoff' || o.outcome === 'needs_support') ? o.outcome : 'needs_support';
+      return {
+        outcome,
+        summary: o.summary.trim(),
+        subject: o.subject.trim(),
+        body: normalizeEmailBody(o.body, first, ac),
+        ask: o.ask.trim(),
+      };
+    },
+  });
+
+  return ai ? { value: ai, viaAi: true } : { value: fallback, viaAi: false };
 }

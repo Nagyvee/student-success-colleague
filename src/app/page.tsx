@@ -1,10 +1,17 @@
 import { Suspense } from 'react';
+import AppShell from '@/components/AppShell';
 import OfficeApp from '@/components/OfficeApp';
+import { requireWorkspaceAccess } from '@/lib/auth/serverAuth';
 
-export default function Page() {
+export const dynamic = 'force-dynamic';
+
+export default async function Page() {
+  await requireWorkspaceAccess();
   return (
-    <Suspense fallback={<div className="cz-boot">Opening the office…</div>}>
-      <OfficeApp />
-    </Suspense>
+    <AppShell fullBleed>
+      <Suspense fallback={<div className="cz-boot">Opening the office…</div>}>
+        <OfficeApp />
+      </Suspense>
+    </AppShell>
   );
 }

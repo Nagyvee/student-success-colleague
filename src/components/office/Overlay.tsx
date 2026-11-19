@@ -107,14 +107,17 @@ function shorten(t: string) {
 
 const TONE: Partial<Record<AgentState['status'], string>> = { revising: ' is-warn', reviewing: ' is-review', celebrating: ' is-good' };
 
+/** Any agent on the floor: the tutoring team's four, or a department's own agents. */
+const specOf = (a: AgentState) => AGENT_BY_ID[a.id] || { name: a.name, title: a.title || '' };
+
 function Note({ agent, lead }: { agent: AgentState; lead: boolean }) {
-  const spec = AGENT_BY_ID[agent.id];
+  const spec = specOf(agent);
   const text = agent.thought ? shorten(agent.thought) : null;
   const shown = useTypewriter(text);
   if (!text) return null;
   return (
     <div data-note={agent.id} className={`note${TONE[agent.status] || ''}${lead ? ' is-lead' : ' is-prev'}`}>
-      <span className="note-who"><i />{agent.name || spec.name}<em>{spec.title.split('·')[0].trim()}</em></span>
+      <span className="note-who"><i />{agent.name || spec.name}<em>{(agent.title || spec.title).split('·')[0].trim()}</em></span>
       <span className="note-t">{shown}</span>
     </div>
   );
@@ -247,8 +250,8 @@ export default function Overlay({ agents = [], visitors = [], rooms, speakers = 
         // Name only; the verb only for the beats the room must not miss.
         const verb = a.status === 'reviewing' || a.status === 'revising' ? doing : null;
         return (
-          <span key={a.id} data-tag={a.id} className={`otag is-${a.status}${doing ? ' is-active' : ''}${lead === a.id ? ' is-speaking' : ''}`} title={AGENT_BY_ID[a.id].title}>
-            {doing && <s />}{a.name || AGENT_BY_ID[a.id].name}{verb && <i> · {verb}</i>}
+          <span key={a.id} data-tag={a.id} className={`otag is-${a.status}${doing ? ' is-active' : ''}${lead === a.id ? ' is-speaking' : ''}`} title={a.title || specOf(a).title}>
+            {doing && <s />}{a.name || specOf(a).name}{verb && <i> · {verb}</i>}
           </span>
         );
       })}
@@ -296,7 +299,7 @@ export function StoryBand({ state, speaker, inspectId, onInspect }: { state: Wor
   const text = fresh && latest ? latest.text
     : running ? running.stepLabel
       : task ? (task.status === 'done' ? 'Goal complete' : 'Stopped')
-        : "Thuso is always on. Change a learner's mark or logins in the learner records and watch the team start by itself.";
+        : "Always listening across connected LMS courses, inbound webhooks, and scheduled automation flows.";
   const icon: IconName = fresh && latest ? headlineIcon(latest) : task?.status === 'done' ? 'badgeCheck' : running ? 'activity' : 'play';
   const key = fresh && latest ? latest.id : `${task?.id || 'idle'}-${task?.status}-${running?.step || 0}`;
 
@@ -319,7 +322,7 @@ export function StoryBand({ state, speaker, inspectId, onInspect }: { state: Wor
             <span className="story-who">
               <span>{who}</span>
               {drafting && drafter && (
-                <span className="story-live"><Icon name="spinner" size={11} className="spin" />{drafter.name || AGENT_BY_ID[drafter.id].name} is drafting with {engineName(state.caps)} · {fmtDur(quiet)}</span>
+                <span className="story-live"><Icon name="spinner" size={11} className="spin" />{drafter.name || specOf(drafter).name} is drafting with {engineName(state.caps)} · {fmtDur(quiet)}</span>
               )}
             </span>
             <b className="story-text" title={text}>{text}</b>

@@ -1,292 +1,302 @@
-# Thuso · the student success colleague
+# Thuso · the academy's AI operations building
 
 > *Thuso* means **help** in Sesotho and Setswana.
 
-**Thuso is an always-on team of four AI agents that notices when a learner is
-quietly falling behind, works out *why*, prepares the right help, checks its
-own work, fixes its own mistakes, delivers the help by email and by phone,
-and tells the school what happened, with no human in the loop.**
+**Thuso is a building of AI agents that runs the academy's day-to-day
+follow-up work.** Each floor is a department. Each department has a few
+agents. Each agent has one job: a workflow of AI steps that starts by itself
+(a new lead from an ad, a row in the student tracker, a failed quiz, an
+overdue fee), works out what to do, writes to the person, checks its own
+work, follows up for days if it has to, and tells the team what happened.
 
-Built in 24 hours for **Colleague Zero**, a hackathon on multi-agent workflows
-for education: *"Don't build a chatbot. Build a colleague."*
-
----
-
-## Contents
-
-1. [The problem](#1-the-problem)
-2. [What Thuso does, in one minute](#2-what-thuso-does-in-one-minute)
-3. [The team](#3-the-team)
-4. [How it works](#4-how-it-works)
-5. [How it reasons](#5-how-it-reasons)
-6. [How it corrects itself](#6-how-it-corrects-itself)
-7. [What reaches the learner](#7-what-reaches-the-learner)
-8. [What the school sees](#8-what-the-school-sees)
-9. [Against the judging criteria](#9-against-the-judging-criteria)
-10. [Architecture](#10-architecture)
-11. [Run it](#11-run-it)
-12. [Deploy it](#12-deploy-it)
-13. [Safety, privacy and honest notes](#13-safety-privacy-and-honest-notes)
-14. [What we would build next](#14-what-we-would-build-next)
+It started as a 24-hour hackathon entry (*Colleague Zero: "Don't build a
+chatbot. Build a colleague."*) with one student success team. It is now the
+engine for every department.
 
 ---
 
-## 1. The problem
+## The building
 
-Learners in online programmes rarely say they are struggling. **They go
-quiet.** By the time a facilitator notices, the learner is weeks behind, and
-the conversation is about dropping out instead of a five-minute catch-up.
-
-Worse, two learners can look identical in the LMS (no logins, a high risk
-score) for **opposite reasons**:
-
-| | Learner A | Learner B |
+| Floor | Department | Agents and their jobs |
 |---|---|---|
-| What the LMS shows | Silent for 9 days, risk 80 | Silent for 12 days, risk 57 |
-| What is actually wrong | Failed the JS-07 checkpoint on one topic and is avoiding it | Passes every quiz, but life got in the way |
-| What helps | Re-teach that exact topic, then a short quiz | A person reaching out. **A quiz would make it worse.** |
+| 5 | **Finance & Operations** | Payment reminders from the fees tracker. **Kagiso** reminds students 3 days before a fee is due. **Refilwe** follows up overdue accounts every 3 days until they are paid, an arrangement is made or the student replies, then hands over to the finance manager. **Musa** sends management a weekly collections report. |
+| 4 | **Learning & Assessment** | From Moodle. **Lindiwe** builds a student who failed a quiz a **personal video lesson that greets them by name** ("Hey Nigel, how are you? I noticed…") and a **10-question test** on exactly what they missed, then follows up on the result. **Tumi** sends a revision plan 5 days before an assignment is due. **Thandi** sends the learning team a Monday academic report (results below the pass mark, overdue work, what is due this week, who finished). |
+| 3 | **Student Success** | From Moodle. **Bongani** checks in when a student goes quiet (5 days). **Nomsa** names a student's overdue assignments, offers help, checks every 3 days and thanks them when the work is in. **Zodwa** answers students' emails with their real progress and hands anything sensitive to a person. **Mpho** starts placement when Moodle shows a finished course. **Karabo** sends the Monday at-risk report. |
+| 2 | **B2B Sales** | Paused: another system does this. **Sipho** (prospect research) and **Lerato** (outreach) can be switched on under Agents & Workflows. |
+| 1 | **Admissions** | **Naledi** walks every lead from ads through a journey of saved messages (welcome and career-fit quiz, their programme video, proof, an invitation to apply). **Zinhle** gives a lead who turns hot a personal note and asks a consultant to call. **Thabo** answers enquiries and hands complex ones to a consultant. **Ayanda** helps applicants finish enrolment and welcomes new students. |
 
-A dashboard shows both as red. A colleague knows the difference, and acts on
-it. That is what Thuso is.
+These are the starting point. Every department, agent and step can be
+changed under **Agents & Workflows**, or you can describe a new job in words
+and let the AI build the steps.
 
-## 2. What Thuso does, in one minute
+## How an agent works
 
-1. **A learner's record changes.** Their JS-07 checkpoint comes in at 38%.
-   The LMS sends Thuso a signed webhook. Nobody types anything.
-2. **Zanele, the Planner**, reads the event and writes a plan: scope, owners,
-   and what "done" means.
-3. **Bongani, Student Success**, reads the record and decides *why* the
-   learner is behind: a topic gap, not disengagement.
-4. **Lindiwe, Learning & Assessment**, writes a **3-minute narrated video
-   lesson** and a **3-question quiz** on exactly that topic, for that learner
-   by name.
-5. **Musa, the Reviewer**, checks every question against the learner's weak
-   topic, finds one that drifts off topic, **stops the line** and sends it
-   back. Lindiwe fixes it, Musa re-checks and approves.
-6. **The study pack is emailed**: the lesson, key points, a video and docs
-   on the topic, and the quiz.
-7. **The learner's phone rings.** Our dialer's AI caller greets them by name,
-   says the call is recorded, and tells them what was just sent. Under a
-   minute.
-8. **The learner takes the quiz.** The score syncs back. Passed: *At-Risk →
-   On Track* on the screen. Below the pass mark: the missed answers
-   explained, the lesson again and a tutor catch-up are emailed at once.
-9. **Musa reports to the head of school**, every day at 17:00.
+**When it starts** (the trigger):
 
-Total: about 75 seconds of agent work. **Human interventions: 0.**
+| Trigger | Example |
+|---|---|
+| A new row in a sheet | A new company on the prospects sheet |
+| A field changes | A lead's status becomes "applied" |
+| A scheduled check | Every morning at 09:00: every account where `payment_state` is overdue |
+| A lead from ads | Meta lead forms, a website form, Zapier or Make |
+| An LMS event | Quiz failed, no login for N days, missed classes |
+| A reply | The person replied to an email |
+| A schedule | Every Monday at 08:00 (reports) |
+| Manual | Only when someone presses Run |
 
-## 3. The team
+**What it does** (the steps, top to bottom, with branches):
 
-| Agent | Role (in the brief's words) | What it does |
-|---|---|---|
-| **Zanele** · Planner | Planner | Turns an event or a goal into a plan: which learners, which language, what "done" means, who owns each step. |
-| **Bongani** · Student Success | Worker | Reads the LMS, works out **why** each learner is behind, writes personal check-ins for learners who went quiet, phones learners through the dialer, and closes the loop on quiz results. |
-| **Lindiwe** · Learning & Assessment | Worker | For each topic gap: a narrated 8-slide lesson, a study pack and a 3-question quiz on the exact weak topic (optionally with isiZulu or Sesotho alongside English). |
-| **Musa** · Reviewer | Reviewer | Audits every output against the learner's record before it is sent, sends back what is wrong with the rule it broke, and writes the school's reports. |
+| Step | What happens |
+|---|---|
+| AI message | The agent writes a personal email and/or WhatsApp from the record, its history and what it knows about the academy. The **reviewer checks it before it goes** (see below). |
+| AI task | The agent works something out (qualify a lead, research a company, summarise the tracker) and saves it on the record. |
+| Video lesson + test | The tutoring team builds the personal video lesson and N-question test. |
+| Condition | Yes/no by a rule (`payment_state is paid`) or by the agent's judgement ("Does this need a human?"). |
+| Wait | Real hours or days. Runs are saved and continue after a restart. |
+| Repeat | Follow up every N hours, at most N times, until a condition holds. It always stops when the person replies. |
+| AI call | A phone call through the dialer's AI caller. |
+| Update record | Set a field (and write it back to the sheet if write-back is set up). |
+| Notify team | Brief a person with the agent's summary. |
+| Webhook | Send the record to another system (CRM, ERP). |
 
-You can **teach** each agent: Settings → Your agents holds standing
-instructions (for example *"Use South African examples where they help"*)
-that go into that agent's prompt on every task.
+## The reviewer, Approval Mode and Safe Test Mode
 
-## 4. How it works
+- **The reviewer's rules are code** (`src/lib/engine/agentAudit.ts`). A
+  message is sent back if it does any of the following:
+  - doesn't use the person's name;
+  - labels them ("at risk", "debtor", "defaulter");
+  - threatens (legal action, suspension, collections);
+  - uses pressure tactics;
+  - leaves a placeholder unfilled;
+  - is too long for WhatsApp;
+  - for finance, doesn't state the exact amount or offer an arrangement.
+
+  The agent rewrites it and the rules re-check it. If it still fails, it
+  waits for a person, even when Approval Mode is off.
+- **Approval Mode** (on by default): every message to a student or a lead
+  waits in the Inbox until someone approves it, and the agent then sends it
+  and carries on. This covers AI-written messages, saved messages from the
+  library, vouchers (the code is made only when approved) and test-result
+  emails. A rejected saved message is skipped and the journey carries on; a
+  rejected AI message stops that run. Reports and hand-offs to the team are
+  internal and are not held.
+- **Follow-up loops wait first**: a "repeat" step waits its interval before
+  its first round, so a follow-up never lands right after the message before it.
+- **Safe Test Mode** (Live Outreach off, the default): nothing leaves the
+  building. Emails appear in the Inbox tab; WhatsApp and calls are logged.
+- **Autopilot** (off by default): off, agents only run when you press Run;
+  on, they start by themselves from their triggers.
+
+## Lead nurturing (Admissions)
+
+**Lead Nurturing** in the menu is the Admissions floor's marketing desk. The
+rule is *write once, send to many*, so AI cost per lead stays close to zero:
+
+1. **Everyone gets saved messages.** The message library holds messages for
+   each stage (welcome, learn, trust, offer, decide, re-engage). Each one is
+   written once (by a person, or by AI from a one-line brief such as "50% off
+   the registration fee until 30 November"), checked by the reviewer's rules
+   once, and approved by a person once. Sending it merges `{{first_name}}` and
+   `{{programme}}`, attaches the guide or video that fits the lead, and tracks
+   every link. No AI per send. Offers carry an end date and are never sent
+   after it.
+2. **Made once, personal for each.** The career-fit quiz ("Which tech path
+   fits you?") and one animated video per programme are made once. A lead's
+   video opens with a scene made for them alone ("Hey Thandi, I noticed you're
+   interested in Data Science and your quiz said you're the Detective…"), from
+   their record, without AI. The shared scenes' narration is recorded once.
+3. **Hot leads and replies: AI sells.** Opens (+1), clicks (+3), the video
+   (+4), the quiz (+5) and replies (+6) score a lead: 3 is warm, 8 is hot. A
+   lead turning hot starts Zinhle, who reads what they did, makes them a
+   **video of their own** (two or three scenes about their goal and their
+   question, then their programme), sends it with a personal note, and asks a
+   consultant to call today. Every reply goes to Thabo, who answers it in the
+   same email thread like a good admissions consultant: what they asked first,
+   then what holds them back, a real offer if one is live, and a concrete next
+   step. He respects "please stop", hands sensitive things to a person, and
+   flags anyone ready to sign up. The welcome also carries one AI sentence
+   about what they wrote on the form.
+
+**Until they buy.** After the first five messages, Naledi keeps in touch:
+weekly for two months, then every three weeks, each time with the next thing
+that lead has not had (a live offer, another message, a guide or video), or a
+short AI check-in when there is nothing new. It pauses while they are talking
+with us and stops when they apply or unsubscribe. A lead who turns hot is taken
+over by Zinhle (Naledi stops, so they hear from one person), who keeps giving
+them new reasons to say yes every three days, then stays close.
+
+**Vouchers** (Lead Nurturing → Vouchers): the team sets up each voucher once
+(R or % off, what it is for, a fixed end date or N days, whether it can be
+passed on) and makes it active. The agents decide who gets one (Zinhle for hot
+leads, Thabo when cost comes up, or a campaign), the code is made by the system
+(`MEL-THAN-7K3Q`, never by AI), and every code is tracked until someone marks
+it used. A shared voucher opens a page where the friend leaves their details
+and becomes a lead with the code.
+
+**Videos that look like video.** Lessons and lead videos play with a moving
+camera on every scene, cuts where the old scene hands straight into the next,
+a warm light sweep into the big moments, a living backdrop (colour field,
+drifting lights, film grain, vignette), titles that rise word by word, and a
+soft music bed with a whoosh on cuts (viewers can switch music off). The
+academy's own footage (Lead Nurturing → Content bank → Footage and music) plays
+behind the greeting and the big moments, slowly zooming and graded into the
+brand; each scene picks a clip by its tags (welcome, students, coding,
+celebration…), by rules. An uploaded music track replaces the built-in bed.
+
+**Emails that land.** Notes from one person to a lead (Thabo, Zinhle) use a
+plain personal layout, come from the agent by name ("Zinhle · Melsoft
+Academy"), and carry one-click unsubscribe headers; every email has preview
+text for the inbox list.
+
+**See it as a lead** (Lead Nurturing → Journey): pick a programme and the
+whole journey lands in your Inbox as a sample lead, in order, with working
+quiz and video buttons. Nothing goes to a real lead and nothing is counted.
+
+**Replies** (Lead Nurturing → Journey → Replies): SMTP only sends, so the same
+mailbox is read over IMAP once a minute (Gmail: `imap.gmail.com`, the same app
+password, IMAP on in Gmail settings). Only mail from leads and students is
+answered; auto-replies, bounces, newsletters and strangers are ignored, mail
+from before it was switched on is never answered, nothing is marked read, and
+after four AI answers to one person in a day a person takes over.
+
+**The content bank** holds what the nurturing shares and learns from: PDF
+guides (uploaded, served through tracked links), YouTube videos (imported
+from the channel's public feed, no API key), links, notes, and FAQs learned
+from a WhatsApp chat export (names, numbers and emails are removed before
+anything is read; only the questions and answers are kept). Each item is read
+by AI once; choosing what fits a lead is rules.
+
+**Campaigns** send one approved message to a group (all warm leads, everyone
+interested in Data Science, leads never messaged) now or later, a few at a
+time. Nobody gets the same message twice.
+
+**Consent.** Every marketing email has a "Stop these emails" link (a page with
+a button, so mail scanners cannot unsubscribe anyone). Unsubscribing stops the
+lead's journeys and campaigns leave them out. Link checkers are not counted as
+clicks.
+
+Leads come from the leads sheet (Facebook and TikTok lead forms → Google Sheet
+→ Lead Nurturing → Journey → paste the link) or the leads webhook below. The
+first read of the sheet imports the leads already on it without messaging
+them; welcome them with a campaign to "Leads we have never messaged".
+
+## Connecting the data
+
+**The student tracker** (Channels & API → Data sources): paste the Google
+Sheets link of the tab (shared "Anyone with the link: Viewer"). Thuso reads it
+every 30 seconds, maps the columns itself (student number, name, email, cell,
+course, total fees, paid to date, outstanding balance, next payment date,
+account status…), and works out `payment_state` (paid, due, overdue,
+arrangement) and `days_overdue` from the balance and the due date. The first
+read is a baseline: nobody is messaged because a sheet was connected. Each tab
+(fees, prospects…) is its own data source with its own link.
+
+**Leads from ads**: send each lead to
 
 ```
-   ┌──────────────────────────── what starts it (nobody types) ───────────────────────────┐
-   │  LMS webhook (signed)   ·   Google Sheet change   ·   weekly sweep   ·   manager goal  │
-   └──────────────────────────────────────────┬────────────────────────────────────────────┘
-                                              ▼
-   GOAL ──▶ PLAN (Zanele) ──▶ ACT ───────────────────────────────▶ CHECK (Musa) ──▶ DELIVER
-                               │ Bongani: why is each learner behind?    │  rubrics in code   │ email: study pack,
-                               │   topic gap ──▶ Lindiwe: lesson + quiz  │  ✗ ──▶ CORRECT ──┘ │ lesson, quiz
-                               │   went quiet ──▶ Bongani: check-in      │     (sent back,    │ phone: dialer's
-                               │                                         │      fixed,        │ AI caller
-                               │                                         │      re-checked)   │ LMS: status updated
-                                                                                              ▼
-                                       learner takes the quiz ──▶ score syncs back ──▶ On Track, or next steps
-                                                                                              ▼
-                                                                         Musa's report to the head of school
+POST /api/webhooks/leads?tenant=<workspace slug>
+X-Thuso-Token: <inbound token from Channels & API>
+
+{ "full_name": "Thandi Mokoena", "email": "thandi@example.com",
+  "phone_number": "082 123 4567", "course": "Data Analytics",
+  "campaign": "Nov intake - Facebook" }
 ```
 
-The screen is a live 3D office: every handoff is a person walking to a room,
-every thought is a note above a head, every mistake the Reviewer catches stops
-the floor with a card showing **the rule, what was wrong, and the rejected
-text crossed out**, then the fixed version. The brief's own loop (**Goal →
-Plan → Act → Check → Correct → Deliver**) lights up along the bottom as the
-team works.
+Zapier, Make and Meta lead forms' `field_data` are understood. Email replies
+reach the agents through `/api/webhooks/email-reply` with the same token.
 
-### What starts it
+**What the agents know** (Channels & API): programmes, fees, intakes,
+policies and the application link. The agents use it and never invent beyond
+it.
 
-| Trigger | How |
-|---|---|
-| **LMS webhook** | `POST /api/webhooks/lms`, signed with HMAC-SHA256 (`X-LMS-Signature: sha256=<hex>`). The built-in **Learner records** page (`/lms`) is a sandbox LMS that sends exactly this webhook when you change a mark or the days since login. |
-| **Google Sheet** | Paste a sheet link in Settings. Thuso reads it every few seconds; a changed score, a changed login count or a new row starts the team. Optional write-back of each learner's status via a small Apps Script. |
-| **Weekly sweep** | Every Monday at 07:00, every cohort, on a scheduler. |
-| **Manager's goal** | "Check every cohort and help the three learners most at risk", in plain words, from Settings. |
+**Moodle** (Channels & API → LMS): every sync (every 5 minutes, and from
+Students → Sync) writes each student to the built-in **Students from Moodle**
+list with the fields the agents use: `days_since_login`, `missed_assignments`
+and `overdue_work`, `last_score` and `failed_assessment`, `completion` and
+`course_completed`, `risk_band`, and the next assignment due
+(`next_assessment_date`, `next_assessment_name`). The first sync is a baseline
+and contacts nobody. After that, a new failed quiz goes to Lindiwe, new overdue
+work to Nomsa, a student who newly goes quiet to Bongani, a finished course to
+Mpho; Tumi checks due dates every morning. Students who finished or were
+withdrawn are never contacted. Set the course IDs of the intakes studying now,
+so past students are not synced at all.
 
-## 5. How it reasons
+**Go-live checklist** (Control → Go-live checklist): what is connected, what
+is missing and where to fix it, read from the live workspace, with a button
+that copies the to-do list.
 
-- **The diagnosis decides the action, per learner.** A failed checkpoint means
-  a topic gap, so the learner gets a lesson and quiz from Lindiwe. Passing
-  marks with silence means disengagement, so the learner gets a personal
-  check-in from Bongani instead. In the sandbox, Kabelo passes every quiz but
-  has not logged in for 12 days, so Thuso writes to him rather than quizzing
-  him.
-- **The plan is the model's.** The Planner scopes each run from the event or
-  goal ("Data Analytics only, in isiZulu" changes the cohort and the tutoring
-  language) and writes what "done" means.
-- **It never acts without evidence.** Every decision cites the learner's
-  record (marks, logins, progress) and is checked against it.
+## Architecture
 
-## 6. How it corrects itself
-
-The Reviewer's verdicts are **code, not vibes** (`src/lib/engine/audit.ts`).
-The same draft always gets the same verdict, whichever model wrote it. The
-model writes the critique and the fix; the rubric decides whether the fix
-passes. Nothing reaches a learner until it does.
-
-Real mistakes it catches:
-
-- a diagnosis that contradicts the learner's marks;
-- a quiz question that drifts off the weak topic;
-- a duplicate option or an answer that does not exist;
-- a check-in that labels the learner ("at risk", "failing") or runs too long.
-
-**Test error** (Settings, on by default for demos) plants one off-topic
-question in the first quiz, so a short demo always shows the catch. We say so
-openly; switch it off and the Reviewer still audits every output exactly as
-the model wrote it.
-
-## 7. What reaches the learner
-
-- **The study pack email**: the key points, a "Watch your 3-minute lesson"
-  button, a video and documentation links on the exact topic, and the quiz.
-- **The 3-minute lesson** (`/learn/[quizId]`): eight slides Claude wrote for
-  this learner, with narration read aloud by the browser, captions and a
-  progress bar, ending on "Take the quiz". It plays like a video on any phone.
-- **The quiz** (`/quiz/[quizId]`): three questions, graded instantly. The
-  score is pushed back to the LMS.
-- **The phone call**: our dialer's AI caller (Deepgram for voice and
-  listening, Claude for the conversation) opens with *"Hi Sipho, it's Thuso
-  from the student success team. Just so you know, this call is recorded. I
-  saw JS-07 has been a bit tough lately, so I've just emailed you a
-  three-minute video lesson and a short quiz…"*, keeps it under a minute and
-  never labels the learner.
-- **The result**: passed means a well-done email and *At-Risk → On Track*.
-  Below the pass mark means the missed questions explained, the lesson again
-  and a tutor catch-up, emailed straight away.
-
-## 8. What the school sees
-
-**Reports** (`/reports`, or the Reports sign in Musa's office): today, this
-week, or everything. Learners checked and helped, study packs and check-ins
-sent, quizzes taken and the pass rate, every mistake the Reviewer caught and
-whether it was fixed, every learner's status and every run with what started
-it. All counted from what actually happened, nothing estimated.
-
-**Musa's report** is written by Claude from those numbers only, can be emailed
-on request, and is emailed every day at 17:00 to `MANAGER_EMAIL`.
-
-## 9. Against the judging criteria
-
-| Criterion | Where to see it |
-|---|---|
-| **Reasons** | Bongani decides *why* each learner is behind, and the action follows (Kabelo gets a check-in, not a quiz). The Planner scopes the run from the event or goal. |
-| **Self-corrects** | Musa's rubric rejects the off-topic question; the "Mistake caught" card shows the rule and the rejected text; the fix is re-checked; *Correct* lights up on the loop. |
-| **Executes** | A real email with a real lesson and quiz, a real phone call, a real quiz graded and synced back, the learner's status updated. Finished work, not a suggestion. |
-| **Collaborates** | Four agents with clear roles, handing work across a live office; every handoff visible. |
-| **Serves education** | It finds learners who are quietly falling behind, tells a topic gap from disengagement, and re-teaches the exact topic, with isiZulu and Sesotho support. |
-
-## 10. Architecture
-
-- **Next.js 15 (App Router) · TypeScript · Tailwind v4 · Framer Motion ·
-  Anthropic SDK (Claude) · Nodemailer.** The office is drawn in 2.5D with CSS
-  3D transforms; no canvas, no images. Light and dark themes.
-- One always-on Node process: an in-memory world, pushed to every open screen
-  over server-sent events, with a small archive in `.data/`.
+- **Next.js 15 (App Router), TypeScript, Anthropic SDK (Claude), Nodemailer,
+  Postgres (optional).**
+- One always-on Node process. It reads the sheets, resumes waiting runs, runs
+  scheduled checks and pushes live state to every open screen over
+  server-sent events.
+- **Persistence.** New stores (agent runs, records, schedules) use
+  `tenantDoc`: in memory, written to `.data/`, and to Postgres (`tenant_kv`)
+  when `DATABASE_URL` is set, so a redeploy keeps waiting runs.
 
 | Path | What it is |
 |---|---|
-| `src/lib/engine/automation.ts` | The always-on pump: job queue, weekly sweep, Google Sheet watcher, daily report, webhook signatures, keep-awake. |
-| `src/lib/engine/scenarios/goal.ts` | One run, from the event to the follow-up call. |
-| `src/lib/engine/orchestrator.ts` | The verbs every run uses (walk, think, draft, review, revise, send) and the plan tracking. |
-| `src/lib/engine/audit.ts` | The Reviewer's rubrics. |
-| `src/lib/ai/agents.ts` | Each agent's prompt and validator, with a playbook fallback so a run always finishes. |
-| `src/lib/ai/instructions.ts` | What you taught each agent. |
-| `src/lib/lms/lmsAdapter.ts` | The LMS interface, a live HTTP adapter and the sandbox. `sheet.ts` is the Google Sheet source. |
-| `src/lib/calls/dialer.ts` | The follow-up call through our dialer's API (`POST /api/v1/ai-calls`). |
-| `src/lib/email/send.ts` | SMTP (Nodemailer), and every email template. |
-| `src/lib/engine/quiz.ts` | Grading, the LMS score sync, the result card and the next steps. |
-| `src/lib/reports.ts`, `src/lib/musaReport.ts` | The numbers and Musa's written report. |
+| `src/lib/engine/departments.ts` | The floors, agents and their default jobs; the one-time migration. |
+| `src/lib/engine/agentRuns.ts` | The runtime: steps, waits, repeats, approvals, resume after restart. |
+| `src/lib/engine/agentTriggers.ts` | What starts an agent: sheet events, schedules, leads, LMS events, replies. |
+| `src/lib/engine/agentAudit.ts` | The reviewer's rules for every message. |
+| `src/lib/ai/agentMind.ts` | How agents write, judge, do tasks, brief the team and build workflows from words. |
+| `src/lib/data/sources.ts`, `records.ts`, `conditions.ts` | Sheets as data sources, column mapping, money/date parsing, rules. |
+| `src/lib/engine/scenarios/goal.ts` | The tutoring team's run: diagnose → video lesson + test → review → deliver. |
+| `src/app/api/departments/route.ts` | The building's API. |
+| `src/lib/nurture/` | Lead nurturing: the message library, content bank, tracked links and scoring, campaigns, the career-fit quiz, programme videos. |
+| `src/app/go/[token]`, `src/app/fit/[token]`, `src/app/watch/[token]` | What a lead opens: tracked links (and unsubscribe), the quiz, their video. |
 
-Every model call is validated JSON with a hard timeout. If the model is off,
-slow or wrong, that agent falls back to a deterministic playbook, so a run
-always finishes. Without any keys at all, Thuso runs fully in simulation.
+Every model call is validated JSON with a timeout and a deterministic
+fallback, so a run always finishes. Without any keys, Thuso runs in
+simulation.
 
-## 11. Run it
+## Run it
 
 ```bash
 npm install
-npm run dev          # http://localhost:3200 (development)
-npm run demo         # build and serve, fastest for presenting
+npm run dev          # http://localhost:3200
+npm test             # engine tests (no keys, no database needed)
+npm run typecheck
 ```
 
-Copy `.env.example` to `.env.local` and switch on what you need:
+Copy `.env.example` to `.env.local`. The important variables:
 
-| Variable | Switches on |
+| Variable | Why |
 |---|---|
-| `ANTHROPIC_API_KEY` (+ `ANTHROPIC_MODEL`) | The agents think with Claude (otherwise the playbook). |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` | Real email through Nodemailer. Gmail: `smtp.gmail.com`, `465`, an App Password. |
-| `MANAGER_EMAIL` | Musa's daily report. |
-| `PUBLIC_BASE_URL` | Where lesson and quiz links open. Must be reachable from a phone. |
-| `DIALER_URL`, `DIALER_API_KEY` | The follow-up call (a dialer key with the "Start AI calls" scope). |
-| `LMS_WEBHOOK_SECRET` | The secret LMS webhooks are signed with. |
-| `LMS_API_URL`, `LMS_API_KEY` | A real LMS instead of the sandbox. |
-| `GOOGLE_SHEET_URL`, `SHEET_WRITEBACK_URL` | A Google Sheet as the learner record, and status write-back. |
-| `DEMO_RECIPIENT_EMAIL` | Send every email to one inbox while presenting. |
+| `SESSION_SECRET` | **Required in production.** 32+ random characters; signs sign-in cookies. |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | The agents think with Claude (otherwise the playbook). |
+| `SMTP_*`, `EMAIL_FROM` | Real email (still only with Live Outreach on). |
+| `DATABASE_URL` | Postgres, so runs, records and settings survive redeploys. |
+| `PUBLIC_BASE_URL` | Where lesson and test links open (reachable from a phone). |
+| `ELEVENLABS_API_KEY` / `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` | A natural voice for the video lessons (else the browser's voice). |
+| `DIALER_URL`, `DIALER_API_KEY` | AI phone calls. |
+| `ALLOW_SIGNUPS=false` | Stop strangers registering workspaces on your server. |
+| `AGENT_WAIT_SCALE` | Testing only: `360` makes a 1-hour wait take 10 seconds. |
 
-Then open **Learner records** (`/lms`), add yourself with a real email and
-phone number, change your mark to 38 and press **Save**. Watch the office.
+## Deploy it
 
-## 12. Deploy it
+Melsoft runs Thuso on its own **Windows VPS**: one always-on Node process (the
+agents' engine lives inside it), started at boot and restarted if it stops,
+with Caddy in front for HTTPS and a nightly backup of `.data`. Step by step:
+[deploy/windows/README.md](deploy/windows/README.md) (`install.ps1` once,
+`update.ps1` after every push). Set `PUBLIC_BASE_URL` to the public address.
+`DATABASE_URL` is optional on a VPS (the disk keeps `.data`), and the sign-in
+key is created on the first start. Serverless hosting does not work: the
+engine must keep running between requests.
 
-Thuso is **one always-on server** (live updates, background runs, the
-scheduler), so host it on **Render, Railway, Fly or a VPS**, not on
-per-request serverless.
+## Security notes
 
-On Render: build `npm install && npm run build`, start `npm start`, paste the
-environment, and set `PUBLIC_BASE_URL` to the service address. On Render's
-free plan Thuso pings its own `/api/health` every 10 minutes so it does not
-sleep, but **the free plan blocks mail ports**: use a paid instance for Gmail
-SMTP, or an SMTP provider on port 2525 (for example Brevo). If an email cannot
-be sent, the activity feed says exactly why.
-
-## 13. Safety, privacy and honest notes
-
-- **Learners are never labelled.** No message or call says "at risk" or
-  mentions a score; the Reviewer rejects drafts that do.
-- **Calls are disclosed and bounded.** Every call says it is recorded, stays
-  under a minute, and the dialer's own rules still apply: AI caller switched
-  on, calling hours, do-not-call list, minutes.
-- **Keys stay in the environment.** No secret is in this repository.
-- **What is a demo choice:**
-  - the learner records are a sandbox LMS by default, using the same adapter
-    a real LMS plugs into;
-  - the planted test error is labelled;
-  - the "video" lesson is a narrated slide lesson rendered in the browser,
-    not a video file.
-- **Today, names and marks are sent to the model** to write personal
-  material. In production we would pseudonymise learners before any model
-  call.
-
-## 14. What we would build next
-
-- Connect a real LMS (Moodle, Canvas) through the same adapter.
-- WhatsApp delivery for learners who never open email.
-- Pseudonymise learner data before it reaches the model.
-- A facilitator approval step, for schools that want one.
-- More colleagues on the same loop: admissions, marking, career support.
-
----
-
-*Thuso finds the learners who are quietly falling behind and helps them,
-before anyone has to ask.*
+- Every staff API needs a signed-in session. Owners and admins alone change
+  integrations, departments, agents, data sources and the team.
+- LMS webhooks are HMAC-signed with the workspace's own secret. Leads and
+  email-reply webhooks need the workspace's inbound token.
+- Sign-in is throttled after repeated failures, and passwords are at least 8
+  characters.
+- **Not yet done:**
+  - integration secrets (SMTP password, Moodle token) are stored
+    unencrypted in `.data/` and Postgres;
+  - learners' names and marks are sent to the model and the voice provider
+    to personalise lessons. Pseudonymise before wider rollout if needed.

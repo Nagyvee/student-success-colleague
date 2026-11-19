@@ -1,16 +1,20 @@
-import type { CatchUpPlan, CheckInMessage, LearnerCard, LearnerCase, Lesson, RemedialQuiz, RunSummary, Trigger } from '@/lib/types';
-import { ENTRANCE, ROOMS } from '@/lib/office/layout';
-import { getState, patchTask, patchVisitor, setAgent, setLearner, setLearners, uid } from '@/lib/engine/store';
+import { warmLessonAudio } from '@/lib/media/tts';
+import type { CatchUpPlan, CheckInMessage, LearnerCard, LearnerCase, Lesson, LessonEvidence, MissedQuestion, RemedialQuiz, RunSummary, Trigger } from '@/lib/types';
+import { AGENT_BY_ID, ENTRANCE, ROOMS } from '@/lib/office/layout';
+import { enqueueOutreachApproval, getState, patchTask, patchVisitor, setAgent, setLearner, setLearners, uid, upsertDeliverable } from '@/lib/engine/store';
 import { startScenario, type Ctx } from '@/lib/engine/orchestrator';
 import { auditCatchUpPlan, auditCheckIn, auditRemedialQuiz } from '@/lib/engine/audit';
 import { diagnose, draftCheckIn, draftLesson, draftRemedialQuiz, planGoal, reviseCatchUpPlan, reviseCheckIn, reviseRemedialQuiz, type AiResult, type Evidence } from '@/lib/ai/agents';
-import { COHORTS, injectQuizDefect, simCase, simPlan } from '@/lib/ai/simulate';
-import { checkInEmail, quizEmail, sendMail } from '@/lib/email/send';
-import { writeBack } from '@/lib/lms/sheet';
+import { COHORTS, clampPassMark, clampQuestions, injectQuizDefect, simCase, simPlan, syllabusFor } from '@/lib/ai/simulate';
 import { callStatus, dialerReady, maskPhone, placeCall } from '@/lib/calls/dialer';
 import { log, setSpotlight } from '@/lib/engine/store';
 import { assessRisk, getLmsAdapter, sandboxAdapter, type LmsAdapter } from '@/lib/lms/lmsAdapter';
 import { MODULES } from '@/lib/lms/sandboxData';
+import { getWorkflow, recordWorkflowRun } from '@/lib/engine/workflows';
+import { getLearnerMemories } from '@/lib/db/postgres';
+import { dispatchApprovedDeliverable } from '@/lib/engine/approvals';
+import { currentTenantId } from '@/lib/auth/tenantContext';
+import { getTenantIntegrations } from '@/lib/auth/accounts';
 
 /* The one run: a person gives the colleague a goal, and it finishes the job.
  *
@@ -34,23 +38,59 @@ async function adapterFor(ctx: Ctx): Promise<LmsAdapter> {
 }
 
 const firstName = (n: string) => n.split(' ')[0];
+
+/** What the tutor noticed: the learner's latest result on the module, what they
+ *  missed, and how long they have been away. It opens the personal video. */
+function evidenceFor(ev: Evidence, moduleCode: string, missed?: MissedQuestion[]): LessonEvidence {
+  const onModule = ev.a.filter((x) => x.moduleCode === moduleCode);
+  const pool = onModule.length ? onModule : ev.a;
+  const latest = [...pool].sort((p, q) => Date.parse(q.takenAt) - Date.parse(p.takenAt)).find((x) => !x.passed) || null;
+  const topics = [
+    ...(missed || []).map((m) => m.topic || '').filter(Boolean),
+    ...(latest?.weakTopics || []),
+  ].map((t) => t.trim()).filter(Boolean);
+  return {
+    scorePct: latest ? latest.scorePct : null,
+    passMark: latest ? latest.passMark : null,
+    assessmentTitle: latest ? latest.title : null,
+    daysSinceLogin: ev.e.daysSinceLastLogin,
+    missedTopics: Array.from(new Set(topics)).slice(0, 4),
+    missedCount: missed?.length || latest?.missedQuestions?.length || 0,
+  };
+}
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export interface RunOptions {
   trigger?: Trigger;
   /** Learners an LMS event is about: they are looked at whatever the scan says. */
   focus?: string[];
+  workflowId?: string;
+  workflowInstructions?: string;
+  missedQuestions?: MissedQuestion[];
+  /** Mastery test length (default 10, 3 to 15). */
+  quizQuestions?: number;
+  /** Pass mark for the test, in percent (default 70). */
+  passMark?: number;
+  /** The agent run that handed this over (logged against when the pack is sent). */
+  agentRunId?: string;
 }
 
 export function runGoal(goalText: string, opts: RunOptions = {}) {
   const goal = goalText.replace(/\s+/g, ' ').trim().slice(0, 280) || DEFAULT_GOAL;
   const trigger: Trigger = opts.trigger || { kind: 'manager', label: "Manager's goal" };
   const focus = opts.focus?.length ? new Set(opts.focus) : null;
+  const wf = opts.workflowId ? getWorkflow(opts.workflowId) : null;
+  const workflowInstructions = opts.workflowInstructions || wf?.instructions;
+  // The mastery test: 10 questions and a 70% pass mark unless the workflow says otherwise.
+  const quizCount = clampQuestions(opts.quizQuestions);
+  const passMark = clampPassMark(opts.passMark);
   return startScenario('goal', 'Goal', goal, 10, async (ctx) => {
     let adapter = await adapterFor(ctx);
-    patchTask(ctx.task.id, { goal, trigger });
+    patchTask(ctx.task.id, { goal, trigger, workflowId: opts.workflowId || null });
     ctx.task.goal = goal;
     ctx.task.trigger = trigger;
+    ctx.task.workflowId = opts.workflowId || null;
+    if (wf) recordWorkflowRun(wf.id);
     let fixes = 0;
 
     // 1 · the goal arrives: typed by a manager, sent by the LMS, or due on the schedule
@@ -98,15 +138,30 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
     ctx.room('success', 'busy', 'Scanning the LMS');
     ctx.think('success', `Pulling engagement and marks for ${scope}…`, 'working');
     let students = [] as Awaited<ReturnType<LmsAdapter['listStudents']>>;
-    try { students = await adapter.listStudents(); if (!students.length) throw new Error('empty roster'); }
-    catch (e) {
-      ctx.say('lms', 'lms', `Live LMS unreachable (${(e as Error).message}). Falling back to the Demo Sandbox so the scan completes.`);
-      adapter = sandboxAdapter();
+    try {
       students = await adapter.listStudents();
+    } catch (e) {
+      ctx.say('lms', 'error', `Could not reach LMS (${(e as Error).message}). Verify your Moodle/LMS connection in Channels & API.`);
+      ctx.calm('success');
+      ctx.think('success', null, 'idle');
+      finish(ctx, { checked: 0, needHelp: 0, quizzes: 0, checkIns: 0, errorsFixed: 0, humanInterventions: 0, durationMs: Date.now() - ctx.task.startedAt });
+      return;
     }
+    if (!students.length) {
+      ctx.say('lms', 'info', 'No learners found in this workspace yet. Connect Moodle, link your Google Sheet, enroll learners, or send a signed webhook event.');
+      ctx.announce('lms', 'Roster empty · connect Moodle or send an LMS webhook to track learners', 'warn');
+      ctx.calm('success');
+      ctx.think('success', null, 'idle');
+      finish(ctx, { checked: 0, needHelp: 0, quizzes: 0, checkIns: 0, errorsFixed: 0, humanInterventions: 0, durationMs: Date.now() - ctx.task.startedAt });
+      return;
+    }
+    const targetStudents = focus ? students.filter((s) => focus.has(s.id)) : students;
     const all: Evidence[] = [];
-    for (const s of students) {
-      const [e, a] = await Promise.all([adapter.getEngagement(s.id), adapter.getAssessments(s.id)]);
+    for (const s of targetStudents) {
+      const [e, a] = await Promise.all([
+        adapter.getEngagement(s.id),
+        adapter.getAssessments(s.id, { includeMissedQuestions: false }),
+      ]);
       if (e) all.push({ student: s, e, a, risk: assessRisk(e, a, MODULES) });
     }
     const cards: LearnerCard[] = all.map(({ student: s, e, a, risk }) => ({
@@ -116,9 +171,14 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
       lastLoginDays: e.daysSinceLastLogin, completion: e.completionPct,
       quizAvg: Math.round(a.reduce((n, x) => n + x.scorePct, 0) / Math.max(1, a.length)), lastEvent: null,
     }));
-    setLearners(cards);
+    if (focus) {
+      for (const c of cards) setLearner(c.id, c);
+    } else {
+      setLearners(cards);
+    }
     // An LMS event is about specific learners: look at them, whatever the plan's scope says.
-    const scoped = focus ? all.filter((x) => focus.has(x.student.id)) : all.filter((x) => plan.scope.cohorts.includes(x.student.cohort));
+    const cohortMatched = all.filter((x) => plan.scope.cohorts.includes(x.student.cohort));
+    const scoped = focus ? all.filter((x) => focus.has(x.student.id)) : (cohortMatched.length ? cohortMatched : all);
     const open = new Set(focus ? [] : getState().learners.filter((l) => l.status === 'intervention' || l.status === 'recovered').map((l) => l.id));
     const flagged = scoped
       .filter((x) => x.risk.band === 'at_risk' || (x.risk.band === 'watch' && x.e.daysSinceLastLogin >= 7) || (focus && (x.e.daysSinceLastLogin >= 7 || x.a.some((r) => !r.passed && r.kind === 'quiz'))))
@@ -147,8 +207,10 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
     ctx.step('Working out why each learner is behind');
     ctx.stage('diagnose', 'doing');
     ctx.think('success', `${plural(need.length, 'learner')} behind. Before anyone acts: is it the topic, or have they gone quiet?`);
+    const memories = await getLearnerMemories(need.map((x) => x.student.id));
+    const needWithMemory = need.map((x) => ({ ...x, memory: memories.get(x.student.id) }));
     const evidenceCases = need.map((x) => simCase(x.student, x.e, x.risk));
-    const { value: diagnosed, viaAi: dxAi } = await diagnose(need, evidenceCases);
+    const { value: diagnosed, viaAi: dxAi } = await diagnose(needWithMemory, evidenceCases);
     await ctx.wait(1200);
     for (const c of diagnosed) {
       ctx.say('success', 'think', `${c.learner.name} · ${c.cause === 'topic_gap' ? `topic gap on ${c.weakModule?.code}` : 'disengaged'} → ${c.action === 'remedial_quiz' ? 'catch-up quiz' : 'personal check-in'}. ${c.why}`);
@@ -176,17 +238,40 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
     const quizJobs = new Map<string, Promise<AiResult<RemedialQuiz>>>();
     const checkJobs = new Map<string, Promise<AiResult<CheckInMessage>>>();
     const lessonJobs = new Map<string, Promise<AiResult<Lesson>>>();
+    const evidenceJobs = new Map<string, Promise<LessonEvidence>>();
     const evidenceOf = (id: string) => need.find((x) => x.student.id === id)!;
     const startJobs = (cases: LearnerCase[]) => {
       for (const c of cases) {
         const ev = evidenceOf(c.learner.id);
+        const eventMissed = (!focus || focus.has(c.learner.id)) ? opts.missedQuestions : undefined;
         if (c.action === 'remedial_quiz' && !quizJobs.has(c.learner.id)) {
-          const mod = MODULES.find((m) => m.code === c.weakModule?.code) || MODULES[0];
           const iv = simPlan(ev.student, ev.e, ev.risk);
-          quizJobs.set(c.learner.id, draftRemedialQuiz(ev.student, { ...iv, weakTopic: c.weakTopic || iv.weakTopic }, mod, quizId(), tutorLang));
-          lessonJobs.set(c.learner.id, draftLesson(ev.student, mod, c.weakTopic || iv.weakTopic));
+          const topic = c.weakTopic || iv.weakTopic;
+          const mod = syllabusFor(c.weakModule?.code || iv.weakModule.code, c.weakModule?.title || iv.weakModule.title, topic);
+          const mem = memories.get(c.learner.id);
+          const missedOnce = (async () => {
+            if (eventMissed?.length) return eventMissed;
+            const cached = ev.a.find((x) => !x.passed && x.missedQuestions?.length)?.missedQuestions;
+            if (cached?.length) return cached;
+            const detailed = await adapter.getAssessments(c.learner.id, { includeMissedQuestions: true }).catch(() => []);
+            return detailed.find((x) => !x.passed && x.missedQuestions?.length)?.missedQuestions;
+          })();
+          const evidenceJob = missedOnce.then((missedQuestions) => evidenceFor(ev, mod.code, missedQuestions));
+          quizJobs.set(
+            c.learner.id,
+            Promise.all([missedOnce, evidenceJob]).then(([missedQuestions, evidence]) =>
+              draftRemedialQuiz(ev.student, { ...iv, weakTopic: topic }, mod, quizId(), tutorLang, missedQuestions, workflowInstructions, mem, { questionCount: quizCount, passMark, evidence }),
+            ),
+          );
+          lessonJobs.set(
+            c.learner.id,
+            Promise.all([missedOnce, evidenceJob]).then(([missedQuestions, evidence]) =>
+              draftLesson(ev.student, mod, topic, missedQuestions, workflowInstructions, mem, { questionCount: quizCount, passMark, evidence, tutorName: AGENT_BY_ID.learning.name }),
+            ),
+          );
+          evidenceJobs.set(c.learner.id, evidenceJob);
         }
-        if (c.action === 'checkin' && !checkJobs.has(c.learner.id)) checkJobs.set(c.learner.id, draftCheckIn(c, ev.e));
+        if (c.action === 'checkin' && !checkJobs.has(c.learner.id)) checkJobs.set(c.learner.id, draftCheckIn(c, ev.e, [], workflowInstructions, memories.get(c.learner.id)));
       }
     };
     startJobs(diagnosed);
@@ -218,7 +303,7 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
       ctx.room('learning', 'busy', `${plural(quizCases.length, 'case file')} incoming`);
       ctx.think('learning', `Bongani's bringing ${plural(quizCases.length, 'case')}. Topic gaps, so it's my turn.`, 'working');
       await ctx.walk('success', ROOMS.learning.visitor, { carrying: plural(quizCases.length, 'case file'), thought: `Taking the topic gaps to Lindiwe. The weak topic is what matters.` });
-      ctx.think('success', `Lindiwe: ${quizCases.map((c) => `${firstName(c.learner.name)} on ${c.weakModule?.code}`).join(', ')}. Three questions each, on exactly that.`, 'working');
+      ctx.think('success', `Lindiwe: ${quizCases.map((c) => `${firstName(c.learner.name)} on ${c.weakModule?.code}`).join(', ')}. ${quizCount} questions each, on exactly that.`, 'working');
       ctx.say('success', 'route', `Handed to Learning & Assessment: ${quizCases.map((c) => `${c.learner.name} (${c.weakModule?.code} · ${c.weakTopic})`).join('; ')}.`, planD.id);
       await ctx.wait(1500);
       back = ctx.walk('success', ROOMS.success.desk, { carrying: null, thought: checkCases.length ? `Back to my desk to write to ${checkCases.map((c) => firstName(c.learner.name)).join(' and ')}.` : null });
@@ -234,7 +319,10 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
     for (const [i, c] of quizCases.entries()) {
       const { value: drafted, viaAi } = await quizJobs.get(c.learner.id)!;
       const { value: lesson, viaAi: lessonAi } = await lessonJobs.get(c.learner.id)!;
-      const clean: RemedialQuiz = { ...drafted, lesson };
+      const evidence = await (evidenceJobs.get(c.learner.id) || Promise.resolve(null));
+      const clean: RemedialQuiz = { ...drafted, lesson, evidence: drafted.evidence || evidence };
+      // Make the narration now, so the learner's video starts the moment they press play.
+      if (lesson) warmLessonAudio(currentTenantId(), drafted.quizId, lesson.slides);
       ctx.say('learning', 'draft', `Video lesson for ${c.learner.name}${lessonAi ? '' : ' (from the question bank)'}: "${lesson.title}", ${lesson.slides.length} narrated slides, about ${Math.max(2, Math.round(lesson.slides.reduce((n, sl) => n + sl.say.split(/\s+/).length, 0) / 150))} minutes.`, undefined, {
         tool: 'learning.create_video_lesson', payload: { learner: c.learner.id, title: lesson.title, slides: lesson.slides.map((sl) => sl.heading) },
       });
@@ -265,7 +353,7 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
     ctx.step('Reviewer audits every output');
     for (const [i, d] of quizzes.entries()) {
       const q = d.content as RemedialQuiz;
-      const mod = MODULES.find((m) => m.code === q.module.code) || MODULES[0];
+      const mod = syllabusFor(q.module.code, q.module.title, q.topic);
       ctx.think('learning', i === 0 ? 'Drafts in. Ready for review.' : null, i === 0 ? 'working' : 'idle');
       let verdict = await ctx.review(d, auditRemedialQuiz(q, mod.keywords), { walk: i === 0, holdMs: 1900 });
       let round = 0;
@@ -292,7 +380,7 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
         const c = checkCases[i];
         const audit = auditCheckIn(d.content as CheckInMessage);
         ctx.think('success', 'Fair. Rewriting it the way a person would say it…', 'revising');
-        const { value: v2 } = await reviseCheckIn(c, evidenceOf(c.learner.id).e, audit.notes);
+        const { value: v2 } = await reviseCheckIn(c, evidenceOf(c.learner.id).e, audit.notes, workflowInstructions, memories.get(c.learner.id));
         ctx.revise(d, v2, 'Rewritten: no labels, shorter, one clear ask.');
         verdict = await ctx.review(d, auditCheckIn(d.content as CheckInMessage), { walk: false, holdMs: 1400 });
       }
@@ -300,36 +388,124 @@ export function runGoal(goalText: string, opts: RunOptions = {}) {
     ctx.calm('success');
     ctx.stage('review', 'done', `${plural(quizzes.length + checkins.length + 1, 'output')} approved · ${plural(fixes, 'fix', 'fixes')}`);
 
-    // 8 · deliver
+    // 8 · deliver (or pause for human approval if enabled for this workspace)
     ctx.step('Sending approved work to learners');
     ctx.stage('deliver', 'doing');
-    for (const d of quizzes) {
-      const q = d.content as RemedialQuiz;
-      const link = `${getState().caps.baseUrl}/quiz/${q.quizId}`;
-      const mail = await sendMail({ to: q.learner.email, toName: q.learner.name, ...quizEmail(q, link), link, taskId: ctx.task.id, deliverableId: d.id });
-      ctx.dispatch(d);
-      try { await adapter.updateStudentStatus(q.learner.id, 'intervention', `Catch-up quiz ${q.quizId} sent`); } catch { /* the office remembers even if the LMS is down */ }
-      setLearner(q.learner.id, { status: 'intervention', lastEvent: `Quiz ${q.quizId} sent · waiting` });
-      void writeBack(q.learner.id, 'being helped', `Study pack and quiz sent ${new Date().toLocaleString('en-ZA')}`);
-      ctx.say('coo', 'dispatch', `Sent: catch-up quiz for ${q.learner.name}. Link: ${link}`, d.id, { tool: 'comms.send_quiz', payload: { quizId: q.quizId, learner: q.learner.id, link, delivery: mail.delivery } });
+    const cadence = wf?.followUpCadence || { intervalHours: 48, repeatForever: true, maxAttempts: null };
+    const ti = getTenantIntegrations(currentTenantId());
+    const requireApproval = Boolean(getState().settings.requireApproval || ti.requireApproval);
+
+    if (requireApproval && (quizzes.length + checkins.length) > 0) {
+      for (const d of quizzes) {
+        const q = d.content as RemedialQuiz;
+        const link = `${getState().caps.baseUrl}/quiz/${q.quizId}`;
+        upsertDeliverable({ ...d, status: 'awaiting_approval' });
+        setLearner(q.learner.id, { lastEvent: `Quiz ${q.quizId} ready · awaiting approval` });
+        enqueueOutreachApproval({
+          id: uid('appr'),
+          taskId: ctx.task.id,
+          deliverableId: d.id,
+          learnerId: q.learner.id,
+          learnerName: q.learner.name,
+          learnerEmail: q.learner.email,
+          cohort: evidenceOf(q.learner.id).student.cohort,
+          kind: 'remedial_quiz',
+          subject: `${q.module.code}: ${q.topic} study pack + catch-up quiz`,
+          previewText: q.tutoringSummary.slice(0, 180),
+          link,
+          moduleCode: q.module.code,
+          topic: q.topic,
+          workflowId: wf?.id || null,
+          workflowName: wf?.officeName || wf?.name || trigger.label,
+          triggerKind: trigger.kind,
+          intervalHours: cadence.intervalHours,
+          repeatForever: cadence.repeatForever,
+          maxAttempts: cadence.maxAttempts,
+          createdAt: Date.now(),
+          status: 'pending',
+        });
+      }
+      for (const d of checkins) {
+        const m = d.content as CheckInMessage;
+        upsertDeliverable({ ...d, status: 'awaiting_approval' });
+        setLearner(m.learner.id, { lastEvent: 'Check-in ready · awaiting approval' });
+        enqueueOutreachApproval({
+          id: uid('appr'),
+          taskId: ctx.task.id,
+          deliverableId: d.id,
+          learnerId: m.learner.id,
+          learnerName: m.learner.name,
+          learnerEmail: m.learner.email,
+          cohort: evidenceOf(m.learner.id).student.cohort,
+          kind: 'checkin',
+          subject: m.subject,
+          previewText: `${m.body.slice(0, 160)} — Ask: ${m.ask}`,
+          link: null,
+          moduleCode: null,
+          topic: null,
+          workflowId: wf?.id || null,
+          workflowName: wf?.officeName || wf?.name || trigger.label,
+          triggerKind: trigger.kind,
+          intervalHours: cadence.intervalHours,
+          repeatForever: cadence.repeatForever,
+          maxAttempts: cadence.maxAttempts,
+          createdAt: Date.now(),
+          status: 'pending',
+        });
+      }
+      ctx.dispatch(planD);
+      ctx.say('coo', 'info', `Approval Mode is ON: ${plural(quizzes.length + checkins.length, 'message')} paused for your approval before sending to learners.`);
+      ctx.stage('deliver', 'doing', `Waiting for your approval (${quizzes.length + checkins.length} ready)`);
+      ctx.announce('coo', `Ready for approval · Click Approve before sending to ${plural(quizzes.length + checkins.length, 'learner')}`, 'warn');
+    } else {
+      for (const d of quizzes) {
+        const q = d.content as RemedialQuiz;
+        await dispatchApprovedDeliverable({
+          deliverable: d,
+          adapter,
+          cohort: evidenceOf(q.learner.id).student.cohort,
+          workflowId: wf?.id || null,
+          workflowName: wf?.officeName || wf?.name || trigger.label,
+          triggerKind: trigger.kind,
+          triggerLabel: trigger.label,
+          intervalHours: cadence.intervalHours,
+          repeatForever: cadence.repeatForever,
+          maxAttempts: cadence.maxAttempts,
+          scoreBefore: evidenceOf(q.learner.id).a.find((x) => x.moduleCode === q.module.code)?.scorePct ?? null,
+        });
+      }
+      for (const d of checkins) {
+        const m = d.content as CheckInMessage;
+        await dispatchApprovedDeliverable({
+          deliverable: d,
+          adapter,
+          cohort: evidenceOf(m.learner.id).student.cohort,
+          workflowId: wf?.id || null,
+          workflowName: wf?.officeName || wf?.name || trigger.label,
+          triggerKind: trigger.kind,
+          triggerLabel: trigger.label,
+          intervalHours: cadence.intervalHours,
+          repeatForever: cadence.repeatForever,
+          maxAttempts: cadence.maxAttempts,
+        });
+      }
+      ctx.dispatch(planD);
+      ctx.say('lms', 'lms', `PATCH /students/{id}/status → intervention for ${plural(cases.length, 'learner')} (${adapter.mode}).`, undefined, {
+        tool: 'lms_adapter.update_student_status', payload: { learners: cases.map((c) => c.learner.id), status: 'intervention' },
+      });
+      const mode = getState().caps.email;
+      ctx.say('system', 'email', `${plural(quizzes.length + checkins.length, 'email')} ${mode === 'smtp' ? 'sent by email (Nodemailer SMTP)' : 'placed in the Inbox tab (no email account connected)'}.`);
+      ctx.stage('deliver', 'done', `${plural(quizzes.length + checkins.length, 'email')} sent · LMS updated`);
+      ctx.announce('coo', `Sent · ${[quizzes.length ? plural(quizzes.length, 'quiz', 'quizzes') : '', checkins.length ? plural(checkins.length, 'check-in') : ''].filter(Boolean).join(' and ')} · LMS updated`, 'good');
     }
-    for (const d of checkins) {
-      const m = d.content as CheckInMessage;
-      const mail = await sendMail({ to: m.learner.email, toName: m.learner.name, ...checkInEmail(m), link: null, taskId: ctx.task.id, deliverableId: d.id });
-      ctx.dispatch(d);
-      try { await adapter.updateStudentStatus(m.learner.id, 'intervention', 'Personal check-in sent'); } catch { /* as above */ }
-      setLearner(m.learner.id, { status: 'intervention', lastEvent: 'Check-in sent · waiting for a reply' });
-      void writeBack(m.learner.id, 'being helped', `Check-in sent ${new Date().toLocaleString('en-ZA')}`);
-      ctx.say('coo', 'dispatch', `Sent: check-in to ${m.learner.name} · "${m.subject}".`, d.id, { tool: 'comms.send_checkin', payload: { learner: m.learner.id, delivery: mail.delivery } });
+    if (opts.agentRunId) {
+      // Tell the department agent that asked for this what the tutoring team did.
+      const { noteLessonOutcome } = await import('@/lib/engine/agentRuns');
+      const q0 = quizzes[0]?.content as RemedialQuiz | undefined;
+      if (q0) noteLessonOutcome(opts.agentRunId, `Tutoring team ${requireApproval ? 'prepared' : 'sent'} the study pack: a personal video lesson and a ${q0.questions.length}-question test on ${q0.module.code} ${q0.topic}${requireApproval ? ' (waiting for approval in the Inbox)' : ''}.`, true);
+      else if (checkins.length) noteLessonOutcome(opts.agentRunId, 'The tutoring team found the marks are fine and wrote a personal check-in instead of a lesson.', true);
+      else noteLessonOutcome(opts.agentRunId, 'The tutoring team found nothing to re-teach for this learner.', false);
     }
-    ctx.dispatch(planD);
-    ctx.say('lms', 'lms', `PATCH /students/{id}/status → intervention for ${plural(cases.length, 'learner')} (${adapter.mode}).`, undefined, {
-      tool: 'lms_adapter.update_student_status', payload: { learners: cases.map((c) => c.learner.id), status: 'intervention' },
-    });
-    const mode = getState().caps.email;
-    ctx.say('system', 'email', `${plural(quizzes.length + checkins.length, 'email')} ${mode === 'smtp' ? 'sent by email (Nodemailer SMTP)' : 'placed in the Inbox tab (no email account connected)'}.`);
-    ctx.stage('deliver', 'done', `${plural(quizzes.length + checkins.length, 'email')} sent · LMS updated`);
-    ctx.announce('coo', `Sent · ${[quizzes.length ? plural(quizzes.length, 'quiz', 'quizzes') : '', checkins.length ? plural(checkins.length, 'check-in') : ''].filter(Boolean).join(' and ')} · LMS updated`, 'good');
     setAgent('learning', { tasksDone: getState().agents.learning.tasksDone + quizzes.length });
     setAgent('success', { tasksDone: getState().agents.success.tasksDone + checkins.length + 1 });
 

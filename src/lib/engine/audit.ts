@@ -28,7 +28,11 @@ export function auditRemedialQuiz(q: RemedialQuiz, keywords: string[]): QuizAudi
   const notes: string[] = [];
   const badIds: string[] = [];
   const kws = (keywords.length ? keywords : q.topicKeywords).map((k) => k.toLowerCase());
-  if (q.questions.length < 3 || q.questions.length > 5) notes.push(`A remedial micro-quiz has 3 to 5 questions; this has ${q.questions.length}.`);
+  if (q.questions.length < 3 || q.questions.length > 15) notes.push(`A mastery test has 3 to 15 questions; this has ${q.questions.length}.`);
+  const prompts = q.questions.map((x) => x.prompt.trim().toLowerCase());
+  q.questions.forEach((x, i) => {
+    if (prompts.indexOf(prompts[i]) !== i) { notes.push(`Question ${i + 1} repeats an earlier question.`); badIds.push(x.id); }
+  });
   q.questions.forEach((x, i) => {
     const hay = `${x.prompt} ${x.options.join(' ')} ${x.topicTag} ${x.explanation}`.toLowerCase();
     const onTopic = kws.some((k) => hay.includes(k));

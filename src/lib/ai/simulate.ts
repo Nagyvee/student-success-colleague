@@ -1,7 +1,9 @@
+import { clampWords } from '@/lib/lessonScene';
 import type {
-  CheckInMessage, GoalPlan, InterventionPlan, LearnerCase, LocalizedTutoring, PlanStep, QuizQuestion, RemedialQuiz, TutorLanguage,
+  CheckInMessage, GoalPlan, InterventionPlan, LearnerCase, Lesson, LessonEvidence, LessonSlide, LocalizedTutoring, PlanStep, QuizQuestion, RemedialQuiz, TutorLanguage,
 } from '@/lib/types';
 import type { EngagementMetrics, ModuleSyllabus, RiskAssessment, StudentProfile } from '@/lib/lms/lmsAdapter';
+import { Q, QUESTION_BANK, bankFor, clampPassMark, clampQuestions, noticedLine, syllabusFor } from './questionBank';
 
 /* Smart simulation.
  *
@@ -77,13 +79,26 @@ export function simCase(student: StudentProfile, e: EngagementMetrics, risk: Ris
   };
 }
 
-export function simCheckIn(c: LearnerCase, daysQuiet: number): CheckInMessage {
+export function simCheckIn(
+  c: LearnerCase,
+  daysQuiet: number,
+  ac: { academyName: string; senderName: string; senderTitle: string } = {
+    academyName: 'Melsoft Academy',
+    senderName: 'Bongani',
+    senderTitle: 'Student Success',
+  },
+): CheckInMessage {
   const first = c.learner.name.split(' ')[0];
   return {
     learner: { id: c.learner.id, name: c.learner.name, email: c.learner.email },
-    subject: `${first}, checking in`,
-    body: `Hi ${first}, it's Bongani from Student Success. We haven't seen you online for ${daysQuiet} days, and your marks have been solid, so this isn't about the work. Life gets busy and that's okay. If something is getting in the way, time, money, a laptop or just energy, tell me and we'll find a way around it together. Your seat in ${c.learner.cohort} is yours.`,
-    ask: 'Reply with one line on what got in the way, or book a 10-minute call this week.',
+    subject: `${first}, checking in from ${ac.academyName}`,
+    body: [
+      `Hi ${first},`,
+      `I'm ${ac.senderName} from ${ac.senderTitle} at ${ac.academyName}. We noticed it has been ${daysQuiet} days since your last login in ${c.learner.cohort}, and wanted to check in personally rather than just sending automated reminders.`,
+      `If life got busy or something got in the way — time, schedules, data, or a tricky concept — let me know and we will work out a flexible plan around it together. Your place in ${c.learner.cohort} is yours.`,
+      `Warm regards,\n${ac.senderName}\n${ac.senderTitle} · ${ac.academyName}`,
+    ].join('\n\n'),
+    ask: 'Reply with one line on what got in the way, or suggest a quick 15-minute slot that works for you this week.',
   };
 }
 
@@ -101,7 +116,7 @@ export function simPlan(student: StudentProfile, e: EngagementMetrics, risk: Ris
     topicKeywords: risk.topicKeywords,
     summary: `${first} was on pace until ${mod.code}. The checkpoint result and the silence since point at one topic, ${risk.weakTopic || mod.title}, not at motivation. A short, targeted win on that topic is the fastest way back.`,
     actions: [
-      { when: 'Today', action: `Send a 3-question remedial micro-quiz on ${risk.weakTopic || mod.title} with a two-minute tutoring summary`, owner: 'Learning & Assessment' },
+      { when: 'Today', action: `Send a personal video lesson and a mastery test on ${risk.weakTopic || mod.title}, with a two-minute tutoring summary`, owner: 'Learning & Assessment' },
       { when: 'Today', action: `WhatsApp check-in from the cohort mentor: no pressure, one question about what got in the way`, owner: 'Student Success' },
       { when: 'Within 48 h', action: `Book a 20-minute 1:1 on ${mod.code} if the quiz scores under the 67% pass mark`, owner: 'Learning & Assessment' },
       { when: 'Day 7', action: 'Re-run the engagement scan; close the case at two consecutive logins and a passed checkpoint', owner: 'Student Success' },
@@ -111,83 +126,7 @@ export function simPlan(student: StudentProfile, e: EngagementMetrics, risk: Ris
 
 /* ── Learning & Assessment ────────────────────────────────────────────────── */
 
-const Q = (prompt: string, options: string[], answerIndex: number, explanation: string, topicTag: string): Omit<QuizQuestion, 'id'> => ({ prompt, options, answerIndex, explanation, topicTag });
-
-export const QUESTION_BANK: Record<string, { summary: string; keyPoints: string[]; questions: Omit<QuizQuestion, 'id'>[] }> = {
-  'JS-07': {
-    summary: 'A Promise is a placeholder for a value that is not ready yet. It starts pending and settles once, as either fulfilled (with a value) or rejected (with a reason). .then() runs when it fulfils, .catch() when it rejects, and each returns a new Promise, which is what makes chaining work. async/await is the same machinery in a friendlier shape: await pauses the async function until the Promise settles, and a rejected Promise becomes a thrown error you catch with try/catch. Promise.all runs several Promises together and rejects as soon as any one of them rejects.',
-    keyPoints: [
-      'Pending → fulfilled or rejected. A Promise settles once and never changes again.',
-      'Every .then() returns a new Promise, so the chain passes values down.',
-      'await only works inside an async function; a rejected Promise throws at the await.',
-      'Promise.all waits for all and fails fast; Promise.allSettled never fails.',
-      'await in a loop runs one at a time; Promise.all runs them together.',
-    ],
-    questions: [
-      Q('What does `await` do inside an async function?',
-        ['Blocks the whole browser until the Promise settles', 'Pauses that function until the Promise settles, then gives back the fulfilled value', 'Converts the Promise into a callback', 'Runs the Promise a second time'],
-        1, 'await pauses only the async function it is in. The rest of the program keeps running, and when the Promise fulfils the function resumes with the value.', 'async/await'),
-      Q('A fetch inside an async function rejects. Which pattern catches the error?',
-        ['if (response.error) { ... }', 'response.catch(err => ...) after the await', 'try { await fetch(url) } catch (err) { ... }', 'await.catch(err => ...)'],
-        2, 'With await, a rejected Promise becomes a thrown error. try/catch around the await is the way to handle it.', 'error handling'),
-      Q('What does `Promise.all([a, b, c])` return?',
-        ['The first Promise to settle', 'A single Promise that fulfils with an array of all three values, or rejects as soon as any one rejects', 'An array of three settled values immediately', 'Nothing; it only runs them'],
-        1, 'Promise.all combines them into one Promise. It fulfils with the array of results in order, and it rejects fast if any input rejects.', 'Promise.all'),
-      Q('In `getUser().then(u => u.id).then(id => console.log(id))`, what does the second .then() receive?',
-        ['The original user object', 'undefined', 'The value returned by the first .then(), the id', 'A new Promise it must await'],
-        2, 'Each .then() returns a new Promise that fulfils with whatever the callback returned, so the id flows into the next step of the chain.', 'Promise chaining'),
-      Q('Which log order does this produce?\n\nconsole.log("A");\nsetTimeout(() => console.log("B"), 0);\nPromise.resolve().then(() => console.log("C"));\nconsole.log("D");',
-        ['A, B, C, D', 'A, D, C, B', 'A, D, B, C', 'A, C, D, B'],
-        1, 'Synchronous code runs first (A, D). Then the microtask queue drains (C) before the timer callback on the macrotask queue (B).', 'event loop'),
-    ],
-  },
-  'SQL-04': {
-    summary: 'A JOIN combines rows from two tables on a matching key. INNER JOIN keeps only the rows that match on both sides. LEFT JOIN keeps every row from the left table and fills the right side with NULL where nothing matches, which is how you find "customers with no orders". GROUP BY folds many rows into one per group so you can COUNT, SUM or AVG them, and HAVING filters those groups after the aggregation (WHERE filters rows before it).',
-    keyPoints: [
-      'INNER JOIN: matches only. LEFT JOIN: everything on the left, NULLs where no match.',
-      'Join on the foreign key; a wrong ON clause multiplies rows.',
-      'WHERE filters rows before grouping; HAVING filters groups after.',
-      'COUNT(column) ignores NULLs; COUNT(*) counts rows.',
-    ],
-    questions: [
-      Q('Which query lists every customer, including those who have never placed an order?',
-        ['SELECT ... FROM customers INNER JOIN orders ON ...', 'SELECT ... FROM customers LEFT JOIN orders ON customers.id = orders.customer_id', 'SELECT ... FROM orders LEFT JOIN customers ON ...', 'SELECT ... FROM customers CROSS JOIN orders'],
-        1, 'LEFT JOIN keeps every row from the left table (customers) and fills order columns with NULL where there is no match.', 'LEFT JOIN'),
-      Q('After `GROUP BY customer_id`, which clause keeps only customers with more than 5 orders?',
-        ['WHERE COUNT(*) > 5', 'HAVING COUNT(*) > 5', 'ORDER BY COUNT(*) > 5', 'LIMIT 5'],
-        1, 'HAVING filters groups after aggregation. WHERE runs before grouping, so it cannot see COUNT(*).', 'HAVING'),
-      Q('customers has 100 rows, orders has 250 rows and every order belongs to a customer. How many rows does `customers INNER JOIN orders` return?',
-        ['100', '250', '350', '25,000'],
-        1, 'Each order matches exactly one customer, so the inner join returns one row per order: 250.', 'INNER JOIN'),
-      Q('In a LEFT JOIN from customers to orders, what is `orders.total` for a customer with no orders?',
-        ['0', 'An empty string', 'NULL', 'The row is dropped'],
-        2, 'Unmatched right-side columns are NULL in a LEFT JOIN. The customer row is kept.', 'NULL handling'),
-    ],
-  },
-  'RE-03': {
-    summary: 'State is the data a component owns and that can change over time. useState gives you the value and a setter; calling the setter re-renders the component with the new value. Never mutate state directly: create a new object or array so React sees the change. useEffect runs side effects after render, and its dependency array decides when: [] once on mount, [x] whenever x changes, and no array after every render.',
-    keyPoints: [
-      'Calling the setter schedules a re-render; mutating state does not.',
-      'Copy, then change: setItems([...items, newItem]), not items.push().',
-      'useEffect dependencies list every value the effect reads.',
-      'Share state by lifting it to the closest common parent.',
-    ],
-    questions: [
-      Q('Why does `items.push(newItem); setItems(items);` fail to show the new item?',
-        ['push is asynchronous', 'The array reference did not change, so React skips the re-render', 'setItems only accepts strings', 'useState cannot hold arrays'],
-        1, 'React compares the new state to the old by reference. The same array object means "nothing changed". Create a new array: setItems([...items, newItem]).', 'immutable updates'),
-      Q('What does `useEffect(() => { fetchData(); }, [])` do?',
-        ['Runs fetchData on every render', 'Runs fetchData once, after the first render', 'Never runs fetchData', 'Runs fetchData before the component mounts'],
-        1, 'An empty dependency array means the effect has no dependencies, so it runs once after the component mounts.', 'useEffect'),
-      Q('Two sibling components need the same piece of state. Where should it live?',
-        ['In whichever sibling renders first', 'In a global variable outside React', 'In their closest common parent, passed down as props', 'Duplicated in both and kept in sync manually'],
-        2, 'Lift the state up to the closest common parent and pass the value and setter down as props.', 'lifting state'),
-      Q('What happens when you call `setCount(count + 1)` three times in one click handler?',
-        ['count increases by 3', 'count increases by 1, because each call read the same stale count', 'React throws an error', 'The component unmounts'],
-        1, 'All three calls read the same count from this render. Use the updater form, setCount(c => c + 1), to build on the latest value.', 'useState'),
-    ],
-  },
-};
+export { QUESTION_BANK, syllabusFor, bankFor, noticedLine, clampQuestions, clampPassMark } from './questionBank';
 
 /** An off-topic question the demo slips into the first draft. */
 export const OFF_TOPIC_QUESTION: Omit<QuizQuestion, 'id'> = Q(
@@ -292,20 +231,27 @@ export const RESOURCES: Record<string, { label: string; url: string; kind: 'read
   'CSS-04': [
     { label: 'Watch: Flexbox and Grid, explained', url: yt('css flexbox grid explained'), kind: 'watch' },
     { label: 'CSS-Tricks: A complete guide to Flexbox', url: 'https://css-tricks.com/snippets/css/a-guide-to-flexbox/', kind: 'read' },
+    { label: 'MDN: Basic concepts of grid layout', url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_grid_layout/Basic_concepts_of_grid_layout', kind: 'read' },
   ],
   'PY-05': [
     { label: 'Watch: pandas groupby and merge, explained', url: yt('pandas groupby merge explained'), kind: 'watch' },
     { label: 'pandas docs: Group by', url: 'https://pandas.pydata.org/docs/user_guide/groupby.html', kind: 'read' },
+    { label: 'pandas docs: Merge, join and concatenate', url: 'https://pandas.pydata.org/docs/user_guide/merging.html', kind: 'read' },
   ],
   'SEC-06': [
     { label: 'Watch: firewalls and TLS, explained', url: yt('firewall tls explained'), kind: 'watch' },
+    { label: 'Cloudflare: What is TLS?', url: 'https://www.cloudflare.com/learning/ssl/transport-layer-security-tls/', kind: 'read' },
+    { label: 'OWASP: Threat modeling cheat sheet', url: 'https://cheatsheetseries.owasp.org/cheatsheets/Threat_Modeling_Cheat_Sheet.html', kind: 'read' },
   ],
 };
 
-export function simQuiz(student: StudentProfile, plan: InterventionPlan, mod: ModuleSyllabus, quizId: string, tutorLanguage: TutorLanguage = 'en'): RemedialQuiz {
-  const bank = QUESTION_BANK[mod.code] || QUESTION_BANK['JS-07'];
-  const translations = LOCALIZED_BANK[mod.code] || LOCALIZED_BANK['JS-07'];
-  const picked = bank.questions.slice(0, 3).map((q, i) => ({ ...q, id: `q${i + 1}` }));
+export interface PackOptions { questionCount?: number; passMark?: number; evidence?: LessonEvidence | null }
+
+export function simQuiz(student: StudentProfile, plan: InterventionPlan, mod: ModuleSyllabus, quizId: string, tutorLanguage: TutorLanguage = 'en', opts: PackOptions = {}): RemedialQuiz {
+  const bank = bankFor(mod, plan.weakTopic);
+  const translations = LOCALIZED_BANK[mod.code];
+  const n = Math.min(clampQuestions(opts.questionCount), bank.questions.length);
+  const picked = bank.questions.slice(0, n).map((q, i) => ({ ...q, id: `q${i + 1}` }));
   return {
     quizId,
     learner: { id: student.id, name: student.name, email: student.email },
@@ -314,50 +260,81 @@ export function simQuiz(student: StudentProfile, plan: InterventionPlan, mod: Mo
     topicKeywords: mod.keywords,
     tutoringSummary: bank.summary,
     keyPoints: bank.keyPoints,
-    localizedSummary: tutorLanguage === 'zu' || tutorLanguage === 'st' ? translations[tutorLanguage] : null,
+    localizedSummary: translations && (tutorLanguage === 'zu' || tutorLanguage === 'st') ? translations[tutorLanguage] : null,
     allTranslations: translations,
     questions: picked,
-    resources: RESOURCES[mod.code] || [],
-    passMark: 67,
+    resources: RESOURCES[mod.code] || [
+      { label: `Watch: ${plan.weakTopic} explained`, url: yt(`${mod.title} ${plan.weakTopic} explained`), kind: 'watch' },
+    ],
+    passMark: clampPassMark(opts.passMark),
     status: 'pending',
     result: null,
+    evidence: opts.evidence || null,
   };
 }
 
-/** A lesson built from the question bank, for when the model is off. */
-export function simLesson(name: string, mod: ModuleSyllabus, topic: string): import('@/lib/types').Lesson {
-  const bank = QUESTION_BANK[mod.code] || QUESTION_BANK['JS-07'];
+export interface LessonOptions extends PackOptions { tutorName?: string; academyName?: string }
+
+/** A lesson built from the question bank, for when the model is off. It still
+ *  greets the learner by name and says what was noticed. */
+export function simLesson(name: string, mod: ModuleSyllabus, topic: string, opts: LessonOptions = {}): Lesson {
+  const bank = bankFor(mod, topic);
   const first = name.split(' ')[0];
   const pts = bank.keyPoints;
-  return {
-    title: `${mod.code} · ${topic}`,
-    viaAi: false,
-    slides: [
-      { heading: `Hi ${first}: let's fix ${topic}`, points: [`${mod.code} · ${mod.title}`, 'About 3 minutes', 'Then 3 quick questions'], say: `Hi ${first}. Your last checkpoint showed that ${topic} is the one thing holding you back in ${mod.code}. In the next three minutes we will go through it step by step, and then you will try three short questions. You have got this.` },
-      { heading: 'The big idea', points: [bank.summary.split('. ')[0] + '.'], say: bank.summary.split('. ').slice(0, 2).join('. ') + '.' },
-      ...pts.slice(0, 4).map((p, i) => ({ heading: `Key point ${i + 1}`, points: [p], say: `Key point ${i + 1}. ${p} Take a second to picture what that means in code you have written.` })),
-      { heading: 'Putting it together', points: pts.slice(0, 3), say: `Let's put it together. ${pts.slice(0, 3).join(' ')}` },
-      { heading: 'Your turn', points: ['3 questions on exactly this topic', 'Pass mark 67%', 'Your record updates the moment you submit'], say: `That's the lesson. Now try the three questions. They are on exactly what we just covered. Pass two of the three and your record updates straight away. Good luck, ${first}.` },
-    ],
-  };
+  const n = clampQuestions(opts.questionCount);
+  const pass = clampPassMark(opts.passMark);
+  const tutor = opts.tutorName ? `I'm ${opts.tutorName}, your tutor.` : '';
+  const greeting = `Hey ${first}, how are you? I noticed ${noticedLine(opts.evidence, mod, topic)}, so I prepared this lesson just for you.`;
+  const sentences = bank.summary.split(/(?<=\.)\s+/);
+  const example = bank.questions.find((q) => /`/.test(q.prompt) || q.prompt.includes('\n'));
+  const code = example
+    ? (example.prompt.includes('\n') ? example.prompt.split('\n').slice(2).join('\n') : example.prompt.match(/`([^`]+)`/)?.[1] || '').slice(0, 320)
+    : '';
+  const q0 = bank.questions[0];
+  const wrong = q0 ? q0.options.find((_, i) => i !== q0.answerIndex) : null;
+  const right = q0 ? q0.options[q0.answerIndex] : pts[0];
+  const ICON_STEPS = ['lightbulb', 'workflow', 'check', 'target', 'star'];
+  // Visual scenes, with tiny labels: the narration does the explaining.
+  const slides: LessonSlide[] = [
+    { visual: 'greeting', heading: `Hey ${first}`, points: [], say: `${greeting} ${tutor} In the next few minutes we'll go through ${topic} step by step, and then you'll try ${n} questions on exactly this. You've got this.` },
+    { visual: 'big', heading: "Today's one idea", points: [], scene: { value: clampWords(topic, 3), caption: 'The one thing we fix today' }, say: sentences.slice(0, 2).join(' ') },
+    { visual: 'flow', heading: 'How it works', points: [], scene: { nodes: pts.slice(0, 3).map((p, k) => ({ label: clampWords(p, 3), icon: ICON_STEPS[k] })) }, say: `Let's take it step by step. First: ${pts[0]} Then: ${pts[1] || ''} And finally: ${pts[2] || ''}` },
+    code
+      ? { visual: 'code', heading: 'See it in code', points: [], code, scene: { highlight: [1], caption: clampWords(pts[3] || pts[0], 8) }, say: `Here's what it looks like in practice. Watch the highlighted line, that's where ${topic} happens. ${pts[3] || pts[0]}` }
+      : { visual: 'analogy', heading: 'Think of it like this', points: [], scene: { left: { label: 'An online order', icon: 'package' }, right: { label: clampWords(topic, 3), icon: 'lightbulb' }, caption: clampWords(pts[3] || pts[0], 10) }, say: `Think of it like an online order. ${pts[3] || pts[0]} Picture where that shows up in work you've already done.` },
+    { visual: 'compare', heading: 'Mistake vs fix', points: [], scene: { left: { label: clampWords(wrong || 'Guessing the rule', 6), icon: 'x' }, right: { label: clampWords(right, 6), icon: 'check' } }, say: `Here's the mistake most people make, and the fix. ${q0?.explanation || pts[0]}` },
+    { visual: 'big', heading: 'Remember this', points: [], scene: { value: 'Remember', caption: clampWords(pts[4] || pts[pts.length - 1], 10) }, say: `One more thing worth remembering. ${pts[4] || pts[pts.length - 1]}` },
+    { visual: 'recap', heading: 'Quick recap', points: [], scene: { nodes: pts.slice(0, 4).map((p) => ({ label: clampWords(p, 6), icon: 'check' })) }, say: `Quick recap. ${pts.slice(0, 3).join(' ')}` },
+    { visual: 'cta', heading: 'Your turn', points: [], say: `That's the lesson, ${first}. Now try the ${n}-question test. Every question is on what we just covered. Score ${pass} percent or more and your record updates straight away. Good luck!` },
+  ];
+  return { title: `${mod.code} · ${topic}`, viaAi: false, slides, greeting, tutorName: opts.tutorName, academyName: opts.academyName, questionCount: n, passMark: pass };
 }
 
+/** An off-topic question the demo slips into the first draft: one that touches
+ *  none of this module's keywords, so the Reviewer has something real to catch. */
 export function injectQuizDefect(q: RemedialQuiz): RemedialQuiz {
-  const questions = q.questions.map((x, i) => (i === q.questions.length - 1 ? { ...OFF_TOPIC_QUESTION, id: x.id } : x));
+  const kws = (q.topicKeywords || []).map((k) => k.toLowerCase());
+  const candidates = [OFF_TOPIC_QUESTION, ...Object.entries(QUESTION_BANK).filter(([code]) => code !== q.module.code).flatMap(([, b]) => b.questions)];
+  const offTopic = candidates.find((c) => !kws.some((k) => `${c.prompt} ${c.options.join(' ')} ${c.topicTag} ${c.explanation}`.toLowerCase().includes(k))) || OFF_TOPIC_QUESTION;
+  const questions = q.questions.map((x, i) => (i === q.questions.length - 1 ? { ...offTopic, id: x.id } : x));
   return { ...q, questions };
 }
 
-/** Replace any question the audit flagged with the next on-topic one in the bank. */
+/** Replace any question the audit flagged with the next unused on-topic one in the bank. */
 export function fixQuiz(q: RemedialQuiz, badIds: string[]): RemedialQuiz {
-  const bank = (QUESTION_BANK[q.module.code] || QUESTION_BANK['JS-07']).questions;
-  const used = new Set(q.questions.map((x) => x.prompt));
+  const mod = syllabusFor(q.module.code, q.module.title, q.topic);
+  const bank = bankFor(mod, q.topic).questions;
+  const used = new Set(q.questions.filter((x) => !badIds.includes(x.id)).map((x) => x.prompt));
   const spare = bank.filter((b) => !used.has(b.prompt));
-  const questions = q.questions.map((x) => {
-    if (!badIds.includes(x.id)) return x;
-    const next = spare.shift() || bank[0];
-    return { ...next, id: x.id };
-  });
-  return { ...q, questions };
+  const replaced: QuizQuestion[] = [];
+  for (const x of q.questions) {
+    if (!badIds.includes(x.id)) { replaced.push(x); continue; }
+    const next = spare.shift();
+    if (next) replaced.push({ ...next, id: x.id });
+  }
+  // Out of spares: a shorter, fully on-topic test beats a padded one.
+  const fixed = replaced.length >= 3 ? replaced : q.questions;
+  return { ...q, questions: fixed.map((x, i) => ({ ...x, id: `q${i + 1}` })) };
 }
 
 /* ── COO ──────────────────────────────────────────────────────────────────── */

@@ -30,6 +30,6 @@ const ICONS = {
 export type IconName = keyof typeof ICONS;
 
 export default function Icon({ name, size = 16, strokeWidth = 2, className, style, ...rest }: { name: IconName } & LucideProps) {
-  const C = ICONS[name];
+  const C = ICONS[name] || Circle;
   return <C size={size} strokeWidth={strokeWidth} className={className} style={style} aria-hidden="true" {...rest} />;
 }
