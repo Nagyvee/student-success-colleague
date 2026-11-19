@@ -13,3 +13,10 @@ backups
 logs
 deploy/windows/caddy.exe
 deploy/windows/Caddyfile
+# The VPS: a/b builds, the live-build marker, Caddy, backups and logs
+.next-a
+.next-b
+.thuso-dist
+.deploy.lock
+backups/
+logs/

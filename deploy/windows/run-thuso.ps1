@@ -24,15 +24,27 @@ function Find-Node {
   return ($guesses | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1)
 }
 
+# Which build to serve: update.ps1 builds the next version beside the live one (.next-a / .next-b)
+# and names the live one in .thuso-dist. A build folder without a BUILD_ID is not used.
+function Find-Dist {
+  $file = Join-Path $AppDir '.thuso-dist'
+  $named = if (Test-Path $file) { (Get-Content $file -Raw).Trim() } else { '' }
+  foreach ($d in @($named, '.next', '.next-a', '.next-b')) {
+    if ($d -and (Test-Path (Join-Path $AppDir "$d\BUILD_ID"))) { return $d }
+  }
+  return '.next'
+}
+
 while ($true) {
   $log = Join-Path $logDir ("thuso-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
+  $env:CZ_DIST = Find-Dist
   $nodeExe = Find-Node
   if (-not $nodeExe) {
     Add-Content -Path $log -Value ("[{0}] node.exe not found. Run deploy\windows\install.ps1 again in an Administrator window (it records where Node.js is), or install Node.js for all users. Trying again in 60 seconds." -f (Get-Date -Format s))
     Start-Sleep -Seconds 60
     continue
   }
-  Add-Content -Path $log -Value ("[{0}] starting Thuso on port {1} ({2})" -f (Get-Date -Format s), $Port, $nodeExe)
+  Add-Content -Path $log -Value ("[{0}] starting Thuso on port {1} ({2}, build {3})" -f (Get-Date -Format s), $Port, $nodeExe, $env:CZ_DIST)
   try {
     & $nodeExe $next start -p $Port *>> $log
     $code = $LASTEXITCODE
