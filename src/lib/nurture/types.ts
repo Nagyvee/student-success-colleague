@@ -204,6 +204,8 @@ export interface NurtureStats {
   clicks: number;
   quizzes: number;
   videoViews: number;
+  /** Admissions emails that really left the server (not previews). */
+  delivered?: number;
   optOuts: number;
 }
 

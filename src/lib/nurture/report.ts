@@ -3,10 +3,10 @@ import { tenantDoc } from '@/lib/engine/tenantDoc';
 import { getState } from '@/lib/engine/store';
 import { listRecords } from '@/lib/data/records';
 import { LEADS_SOURCE_ID } from '@/lib/data/sources';
-import { getAcademyContext } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { meta } from './store';
 import { QUALIFY_REASON, discordWebhook, isDiscordHook, leadChannel, type QualifyReason } from './qualify';
+import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 
 /* The Admissions daily report, in the team's Discord channel.
  *
@@ -50,10 +50,11 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
   const recs = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes');
   const inWindow = (t: number) => Number.isFinite(t) && t > from && t <= to;
 
-  const fresh = recs.filter((r) => inWindow(r.firstSeenAt));
+  // New: people who came in for nurturing (never a sheet's old rows imported quietly).
+  const fresh = recs.filter((r) => inWindow(r.firstSeenAt) && r.fields.imported_quietly !== 'yes');
   const channels = new Map<string, number>();
   for (const r of fresh) { const c = leadChannel(r.fields); channels.set(c, (channels.get(c) || 0) + 1); }
-  const emailed = recs.filter((r) => inWindow(stamp(r.fields.nurture_last_sent_at))).length;
+  const emailed = recs.filter((r) => inWindow(stamp(r.fields.nurture_delivered_at))).length;
   const replied = recs.filter((r) => inWindow(stamp(r.fields.replied_at_ms)));
   const quizzes = recs.filter((r) => inWindow(stamp(r.fields.fit_at))).length;
   const qualified = recs.filter((r) => inWindow(stamp(r.fields.qualified_at)));
@@ -61,9 +62,12 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
 
   const cur = meta().stats;
   const diff = (k: keyof NurtureStats) => Math.max(0, (cur[k] || 0) - (base?.[k] || 0));
-  const sent = diff('librarySends') + diff('aiSends');
+  // Only emails that really left the server (previews kept while sending was off do not count).
+  const sent = diff('delivered');
 
-  const nurturing = recs.filter((r) => r.fields.opted_out !== 'yes' && r.fields.dialer_left !== 'yes' && r.fields.qualified !== 'yes');
+  // In nurturing: the leads Thuso is actually working (emailed or engaged, or waiting for it in the dialer).
+  const nurturing = recs.filter((r) => (Number(r.fields.nurture_count || 0) > 0 || Number(r.fields.engagement_score || 0) > 0 || r.fields.dialer_row_id)
+    && r.fields.opted_out !== 'yes' && r.fields.dialer_left !== 'yes' && r.fields.qualified !== 'yes');
   const hot = nurturing.filter((r) => r.fields.engagement === 'hot').length;
   const warm = nurturing.filter((r) => r.fields.engagement === 'warm').length;
   const st = getState();
@@ -124,9 +128,10 @@ export async function maybeSendNurtureReport(tenantId = currentTenantId(), now =
   // First time: start counting from the most recent slot (no report for the past).
   if (!st.lastAt) { reportDoc.set({ lastAt: slot, stats: { ...meta(tenantId).stats } }, tenantId); return false; }
   if (slot <= st.lastAt) return false;
-  const webhook = discordWebhook(tenantId);
+  // Posting is a switch (Channels & API), off until someone has checked the preview.
+  const webhook = getTenantIntegrations(tenantId).handoff?.reportOn ? discordWebhook(tenantId) : '';
   const report = buildNurtureReport(st.lastAt, now, st.stats);
-  // Without Discord the window still moves on, so connecting it later does not post a huge first report.
+  // Not posting (switched off, or no Discord): the window still moves on, so the first post is never a huge backlog.
   if (webhook) {
     const r = await post(webhook, report, false);
     if (!r.ok) { console.warn(`[thuso] daily report not posted: ${r.error}`); return false; }
@@ -135,13 +140,20 @@ export async function maybeSendNurtureReport(tenantId = currentTenantId(), now =
   return Boolean(webhook);
 }
 
-/** "Send a preview": the report so far (since the last one), posted now; the schedule does not move. */
-export async function previewNurtureReport(tenantId = currentTenantId()): Promise<{ ok: boolean; detail?: string; error?: string }> {
+/** The report so far (since the last one), to look at in the app. Nothing is posted; the schedule does not move. */
+export function previewNurtureReport(tenantId = currentTenantId()): { ok: true; detail: string; report: NurtureReport } {
   const st = reportDoc.get(tenantId);
   const now = Date.now();
-  const from = st.lastAt || lastReportSlot(now);
+  const report = buildNurtureReport(st.lastAt || lastReportSlot(now), now, st.stats);
+  return { ok: true, detail: 'This is what the report says so far (nothing was posted).', report };
+}
+
+/** Post the report so far in Discord now (after checking the preview); the schedule does not move. */
+export async function postNurtureReportNow(tenantId = currentTenantId()): Promise<{ ok: boolean; detail?: string; error?: string }> {
+  const st = reportDoc.get(tenantId);
+  const now = Date.now();
   const webhook = discordWebhook(tenantId);
   if (!webhook) return { ok: false, error: 'Connect Discord first (paste the webhook above and Save).' };
-  const r = await post(webhook, buildNurtureReport(from, now, st.stats), true);
-  return r.ok ? { ok: true, detail: 'A preview of the daily report was posted in Discord.' } : { ok: false, error: r.error };
+  const r = await post(webhook, buildNurtureReport(st.lastAt || lastReportSlot(now), now, st.stats), false);
+  return r.ok ? { ok: true, detail: 'Posted in Discord.' } : { ok: false, error: r.error };
 }

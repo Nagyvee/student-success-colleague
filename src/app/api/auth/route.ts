@@ -236,7 +236,11 @@ export async function POST(req: Request) {
       }
       if (kind === 'report') {
         const { previewNurtureReport } = await import('@/lib/nurture/report');
-        return NextResponse.json(await previewNurtureReport(tid));
+        return NextResponse.json(previewNurtureReport(tid));
+      }
+      if (kind === 'report-post') {
+        const { postNurtureReportNow } = await import('@/lib/nurture/report');
+        return NextResponse.json(await postNurtureReportNow(tid));
       }
       if (kind === 'discord' || kind === 'dialer') {
         const { getTenantIntegrations } = await import('@/lib/auth/accounts');

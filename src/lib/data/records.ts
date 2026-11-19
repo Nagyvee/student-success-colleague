@@ -155,10 +155,19 @@ export function appendConversation(sourceId: string | null, key: string, who: Tu
   setRecordField(rec.sourceId, rec.key, 'conversation', JSON.stringify(list.slice(-max)));
 }
 
-export function removeSourceRecords(sourceId: string) {
+export function removeSourceRecords(sourceId: string, keep?: (r: DataRecord) => boolean): number {
   const all = doc.get();
-  if (all[sourceId]) {
-    delete all[sourceId];
-    doc.save();
-  }
+  const bucket = all[sourceId];
+  if (!bucket) return 0;
+  let n = 0;
+  if (!keep) { n = Object.keys(bucket).length; delete all[sourceId]; }
+  else for (const [k, r] of Object.entries(bucket)) if (!keep(r)) { delete bucket[k]; n++; }
+  if (n) doc.save();
+  return n;
+}
+
+/** A lead Thuso has actually worked: emailed, engaged, qualified, unsubscribed or replied. */
+export function wasNurtured(r: DataRecord): boolean {
+  const f = r.fields;
+  return Number(f.nurture_count || 0) > 0 || Number(f.engagement_score || 0) > 0 || f.qualified === 'yes' || f.opted_out === 'yes' || f.replied === 'yes';
 }

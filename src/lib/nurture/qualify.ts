@@ -100,6 +100,8 @@ export interface Handoff {
   dialerKey?: string;
   /** Send qualified leads to the dialer (only when Live Outreach is on, because the dialer rings them). */
   dialerOn?: boolean;
+  /** Post the Admissions daily report in Discord (weekdays 17:00). */
+  reportOn?: boolean;
 }
 
 function handoffSettings(tenantId = currentTenantId()): Required<Pick<Handoff, 'discordWebhook' | 'dialerUrl' | 'dialerKey'>> & { dialerOn: boolean } {

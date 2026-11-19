@@ -298,6 +298,14 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
       ? `[Paused] Email for ${input.toName} (${input.to}) kept in the Inbox: sending is paused on this server.`
       : `[Safe Test Mode] Email for ${input.toName} (${input.to}) saved to Inbox preview only — Live Outreach is OFF.`);
   }
+  // Admissions emails that really went: counted for the daily report, and the lead remembers when.
+  if (delivery === 'smtp' && /admissions/i.test(input.dept || '')) {
+    try {
+      const [{ bumpStat }, { findRecordsByEmail, setRecordField }] = await Promise.all([import('@/lib/nurture/store'), import('@/lib/data/records')]);
+      bumpStat('delivered');
+      for (const r of findRecordsByEmail(to)) setRecordField(r.sourceId, r.key, 'nurture_delivered_at', new Date().toISOString());
+    } catch { /* the email went; only the count is missed */ }
+  }
   const mail: InboxMail = {
     id: uid('m'), ts: Date.now(), to, toName: input.toName, from, subject: input.subject, html: input.html, text: input.text,
     link: input.link, delivery, providerId, taskId: input.taskId, deliverableId: input.deliverableId, error, ...(input.dept ? { dept: input.dept } : {}),

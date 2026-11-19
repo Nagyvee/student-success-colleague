@@ -49,6 +49,8 @@ test('the report slot is the latest weekday 17:00 in South Africa', () => {
 
 test('it posts once each weekday at 17:00, never at the weekend, and Monday covers the weekend', () => T(async () => {
   posts.length = 0;
+  const { updateTenantIntegrations } = await import('../src/lib/auth/accounts');
+  updateTenantIntegrations('default', { handoff: { reportOn: true } });
   assert.equal(await m.rep.maybeSendNurtureReport('default', at('2026-11-19T14:00:00Z')), false, 'the first check only starts the clock');
   assert.equal(await m.rep.maybeSendNurtureReport('default', at('2026-11-19T14:59:00Z')), false, 'not yet 17:00');
   assert.equal(await m.rep.maybeSendNurtureReport('default', at('2026-11-19T15:01:00Z')), true, 'Thursday 17:01');
@@ -62,16 +64,29 @@ test('it posts once each weekday at 17:00, never at the weekend, and Monday cove
   assert.match(String((posts[2].embeds[0] as unknown as { description: string }).description), /Fri,? 20 Nov.*17:00.*Mon,? 23 Nov.*17:02/, 'Monday covers Friday 17:00 to Monday');
 }));
 
-test('the report counts new leads by source, qualified leads and replies in its window', () => T(() => {
+test('the report counts only real new leads, qualified leads and replies; old sheet rows never count', () => T(() => {
   const now = Date.now();
   m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'a@example.com', name: 'Thandi Mokoena', email: 'a@example.com', phone: '+27820000001', fields: { platform: 'ig', engagement: 'hot', qualified: 'yes', qualified_at: new Date(now).toISOString(), qualified_reason: 'call', dialer_status: 'moved to New in the dialer', replied_at_ms: String(now) } });
-  m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'b@example.com', name: 'Sizwe Ndlovu', email: 'b@example.com', phone: '+27820000002', fields: { platform: 'fb', engagement: 'warm' } });
+  m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'b@example.com', name: 'Sizwe Ndlovu', email: 'b@example.com', phone: '+27820000002', fields: { platform: 'fb', engagement: 'warm', engagement_score: '4', nurture_count: '2' } });
+  // An old sheet row imported quietly: not new, not in nurturing.
+  m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'c@example.com', name: 'Old Sheet Row', email: 'c@example.com', phone: '+27820000003', fields: { platform: 'fb', imported_quietly: 'yes' } });
   const r = m.rep.buildNurtureReport(now - 3_600_000, now + 3_600_000, null);
   const f = (name: RegExp) => r.fields.find((x) => name.test(x.name))?.value || '';
   assert.match(f(/New leads/), /\*\*2\*\*/);
   assert.match(f(/New leads/), /Instagram ads: 1/);
-  assert.match(f(/New leads/), /Facebook ads: 1/);
+  assert.match(f(/New leads/), /Facebook ads: 1/, 'the quietly imported sheet row is not new');
   assert.match(f(/Qualified/), /Thandi Mokoena\*\* asked us to call them · dialer: moved to New/);
   assert.match(f(/Replies/), /Thandi Mokoena/);
-  assert.match(f(/Right now/), /1 lead in nurturing · \*\*0\*\* hot · 1 warming up/);
+  assert.match(f(/Right now/), /1 lead in nurturing · \*\*0\*\* hot · 1 warming up/, 'only leads Thuso is working');
+}));
+
+test('the report waits for the switch: nothing is posted until "Post the daily report" is on', () => T(async () => {
+  const { updateTenantIntegrations } = await import('../src/lib/auth/accounts');
+  updateTenantIntegrations('default', { handoff: { reportOn: false } });
+  posts.length = 0;
+  assert.equal(await m.rep.maybeSendNurtureReport('default', at('2026-11-24T15:05:00Z')), false);
+  assert.equal(posts.length, 0);
+  const p = m.rep.previewNurtureReport('default');
+  assert.match(p.report.title, /Admissions report/, 'the preview is there to read in the app');
+  assert.equal(posts.length, 0, 'a preview posts nothing');
 }));

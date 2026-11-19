@@ -5,7 +5,7 @@ import { getTenantIntegrations, updateTenantIntegrations } from '@/lib/auth/acco
 import { parseCsv, toCsvUrl } from '@/lib/lms/sheet';
 import { findSyncedLearnerByEmailOrId, mergeLearnerPatchByEmailOrId } from '@/lib/db/postgres';
 import { generateJSON, obj } from '@/lib/ai/llm';
-import { countRecords, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord } from './records';
+import { countRecords, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord, wasNurtured } from './records';
 import { daysUntil, isoDate, parseDate, parseMoney } from './conditions';
 import { leadProfile } from '@/lib/nurture/profile';
 
@@ -187,8 +187,9 @@ export function saveSource(input: Partial<DataSource> & { name: string; kind: Da
     columns: input.columns || prev?.columns,
   };
   if (prev && (prev.url !== next.url || (prev.provider || 'sheet') !== (next.provider || 'sheet'))) {
-    // A different sheet: start from a fresh baseline so its rows are not "new".
-    removeSourceRecords(next.id);
+    // A different sheet (or the dialer instead of the sheets): the old list goes, except the people
+    // Thuso is already nurturing (emailed, engaged, qualified...), whose journeys carry on.
+    removeSourceRecords(next.id, wasNurtured);
     const r = rt(tenantId, next.id);
     r.lastReadAt = null; r.rows = 0; r.columns = []; r.lastError = null; r.nextAt = 0;
   }
@@ -376,7 +377,10 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
     const events: RecordEvent[] = [];
     for (const rec of merged.values()) {
       const out = upsertRecord(source.id, rec);
-      if (baseline) continue;
+      if (baseline) {
+        if (out.created) setRecordField(source.id, out.record.key, 'imported_quietly', 'yes');
+        continue;
+      }
       if (out.created) events.push({ source, record: out.record, kind: 'added', changed: [] });
       else if (out.changed.length) events.push({ source, record: out.record, kind: 'changed', changed: out.changed });
     }

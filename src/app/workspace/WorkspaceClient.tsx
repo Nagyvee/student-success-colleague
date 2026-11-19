@@ -81,6 +81,22 @@ export default function WorkspaceClient() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [tests, setTests] = useState<Record<string, TestOutcome>>({});
+  // The daily report, as it stands now (looked at here before anything goes to the team).
+  const [report, setReport] = useState<{ title: string; description: string; fields: { name: string; value: string }[] } | null>(null);
+  async function reportAction(kind: 'report' | 'report-post') {
+    setBusy(kind);
+    setNotice(null);
+    try {
+      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'testConnection', kind, draft: {} }) });
+      const j = await res.json();
+      if (kind === 'report' && j.report) setReport(j.report);
+      setNotice({ kind: j.ok ? 'ok' : 'err', text: j.detail || j.error || (j.ok ? 'Done.' : 'Something went wrong.') });
+    } catch {
+      setNotice({ kind: 'err', text: 'Network error.' });
+    } finally {
+      setBusy(null);
+    }
+  }
   const [origin, setOrigin] = useState('https://your-domain.example');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [moodleCatalog, setMoodleCatalog] = useState<MoodleCourseMeta[] | null>(null);
@@ -1032,7 +1048,7 @@ export default function WorkspaceClient() {
             </div>
             {renderTestStatus('discord')}
             {renderTestStatus('dialer')}
-            {renderTestStatus('report')}
+
           </div>
           <div className="pg-grid">
             <label className="field" style={{ gridColumn: '1 / -1' }}>
@@ -1076,6 +1092,18 @@ export default function WorkspaceClient() {
                 The dialer calls them, so this also waits for Live Outreach. Discord only reaches your team.
               </span>
             </label>
+            <label className="switch" style={{ gridColumn: '1 / -1', alignItems: 'flex-start', lineHeight: 1.45 }}>
+              <input
+                type="checkbox"
+                checked={Boolean(form.handoff?.reportOn)}
+                onChange={(e) => updateField('handoff', { ...(form.handoff || {}), reportOn: e.target.checked })}
+              />
+              <i />
+              <span style={{ display: 'block' }}>
+                <b style={{ color: 'var(--ink)' }}>Post the daily report in Discord</b><br />
+                Every weekday at 17:00, what happened since the last report. Check it with Preview first; then Save.
+              </span>
+            </label>
           </div>
           <div className="pg-actions">
             <button
@@ -1092,11 +1120,36 @@ export default function WorkspaceClient() {
             <button type="button" className="btn ghost sm" disabled={busy === 'test-dialer'} onClick={() => runTest('dialer')}>
               {busy === 'test-dialer' ? 'Checking…' : 'Check the dialer'}
             </button>
-            <button type="button" className="btn ghost sm" disabled={busy === 'test-report'} onClick={() => runTest('report')} title="The Admissions report posts in Discord every weekday at 17:00">
-              {busy === 'test-report' ? 'Posting…' : 'Preview the daily report'}
+            <button type="button" className="btn ghost sm" disabled={busy === 'report'} onClick={() => void reportAction('report')} title="What the Admissions report says so far (nothing is posted)">
+              {busy === 'report' ? 'Reading…' : 'Preview the daily report'}
             </button>
           </div>
         </section>
+
+        {report && (
+          <section className="pg-card" aria-label="Daily report preview">
+            <div className="pg-card-h">
+              <div>
+                <h2><Icon name="chart" size={16} /> {report.title}</h2>
+                <p className="pg-sub">{report.description} This preview was not posted anywhere.</p>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+              {report.fields.map((f) => (
+                <div key={f.name} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--surface-sunken)' }}>
+                  <b style={{ fontSize: 12.5 }}>{f.name}</b>
+                  <div style={{ fontSize: 13, whiteSpace: 'pre-line', marginTop: 4 }}>{f.value.replace(/\*\*/g, '')}</div>
+                </div>
+              ))}
+            </div>
+            <div className="pg-actions">
+              <button type="button" className="btn primary sm" disabled={busy === 'report-post'} onClick={() => { if (window.confirm('Post this report in the Discord channel now? Everyone in the channel sees it.')) void reportAction('report-post'); }}>
+                {busy === 'report-post' ? 'Posting…' : 'Post it in Discord now'}
+              </button>
+              <button type="button" className="btn ghost sm" onClick={() => setReport(null)}>Close</button>
+            </div>
+          </section>
+        )}
 
         {/* 4. WhatsApp Bridge */}
         <section className="pg-card">

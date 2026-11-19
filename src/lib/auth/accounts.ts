@@ -372,6 +372,7 @@ function mergeHandoff(next: TenantIntegrations['handoff'], prev: TenantIntegrati
     dialerUrl: next.dialerUrl !== undefined ? next.dialerUrl.trim().replace(/\/$/, '') : p.dialerUrl,
     dialerKey: mergeSecret(next.dialerKey, p.dialerKey),
     dialerOn: typeof next.dialerOn === 'boolean' ? next.dialerOn : p.dialerOn,
+    reportOn: typeof next.reportOn === 'boolean' ? next.reportOn : p.reportOn,
   };
 }
 

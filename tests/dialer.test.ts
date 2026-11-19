@@ -59,7 +59,13 @@ test('leads read from the dialer: everyone it holds for Thuso, with their column
     row('r1', { full_name: 'Thandi Mokoena', email: 'Thandi@Example.com', phone_number: '0821234567', platform: 'ig', how_will_you_finance_the_program: 'i_will_fund_my_self', which_programme_are_you_interested_in: 'data_science' }, { phone: '+27821234567' }),
     row('r2', { full_name: 'Sizwe Ndlovu', email: 'sizwe@example.com', phone_number: '0831234567', platform: 'fb' }, { phone: '+27831234567' }),
   );
+  // Before: the old sheet list, where Thuso was already nurturing one person.
+  m.src.saveSource({ id: m.src.LEADS_SOURCE_ID, name: 'Leads from ads & forms', kind: 'leads', url: '' });
+  m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'kept@example.com', name: 'Being Nurtured', email: 'kept@example.com', phone: '+27820000009', fields: { nurture_count: '1' } });
+  m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'old@example.com', name: 'Old Sheet Row', email: 'old@example.com', phone: '+27820000008', fields: { imported_quietly: 'yes' } });
   m.src.saveSource({ id: m.src.LEADS_SOURCE_ID, name: 'Leads from ads & forms', kind: 'leads', provider: 'dialer', url: '' });
+  assert.ok(m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'kept@example.com'), 'someone Thuso is nurturing stays (their journey carries on)');
+  assert.equal(m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'old@example.com'), null, 'an old sheet row Thuso never contacted goes');
   const events = await m.src.readSource(m.src.getSource(m.src.LEADS_SOURCE_ID)!);
   assert.deepEqual(events.map((e) => [e.kind, e.record.email]), [['added', 'thandi@example.com'], ['added', 'sizwe@example.com']], 'everyone the dialer holds is new to nurture (no quiet baseline)');
   const thandi = m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'thandi@example.com')!;
