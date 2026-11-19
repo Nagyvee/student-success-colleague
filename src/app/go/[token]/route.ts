@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { withTenant } from '@/lib/auth/tenantContext';
 import { getAcademyContext, getTenantIntegrations, listTenantIds } from '@/lib/auth/accounts';
 import { bootReady } from '@/lib/engine/automation';
+import { publicUrl } from '@/lib/engine/store';
 import { getRecord } from '@/lib/data/records';
 import { getResource } from '@/lib/nurture/bank';
 import { getMessage } from '@/lib/nurture/library';
@@ -120,7 +121,9 @@ async function handle(req: Request, token: string, method: 'GET' | 'POST'): Prom
     const human = method === 'GET' && !isBot(req.headers.get('user-agent')) && req.method !== 'HEAD';
     if (rec && human) await noteEngagement(p, 'click', detail).catch(() => null);
 
-    const origin = url.origin;
+    // The public address (PUBLIC_BASE_URL), never the address the request reached: behind Caddy
+    // the app sees itself as localhost, and a redirect there would send the lead nowhere.
+    const origin = publicUrl(p.t);
     if (p.x === 'quiz') return NextResponse.redirect(`${origin}/fit/${token}`, 302);
     if (p.x === 'video') return NextResponse.redirect(`${origin}/watch/${token}`, 302);
     if (p.x === 'url' && p.u) return NextResponse.redirect(p.u, 302);

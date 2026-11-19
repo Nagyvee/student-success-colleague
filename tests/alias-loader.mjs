@@ -22,5 +22,7 @@ export async function resolve(specifier, context, next) {
     const f = tryFile(fileURLToPath(new URL(specifier, context.parentURL)));
     if (f) return next(pathToFileURL(f).href, context);
   }
+  // Next's entry points ("next/server") are plain files without an exports map: give Node the .js.
+  if (specifier === 'next/server' || specifier === 'next/headers') return next(`${specifier}.js`, context);
   return next(specifier, context);
 }
