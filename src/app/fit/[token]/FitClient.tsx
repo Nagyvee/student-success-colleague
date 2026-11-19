@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   ArrowLeft, ArrowRight, Brain, Briefcase, ChartColumn, Code2, Coffee, Compass, Download, Heart, LayoutDashboard, Lightbulb, MessageCircle,
-  Phone, Play, Puzzle, RotateCcw, Rocket, Search, Share2, ShieldCheck, Sparkles, Star, Target, Trophy, Users, Zap, type LucideIcon,
+  Phone, Play, Puzzle, RotateCcw, Rocket, Search, Share2, ShieldCheck, Star, Target, Trophy, Users, Zap, type LucideIcon,
 } from 'lucide-react';
 import type { FitQuestion, FitTrack } from '@/lib/nurture/types';
 import { drawScorecard } from './scorecard';
@@ -19,7 +19,7 @@ import '../fit.css';
  * scorecard to keep or share. The next step is their video, or "yes". */
 
 const ICON: Record<string, LucideIcon> = {
-  code: Code2, chart: ChartColumn, shield: ShieldCheck, brain: Brain, sparkles: Star, star: Star, rocket: Rocket, search: Search, users: Users,
+  code: Code2, chart: ChartColumn, shield: ShieldCheck, brain: Brain, star: Star, rocket: Rocket, search: Search, users: Users,
   puzzle: Puzzle, zap: Zap, trophy: Trophy, coffee: Coffee, lightbulb: Lightbulb, target: Target, heart: Heart, compass: Compass,
   layout: LayoutDashboard, message: MessageCircle,
 };
@@ -131,7 +131,7 @@ export default function FitClient({ token }: { token: string }) {
                 <h2>{view.quiz.title}</h2>
                 <p>{view.quiz.intro || `${qs.length} quick questions, no wrong answers.`}</p>
                 <ul className="fit-gets" aria-label="What you get">
-                  <li><Sparkles size={16} aria-hidden="true" /> Your tech personality</li>
+                  <li><Compass size={16} aria-hidden="true" /> Your tech personality</li>
                   <li><Target size={16} aria-hidden="true" /> The programme that fits you best</li>
                   <li><Download size={16} aria-hidden="true" /> A scorecard to keep and share</li>
                 </ul>

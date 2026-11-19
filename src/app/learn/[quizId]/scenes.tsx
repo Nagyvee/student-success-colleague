@@ -32,7 +32,7 @@ const ICONS: Record<string, LucideIcon> = {
   flag: Flag, rocket: Rocket, zap: Zap, repeat: Repeat, refresh: RefreshCw, 'arrow-right': ArrowRight, play: Play,
   pause: Pause, stop: Square, cart: ShoppingCart, receipt: Receipt, wallet: Wallet, coffee: Coffee, bus: Bus, home: Home,
   building: Building, graduation: GraduationCap, book: BookOpen, brain: Brain, eye: Eye, hand: Hand, puzzle: Puzzle,
-  star: Star, heart: Heart, trophy: Trophy, smartphone: Smartphone, monitor: Monitor, cpu: Cpu, sparkles: Star,
+  star: Star, heart: Heart, trophy: Trophy, smartphone: Smartphone, monitor: Monitor, cpu: Cpu,
   calendar: Calendar, map: Map, compass: Compass, inbox: Inbox, send: Send, layout: LayoutGrid, grid: Grid3x3,
   columns: Columns2, rows: Rows3, network: Network, variable: Variable, sigma: Sigma,
 };
