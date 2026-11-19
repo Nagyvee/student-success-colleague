@@ -73,6 +73,7 @@
 .nu-kpis b { font-size:18px; font-weight:800; color:var(--ink); margin-right:3px; }
 .nu-kpis .t-hot b { color:#ea580c; }
 .nu-kpis .t-warm b { color:#ca8a04; }
+.nu-kpis .t-good b { color:var(--good-ink, #0a6f63); }
 
 /* stage groups */
 .nu-stage { display:flex; flex-direction:column; gap:10px; }

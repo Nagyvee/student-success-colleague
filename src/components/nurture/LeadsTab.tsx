@@ -5,13 +5,18 @@ import type { AgentRunLog, StepCondition } from '@/lib/types';
 import Icon from '@/components/Icon';
 import { SEGMENT_PRESETS, ago, nurturePost, pct, type LeadRow, type Overview } from './api';
 import { Chip, Empty, Field, Modal } from './ui';
+import { LEAD_STAGE_LABEL, leadStage, type LeadStage } from '@/lib/nurture/stage';
 
 /* Leads: who is warm, who is hot, and everything each one received and did. */
 
-const FILTERS: { id: string; label: string }[] = [
-  { id: '', label: 'All' }, { id: 'hot', label: 'Hot' }, { id: 'warm', label: 'Warm' }, { id: 'cold', label: 'Cold' },
-  { id: 'applied', label: 'Applied' }, { id: 'opted_out', label: 'Unsubscribed' },
+// The same stages as the office's Leads drawer (one definition on the server).
+type Stage = LeadStage;
+const FILTERS: { id: '' | Stage; label: string }[] = [
+  { id: '', label: 'All' }, { id: 'qualified', label: 'Qualified' }, { id: 'hot', label: 'Hot' }, { id: 'warm', label: 'Warming up' },
+  { id: 'cold', label: 'New' }, { id: 'applied', label: 'Applied' }, { id: 'opted_out', label: 'Stopped' },
 ];
+const STAGE_LABEL = LEAD_STAGE_LABEL;
+const stageOf = (r: LeadRow): Stage => leadStage(r);
 
 const heat = (e: LeadRow['engagement']) => (e === 'hot' ? 'hot' : e === 'warm' ? 'warm' : 'cold');
 
@@ -19,16 +24,19 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
   const [filter, setFilter] = useState('');
   const [q, setQ] = useState(initialQ);
   const [rows, setRows] = useState<LeadRow[] | null>(null);
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/nurture?leads=1&stage=${encodeURIComponent(filter)}&q=${encodeURIComponent(q)}`, { cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     setRows(Array.isArray(j.leads) ? j.leads : []);
+    if (j.counts) setCounts(j.counts);
   }, [filter, q]);
   useEffect(() => { const t = setTimeout(() => void load(), q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
 
-  const f = data.funnel;
+  // Counts for every lead (not just the ones listed), from the same place as the office drawer.
+  const c = counts || { qualified: data.funnel.qualified ?? 0, hot: data.funnel.hot, warm: data.funnel.warm, cold: data.funnel.cold };
   return (
     <div className="nu-tab">
       <section className="pg-card">
@@ -41,14 +49,15 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
             </p>
           </div>
           <div className="nu-kpis">
-            <span className="t-hot"><b>{f.hot}</b> hot</span>
-            <span className="t-warm"><b>{f.warm}</b> warm</span>
-            <span><b>{f.cold}</b> cold</span>
+            <span className="t-good"><b>{c.qualified ?? 0}</b> qualified</span>
+            <span className="t-hot"><b>{c.hot ?? 0}</b> hot</span>
+            <span className="t-warm"><b>{c.warm ?? 0}</b> warming up</span>
+            <span><b>{c.cold ?? 0}</b> new</span>
           </div>
         </div>
         <div className="nu-filter">
           <div className="nu-seg">
-            {FILTERS.map((x) => <button key={x.id} type="button" className={filter === x.id ? 'on' : ''} onClick={() => setFilter(x.id)}>{x.label}</button>)}
+            {FILTERS.map((x) => <button key={x.id} type="button" className={filter === x.id ? 'on' : ''} onClick={() => setFilter(x.id)}>{x.label}{counts && x.id ? ` ${counts[x.id] ?? 0}` : counts && !x.id ? ` ${counts.all ?? 0}` : ''}</button>)}
           </div>
           <input className="in nu-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, programme, source…" />
         </div>
@@ -62,11 +71,11 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
                     <td><b>{r.name}</b><small>{r.email || r.phone}</small></td>
                     <td>{r.programme || <em>—</em>}</td>
                     <td>{r.source || <em>—</em>}</td>
-                    <td>{r.optedOut ? <Chip tone="muted">Unsubscribed</Chip> : <Chip tone={heat(r.engagement)}>{r.engagement} · {r.score}</Chip>}</td>
+                    <td>{(() => { const st = stageOf(r); return <Chip tone={st === 'opted_out' ? 'muted' : st === 'qualified' || st === 'applied' ? 'good' : heat(r.engagement)}>{STAGE_LABEL[st]} · {r.score}</Chip>; })()}</td>
                     <td>{r.opens} · {r.clicks}</td>
                     <td>{r.sent}</td>
                     <td>{r.fit ? <span title={r.fit}>{r.fit.split('→')[0].trim()}</span> : <em>—</em>}</td>
-                    <td>{r.status}</td>
+                    <td>{r.qualified && r.dialer ? <span title={`Dialer: ${r.dialer}`}>{r.status}{/^moved to New|^already/.test(r.dialer) ? ' · in the dialer' : ''}</span> : r.status}</td>
                     <td>{ago(r.lastEngagedAt) || ago(r.firstSeenAt)}</td>
                   </tr>
                 ))}
@@ -111,7 +120,7 @@ function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey
       {!d ? <div className="nu-loading"><Icon name="spinner" size={15} className="spin" /> Loading…</div> : (
         <div className="nu-lead">
           <div className="nu-lead-top">
-            <div className={`nu-heat t-${heat(d.lead.engagement)}`}><b>{d.lead.score}</b><span>{d.lead.optedOut ? 'unsubscribed' : d.lead.engagement}</span></div>
+            <div className={`nu-heat t-${heat(d.lead.engagement)}`}><b>{d.lead.score}</b><span>{STAGE_LABEL[stageOf(d.lead)].toLowerCase()}</span></div>
             <dl>
               <div><dt>Programme</dt><dd>{d.lead.programme || '—'}</dd></div>
               <div><dt>Came from</dt><dd>{d.lead.source || '—'}</dd></div>

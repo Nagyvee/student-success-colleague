@@ -22,6 +22,7 @@ import { approveMessage, deleteMessage, getMessage, listMessages, previewMessage
 import { cancelCampaign, campaignSender, createCampaign, listCampaigns, segmentMembers } from '@/lib/nurture/campaigns';
 import { buildFitQuiz, ensureFitQuiz } from '@/lib/nurture/fit';
 import { leadChannel } from '@/lib/nurture/qualify';
+import { leadStage, type LeadStage } from '@/lib/nurture/stage';
 import { buildMissingVideos, buildProgrammeVideo, listVideos } from '@/lib/nurture/video';
 import { leadProgramme, programmeList } from '@/lib/nurture/programmes';
 import { engagementFor, signTrack } from '@/lib/nurture/track';
@@ -59,15 +60,27 @@ function leadRow(r: DataRecord) {
   };
 }
 
+/** A lead's stage, the same everywhere (Lead Nurturing, the office's Leads drawer, the counts):
+ *  stopped (unsubscribed) > applied/enrolled > qualified (handed to sales) > hot > warm > cold (new). */
+type Stage = LeadStage;
+const stageOf = (r: ReturnType<typeof leadRow>): Stage => leadStage(r);
+function stageCounts(rows: ReturnType<typeof leadRow>[]): Record<Stage | 'all', number> {
+  const c: Record<Stage | 'all', number> = { all: rows.length, opted_out: 0, applied: 0, qualified: 0, hot: 0, warm: 0, cold: 0 };
+  for (const r of rows) c[stageOf(r)]++;
+  return c;
+}
+
 function overview(manager: boolean, role: string) {
   const leads = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes');
   const rows = leads.map(leadRow);
+  const stages = stageCounts(rows);
   const funnel = {
     total: rows.length,
     contacted: rows.filter((r) => r.sent > 0).length,
-    cold: rows.filter((r) => !r.optedOut && !DONE.test(r.status) && r.engagement === 'cold').length,
-    warm: rows.filter((r) => !r.optedOut && !DONE.test(r.status) && r.engagement === 'warm').length,
-    hot: rows.filter((r) => !r.optedOut && !DONE.test(r.status) && r.engagement === 'hot').length,
+    cold: stages.cold,
+    warm: stages.warm,
+    hot: stages.hot,
+    qualified: stages.qualified,
     applied: rows.filter((r) => /^applied$/i.test(r.status)).length,
     enrolled: rows.filter((r) => /^(enrolled|registered|student)$/i.test(r.status)).length,
     optedOut: rows.filter((r) => r.optedOut).length,
@@ -136,13 +149,10 @@ export async function GET(req: Request) {
       const q = (url.searchParams.get('q') || '').trim().toLowerCase();
       const want = url.searchParams.get('stage') || '';
       const all = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes').map(leadRow);
-      // Every lead by stage (the list below is the 300 most engaged that match).
-      const stageOf = (r: ReturnType<typeof leadRow>) => (r.optedOut ? 'opted_out' : r.qualified ? 'qualified' : r.engagement);
-      const counts: Record<string, number> = { all: all.length, qualified: 0, hot: 0, warm: 0, cold: 0, opted_out: 0 };
-      for (const r of all) counts[stageOf(r)]++;
+      const counts = stageCounts(all);
       const rows = all
         .filter((r) => !q || `${r.name} ${r.email} ${r.phone} ${r.programme} ${r.source}`.toLowerCase().includes(q))
-        .filter((r) => !want || (want === 'opted_out' ? r.optedOut : want === 'applied' ? DONE.test(r.status) : want === 'qualified' ? r.qualified && !r.optedOut : r.engagement === want && !r.optedOut && !DONE.test(r.status)))
+        .filter((r) => !want || stageOf(r) === want)
         .sort((a, b) => b.score - a.score || b.firstSeenAt - a.firstSeenAt)
         .slice(0, 300);
       return NextResponse.json({ leads: rows, counts });

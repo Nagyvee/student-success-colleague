@@ -11,6 +11,7 @@ export interface LeadRow {
   programme: string; interest: string; source: string; status: string;
   engagement: 'cold' | 'warm' | 'hot'; score: number; opens: number; clicks: number; sent: number;
   lastClicked: string; fit: string; optedOut: boolean; firstSeenAt: number; lastEngagedAt: string;
+  qualified?: boolean; channel?: string; dialer?: string;
 }
 
 export interface NurtureAgent {
@@ -24,7 +25,7 @@ export interface Overview {
   role: string;
   canManage: boolean;
   stats: NurtureStats;
-  funnel: { total: number; contacted: number; cold: number; warm: number; hot: number; applied: number; enrolled: number; optedOut: number; quiz: number };
+  funnel: { total: number; contacted: number; cold: number; warm: number; hot: number; qualified: number; applied: number; enrolled: number; optedOut: number; quiz: number };
   programmes: string[];
   leadsSource: { id: string; name: string; url: string; rows?: number; lastReadAt?: number | null; lastError?: string | null; columns: string[] } | null;
   messages: NurtureMessage[];

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Icon from '@/components/Icon';
+import { leadStage } from '@/lib/nurture/stage';
 
 /* The leads Admissions is nurturing, by stage: new, warming up, hot,
  * qualified (handed to the sales team), and those who asked us to stop.
@@ -13,15 +14,17 @@ interface LeadRow {
   sent: number; opens: number; clicks: number; lastClicked: string; fit: string; dialer: string;
 }
 
-type Stage = 'all' | 'qualified' | 'hot' | 'warm' | 'cold' | 'opted_out';
+// The same stages as Lead Nurturing (one definition on the server).
+type Stage = 'all' | 'qualified' | 'hot' | 'warm' | 'cold' | 'applied' | 'opted_out';
 const STAGES: { id: Stage; label: string }[] = [
   { id: 'all', label: 'All' }, { id: 'qualified', label: 'Qualified' }, { id: 'hot', label: 'Hot' },
-  { id: 'warm', label: 'Warming up' }, { id: 'cold', label: 'New' }, { id: 'opted_out', label: 'Stopped' },
+  { id: 'warm', label: 'Warming up' }, { id: 'cold', label: 'New' }, { id: 'applied', label: 'Applied' }, { id: 'opted_out', label: 'Stopped' },
 ];
 
-const stageOf = (l: LeadRow): Exclude<Stage, 'all'> => (l.optedOut ? 'opted_out' : l.qualified ? 'qualified' : l.engagement);
+const stageOf = (l: LeadRow): Exclude<Stage, 'all'> => leadStage(l);
 const BADGE: Record<Exclude<Stage, 'all'>, { cls: string; label: string }> = {
   qualified: { cls: 'badge-good', label: 'Qualified' },
+  applied: { cls: 'badge-good', label: 'Applied' },
   hot: { cls: 'badge-bad', label: 'Hot' },
   warm: { cls: 'badge-warn', label: 'Warming up' },
   cold: { cls: 'badge-soft', label: 'New' },
@@ -45,7 +48,7 @@ export default function LeadsPanel() {
   // Every lead by stage, from the server (the list itself is the 300 most engaged).
   const counts = useMemo(() => {
     if (totals) return totals;
-    const c: Record<Stage, number> = { all: 0, qualified: 0, hot: 0, warm: 0, cold: 0, opted_out: 0 };
+    const c: Record<Stage, number> = { all: 0, qualified: 0, hot: 0, warm: 0, cold: 0, applied: 0, opted_out: 0 };
     for (const l of rows || []) { c.all++; c[stageOf(l)]++; }
     return c;
   }, [rows, totals]);

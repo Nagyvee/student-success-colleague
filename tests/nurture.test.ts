@@ -316,3 +316,14 @@ test('a reused video only says what the record says, and loan leads hear about l
   assert.equal(plain.slide.say, "Hey Sizwe, how are you? I'm Naledi from Melsoft Academy. You asked about studying with us, so I made this short video just for you. Let me show you what it's really like.");
   assert.doesNotMatch(plain.slide.say, /work|job|employ/i, 'nothing the record does not say');
 });
+
+test('a lead has one stage on every screen: qualified beats hot, stopped beats everything', async () => {
+  const { leadStage } = await import('../src/lib/nurture/stage');
+  assert.equal(leadStage({ engagement: 'hot', qualified: true, status: 'qualified' }), 'qualified', 'said yes: qualified, not just hot');
+  assert.equal(leadStage({ engagement: 'cold', qualified: true }), 'qualified', 'qualified even if their score was lost or low');
+  assert.equal(leadStage({ engagement: 'hot' }), 'hot');
+  assert.equal(leadStage({ engagement: 'warm' }), 'warm');
+  assert.equal(leadStage({}), 'cold', 'new');
+  assert.equal(leadStage({ qualified: true, status: 'applied' }), 'applied');
+  assert.equal(leadStage({ optedOut: true, qualified: true }), 'opted_out');
+});
