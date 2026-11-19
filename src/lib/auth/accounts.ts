@@ -439,6 +439,9 @@ export function updateTenantIntegrations(tenantId: string, patch: Partial<Tenant
     applyUrl: patch.applyUrl !== undefined ? patch.applyUrl.trim() : prev.applyUrl,
     escalations: patch.escalations !== undefined ? cleanRoutes(patch.escalations) : prev.escalations,
     handoff: mergeHandoff(patch.handoff, prev.handoff),
+    autopilotDepartments: Array.isArray(patch.autopilotDepartments)
+      ? [...new Set(patch.autopilotDepartments.map(String).map((x) => x.trim()).filter((x) => /^[\w-]{1,60}$/.test(x)))].slice(0, 30)
+      : prev.autopilotDepartments,
   };
   t.integrations = next;
   saveAuth(t);

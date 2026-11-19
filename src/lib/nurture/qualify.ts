@@ -112,6 +112,30 @@ function handoffSettings(tenantId = currentTenantId()): Required<Pick<Handoff, '
   };
 }
 
+/** The dialer's address and key (Settings, else DIALER_URL / DIALER_API_KEY), for reading and releasing leads. */
+export function dialerConnection(tenantId = currentTenantId()): { url: string; key: string } {
+  const s = handoffSettings(tenantId);
+  return { url: s.dialerUrl, key: s.dialerKey };
+}
+
+/** A lead the dialer holds for Thuso comes in there as a new lead (POST /api/v1/nurture/<row>/release). */
+async function releaseInDialer(s: ReturnType<typeof handoffSettings>, rowId: string, q: QualifyInput, brief: string): Promise<{ ok: boolean; outcome?: string; id?: string; error?: string }> {
+  try {
+    const res = await fetch(`${s.dialerUrl}/api/v1/nurture/${encodeURIComponent(rowId)}/release`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${s.dialerKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: brief, source_detail: `Thuso qualified: ${QUALIFY_REASON[q.reason].said}`.slice(0, 200) }),
+      signal: AbortSignal.timeout(20000),
+      cache: 'no-store',
+    });
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; outcome?: string; lead_id?: string; lead?: { id?: string }; error?: string };
+    if (!res.ok || !j.ok) return { ok: false, error: j.error || `HTTP ${res.status}` };
+    return { ok: true, outcome: j.outcome, id: j.lead?.id || j.lead_id };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 const isDiscordHook = (u: string) => /^https:\/\/(?:canary\.|ptb\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(u);
 
 /** Posts a card in the team's Discord channel. Only the team sees it. */
@@ -203,8 +227,9 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
   else if (!s.dialerOn) dialer = 'held: sending to the dialer is switched off';
   else if (!liveAllowed(getTenantIntegrations(tenantId).liveOutreachEnabled)) dialer = sendingPaused() ? 'held: test phase (sending is paused on this server)' : 'held: Live Outreach is off';
   else {
-    const r = await pushToDialer(s, rec, q, brief);
-    dialer = r.ok ? (r.outcome === 'merged' ? 'already in the dialer: brief added' : 'added as a new lead') : `failed: ${r.error}`;
+    // Held in the dialer for Thuso: release it there; otherwise (a lead from elsewhere) add it.
+    const r = f.dialer_row_id ? await releaseInDialer(s, f.dialer_row_id, q, brief) : await pushToDialer(s, rec, q, brief);
+    dialer = r.ok ? (r.outcome === 'already' ? 'already a lead in the dialer' : r.outcome === 'merged' ? 'already in the dialer: brief added' : 'moved to New in the dialer') : `failed: ${r.error}`;
     if (r.id) setRecordField(sourceId, key, 'dialer_lead_id', r.id);
   }
   setRecordField(sourceId, key, 'dialer_status', dialer);

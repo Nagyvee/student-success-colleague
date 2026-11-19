@@ -5,7 +5,7 @@ import { getTenantIntegrations, updateTenantIntegrations } from '@/lib/auth/acco
 import { parseCsv, toCsvUrl } from '@/lib/lms/sheet';
 import { findSyncedLearnerByEmailOrId, mergeLearnerPatchByEmailOrId } from '@/lib/db/postgres';
 import { generateJSON, obj } from '@/lib/ai/llm';
-import { countRecords, listRecords, recordKey, removeSourceRecords, upsertRecord } from './records';
+import { countRecords, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord } from './records';
 import { daysUntil, isoDate, parseDate, parseMoney } from './conditions';
 import { leadProfile } from '@/lib/nurture/profile';
 
@@ -176,7 +176,8 @@ export function saveSource(input: Partial<DataSource> & { name: string; kind: Da
     id: prev?.id || input.id || `src_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     name: input.name.trim().slice(0, 60) || prev?.name || 'Sheet',
     kind: input.kind || prev?.kind || 'custom',
-    url: input.url !== undefined ? url : prev?.url || '',
+    url: input.provider === 'dialer' ? '' : input.url !== undefined ? url : prev?.url || '',
+    provider: input.provider ?? prev?.provider,
     departmentId: input.departmentId ?? prev?.departmentId,
     mapping: input.mapping || prev?.mapping || {},
     tabs: input.tabs !== undefined ? cleanTabs(input.tabs) : prev?.tabs,
@@ -185,7 +186,7 @@ export function saveSource(input: Partial<DataSource> & { name: string; kind: Da
     createdAt: prev?.createdAt || Date.now(),
     columns: input.columns || prev?.columns,
   };
-  if (prev && prev.url !== next.url) {
+  if (prev && (prev.url !== next.url || (prev.provider || 'sheet') !== (next.provider || 'sheet'))) {
     // A different sheet: start from a fresh baseline so its rows are not "new".
     removeSourceRecords(next.id);
     const r = rt(tenantId, next.id);
@@ -318,6 +319,7 @@ const POLL_MS = Math.max(15, Number(process.env.SHEET_POLL_SECONDS || 30)) * 100
 
 /** Read one source now. Returns what changed since the last read (nothing on the first read). */
 export async function readSource(source: DataSource, tenantId = currentTenantId()): Promise<RecordEvent[]> {
+  if (source.provider === 'dialer') return readDialerSource(source, tenantId);
   const r = rt(tenantId, source.id);
   if (!source.url || r.reading) return [];
   r.reading = true;
@@ -390,11 +392,79 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
   }
 }
 
+/** The dialer's people waiting for Thuso (GET /api/v1/nurture), every page. */
+async function fetchNurturing(tenantId: string): Promise<{ id: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> }[]> {
+  const { dialerConnection } = await import('@/lib/nurture/qualify');
+  const { url, key } = dialerConnection(tenantId);
+  if (!url || !key) throw new Error('The dialer is not connected: add its address and API key in Channels & API → Qualified leads (or DIALER_URL and DIALER_API_KEY on the server).');
+  const rows: Awaited<ReturnType<typeof fetchNurturing>> = [];
+  for (let page = 1; page <= 60; page++) {
+    const res = await fetch(`${url}/api/v1/nurture?page=${page}&per=500`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000), cache: 'no-store' });
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: typeof rows; total?: number; per?: number };
+    if (!res.ok || !j.ok) throw new Error(res.status === 404 ? 'The dialer does not have the Thuso update yet (deploy it, and run its 2026-11-19 migration).' : j.error || `The dialer answered HTTP ${res.status}.`);
+    rows.push(...(j.rows || []));
+    if (!j.rows?.length || (j.rows.length < (j.per || 500)) || rows.length >= (j.total || 0)) break;
+  }
+  return rows;
+}
+
+/** A leads list read from the dialer: everyone it holds for Thuso, with every column of their sheet row.
+ *  Nobody here is a baseline: the dialer only holds people for Thuso to nurture. Someone who leaves the
+ *  queue without Thuso qualifying them was taken over in the dialer, so their nurturing stops. */
+async function readDialerSource(source: DataSource, tenantId: string): Promise<RecordEvent[]> {
+  const r = rt(tenantId, source.id);
+  if (r.reading) return [];
+  r.reading = true;
+  try {
+    const rows = await fetchNurturing(tenantId);
+    const events: RecordEvent[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const headers = Object.keys(row.cells || {});
+      const values = headers.map((h) => String((row.cells as Record<string, unknown>)[h] ?? ''));
+      const rec = rowToRecord({ ...source, mapping: autoMap(headers) }, headers, values, 0);
+      // The dialer's reading of the person: the name, number and email it will call and write to.
+      const email = (row.email || rec.email || '').trim().toLowerCase();
+      const phone = cleanPhone(row.phone || rec.phone || '');
+      if (row.name) { rec.name = row.name; rec.fields.name = row.name; rec.fields.first_name = row.name.split(/\s+/)[0]; }
+      rec.email = email; rec.fields.email = email;
+      rec.phone = phone; rec.fields.phone = phone;
+      rec.key = email || (phone ? `phone:${phone}` : `dialer:${row.id}`);
+      rec.fields.agent_dialer_row_id = row.id;
+      rec.fields.agent_sheet_tab = row.tab || row.source || '';
+      rec.fields.agent_dialer_source = row.source || '';
+      if (seen.has(rec.key)) continue;
+      seen.add(rec.key);
+      const out = upsertRecord(source.id, rec);
+      if (out.created) events.push({ source, record: out.record, kind: 'added', changed: [] });
+      else if (out.changed.length) events.push({ source, record: out.record, kind: 'changed', changed: out.changed });
+    }
+    // Taken over in the dialer (or their row removed): Thuso stops nurturing them.
+    const left = listRecords(source.id).filter((x) => !seen.has(x.key) && x.fields.dialer_row_id && x.fields.qualified !== 'yes' && x.fields.dialer_left !== 'yes');
+    if (left.length) {
+      const { stopRunsFor } = await import('@/lib/engine/agentRuns');
+      for (const x of left) {
+        setRecordField(source.id, x.key, 'dialer_left', 'yes');
+        setRecordField(source.id, x.key, 'status', 'with sales');
+        stopRunsFor(x.email, x.key, `${x.name} is no longer waiting for Thuso in the dialer (the team took them over), so nurturing stops.`);
+      }
+    }
+    r.lastReadAt = Date.now(); r.lastError = null; r.rows = seen.size; r.columns = ['dialer'];
+    return events;
+  } catch (e) {
+    r.lastError = (e as Error).message;
+    return [];
+  } finally {
+    r.reading = false;
+    r.nextAt = Date.now() + POLL_MS;
+  }
+}
+
 /** Read every enabled sheet that is due. Called by the always-on pump. */
 export async function pollSources(tenantId = currentTenantId()): Promise<RecordEvent[]> {
   const out: RecordEvent[] = [];
   for (const s of listSources(tenantId)) {
-    if (!s.enabled || !s.url) continue;
+    if (!s.enabled || (!s.url && s.provider !== 'dialer')) continue;
     const r = rt(tenantId, s.id);
     if (r.reading || Date.now() < r.nextAt) continue;
     out.push(...(await readSource(s, tenantId)));

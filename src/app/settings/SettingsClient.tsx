@@ -95,6 +95,20 @@ export default function SettingsClient() {
   const say = (t: string) => { setMsg(t); setTimeout(() => setMsg(null), 4000); };
   async function set(patch: Partial<Settings>) { try { await post('/api/state', { action: 'settings', settings: patch }); } catch (e) { say((e as Error).message); } }
   const [clearing, setClearing] = useState(false);
+  // Which departments autopilot runs (empty: all of them).
+  const [depts, setDepts] = useState<{ id: string; name: string; color?: string }[]>([]);
+  const [autoDepts, setAutoDepts] = useState<string[] | null>(null);
+  useEffect(() => {
+    fetch('/api/departments', { cache: 'no-store' }).then((r) => r.json()).then((j) => setDepts((j.departments || []).map((d: { id: string; name: string; color?: string }) => ({ id: d.id, name: d.name, color: d.color })))).catch(() => {});
+    fetch('/api/auth', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAutoDepts(j?.integrations?.autopilotDepartments || [])).catch(() => setAutoDepts([]));
+  }, []);
+  async function saveAutoDepts(next: string[]) {
+    setAutoDepts(next);
+    try {
+      const r = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'saveIntegrations', integrations: { autopilotDepartments: next } }) });
+      if (!r.ok) say((await r.json().catch(() => ({}))).error || 'Could not save.');
+    } catch (e) { say((e as Error).message); }
+  }
   async function clearSamples() {
     if (!window.confirm('Clear all samples and test data? The inbox, outputs, approvals, plans, activity and test agent runs are removed, with the preview leads and their vouchers. Settings, real leads and students, messages, videos and the quiz stay.')) return;
     setClearing(true);
@@ -450,7 +464,7 @@ export default function SettingsClient() {
               </span>
             </h3>
             <p>
-              With autopilot <b>off</b>, Moodle and sheet syncs update records quietly and agents only work when someone presses <b>Run</b>. Turn it <b>on</b> and every department's agents start by themselves: new leads, tracker changes, scheduled checks, LMS events and replies.
+              With autopilot <b>off</b>, Moodle and sheet syncs update records quietly and agents only work when someone presses <b>Run</b>. Turn it <b>on</b> and the departments ticked below start by themselves: new leads, tracker changes, scheduled checks, LMS events and replies.
             </p>
             <label className="switch">
               <input
@@ -461,6 +475,24 @@ export default function SettingsClient() {
               <i />
               <span>{s?.autoRunMode ? 'On: agents start by themselves from their triggers' : 'Off: agents run only when someone presses Run'}</span>
             </label>
+            {depts.length > 0 && autoDepts !== null && (
+              <div style={{ marginTop: 12 }}>
+                <b style={{ fontSize: 12.5 }}>Departments on autopilot</b>
+                <p style={{ margin: '2px 0 8px', fontSize: 12.5 }}>{autoDepts.length ? 'Only these start by themselves; the others work when someone presses Run.' : 'All departments (tick some to limit autopilot to them).'}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {depts.map((d) => {
+                    const on = autoDepts.includes(d.id);
+                    return (
+                      <label key={d.id} className="switch" style={{ margin: 0 }}>
+                        <input type="checkbox" checked={on} onChange={() => void saveAutoDepts(on ? autoDepts.filter((x) => x !== d.id) : [...autoDepts, d.id])} />
+                        <i />
+                        <span>{d.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
           <div className="set-card">
             <h3><Icon name="check" size={15} />Approval Gate {s?.requireApproval !== false ? <span className="badge badge-good">Safe Mode</span> : <span className="badge badge-mute">Auto-Send</span>}</h3>

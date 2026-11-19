@@ -448,6 +448,8 @@ export interface TenantIntegrations {
   applyUrl?: string;
   /** Who gets each kind of escalation (comma-separated emails); unset kinds go to managerEmail. */
   escalations?: Partial<Record<'admissions' | 'support' | 'academic' | 'placement' | 'finance' | 'reports', string>>;
+  /** The departments autopilot runs (empty: all). Other departments' agents run only when someone presses Run. */
+  autopilotDepartments?: string[];
   /** Qualified leads go to the sales team: a Discord channel and the dialer. */
   handoff?: { discordWebhook?: string; dialerUrl?: string; dialerKey?: string; dialerOn?: boolean };
 }
@@ -945,6 +947,9 @@ export interface DataSource {
   kind: DataSourceKind;
   /** A Google Sheets link (any tab, shared "Anyone with the link: Viewer"), or empty for a list fed by webhook. */
   url: string;
+  /** 'dialer': the leads the dialer holds for Thuso (tabs marked "Thuso nurtures these leads first"), read
+   *  through its API instead of a sheet. Thuso nurtures them and releases each one it qualifies. */
+  provider?: 'sheet' | 'dialer';
   departmentId?: string;
   /** Our field → the sheet's column header. Filled automatically, editable. */
   mapping: Partial<Record<RecordField, string>>;

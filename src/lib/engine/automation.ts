@@ -17,7 +17,7 @@ import { hydrateLmsSaved } from '@/lib/lms/gradebook';
 import { pumpCampaigns } from '@/lib/nurture/campaigns';
 import { checkReplies, hydrateMailWatch } from '@/lib/email/watch';
 import { hydrateAgentRuns, resumeDueRuns } from './agentRuns';
-import { dispatchRecordEvents, hydrateAgentSchedule, runScheduledAgents } from './agentTriggers';
+import { autopilotForKinds, dispatchRecordEvents, hydrateAgentSchedule, runScheduledAgents } from './agentTriggers';
 import { ensureDepartmentModel } from './departments';
 
 /* Always on.
@@ -314,11 +314,14 @@ function tick() {
       void runScheduledAgents().catch(() => { /* next minute */ });
     }
   }
-  if (s.settings.autoRunMode) {
+  // The tutoring team (sweeps, follow-ups, learner-sheet and Moodle triggers) works for Student Success and Learning:
+  // it runs by itself only when one of them is on autopilot.
+  const tutoringAuto = autopilotForKinds(['student_success', 'learning']);
+  if (tutoringAuto) {
     void pollSheet();
     pollMoodleChanges();
   }
-  if (s.settings.autoRunMode && (!h.lastFollowUp || Date.now() - h.lastFollowUp >= 30_000)) {
+  if (tutoringAuto && (!h.lastFollowUp || Date.now() - h.lastFollowUp >= 30_000)) {
     h.lastFollowUp = Date.now();
     void processDueFollowUps().catch(() => { /* logged in followups */ });
   }
@@ -330,7 +333,7 @@ function tick() {
       void emailReport('today', to).catch(() => { /* logged by the mailer */ });
     }
   }
-  if (s.settings.autoRunMode && s.settings.scheduleEnabled !== false && Date.now() >= h.nextSweep) {
+  if (tutoringAuto && s.settings.scheduleEnabled !== false && Date.now() >= h.nextSweep) {
     h.lastSweep = Date.now();
     h.nextSweep = nextSweepAfter(Date.now() + 60_000);
     log('system', 'system', 'Scheduler: the weekly sweep is due. Starting it with nobody asked.');

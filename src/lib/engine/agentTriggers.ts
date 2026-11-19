@@ -7,6 +7,8 @@ import { appendConversation, findRecordsByEmail, getRecord, listRecords, setReco
 import { LEADS_SOURCE_ID, MOODLE_SOURCE_ID, getSource, liveFields, listSources, type RecordEvent } from '@/lib/data/sources';
 import { matchesAll } from '@/lib/data/conditions';
 import { currentTenantId } from '@/lib/auth/tenantContext';
+import { getTenantIntegrations } from '@/lib/auth/accounts';
+import { listOffices } from './offices';
 
 /* What starts an agent.
  *
@@ -19,6 +21,25 @@ export const agentWorkflows = (): WorkflowDef[] => listWorkflows().filter((w) =>
 
 /** Agents start by themselves only when autopilot is on; the Run button always works. */
 export const autopilotOn = () => Boolean(getState().settings.autoRunMode);
+
+/** The departments autopilot runs (empty: every department). */
+export function autopilotDepartments(): string[] {
+  return getTenantIntegrations(currentTenantId()).autopilotDepartments || [];
+}
+
+/** Does autopilot start this agent by itself? (Its department is on autopilot.) */
+export function autopilotFor(wf: Pick<WorkflowDef, 'departmentId' | 'officeId'>): boolean {
+  const only = autopilotDepartments();
+  return !only.length || only.includes(wf.departmentId || wf.officeId || '');
+}
+
+/** Is any department of these kinds on autopilot? (The tutoring team works for Student Success and Learning.) */
+export function autopilotForKinds(kinds: string[]): boolean {
+  if (!autopilotOn()) return false;
+  const only = autopilotDepartments();
+  if (!only.length) return true;
+  return listOffices().some((o) => only.includes(o.id) && kinds.includes(o.kind || ''));
+}
 
 const BATCH = Math.max(1, Number(process.env.AGENT_BATCH || 20));
 
@@ -33,7 +54,7 @@ export async function dispatchRecordEvents(events: RecordEvent[]): Promise<numbe
   let started = 0;
   for (const wf of agentWorkflows()) {
     const t = wf.agentTrigger;
-    if (!t) continue;
+    if (!t || !autopilotFor(wf)) continue;
     for (const ev of events) {
       if (t.sourceId && t.sourceId !== ev.source.id) continue;
       if (ev.record.fields.preview === 'yes') continue;
@@ -143,7 +164,7 @@ export async function dispatchLmsEvent(event: WorkflowTrigger, learner: { id: st
   const { id: _id, ...facts } = learner.fields;
   // Runs already working on this person see the new facts (a login ends a check-in loop).
   if (learner.email) noteFacts(learner.email, facts);
-  const wfs = agentWorkflows().filter((w) => w.agentTrigger?.kind === 'lms.event' && w.agentTrigger.lmsEvent === event);
+  const wfs = agentWorkflows().filter((w) => w.agentTrigger?.kind === 'lms.event' && w.agentTrigger.lmsEvent === event && (opts.manual || autopilotFor(w)));
   if (!wfs.length || (!autopilotOn() && !opts.manual)) return 0;
   // Prefer the person's record on a list (Moodle's students first): it has the live fields.
   const lists = learner.email ? findRecordsByEmail(learner.email).filter((r) => r.sourceId !== LEADS_SOURCE_ID && r.fields.preview !== 'yes') : [];
@@ -175,7 +196,7 @@ export async function dispatchReply(email: string, text: string, name?: string, 
   }
   // A person testing a reply from the Inbox wants to see the answer, autopilot or not.
   if (!autopilotOn() && !meta.manual) return 0;
-  const wfs = agentWorkflows().filter((w) => w.agentTrigger?.kind === 'reply.received');
+  const wfs = agentWorkflows().filter((w) => w.agentTrigger?.kind === 'reply.received' && (meta.manual || autopilotFor(w)));
   let started = 0;
   for (const wf of wfs) {
     const src = wf.agentTrigger?.sourceId;
@@ -228,7 +249,7 @@ export async function runScheduledAgents(tenantId = currentTenantId()): Promise<
     const now = Date.now();
     for (const wf of agentWorkflows()) {
       const t = wf.agentTrigger;
-      if (!t || (t.kind !== 'record.match' && t.kind !== 'schedule')) continue;
+      if (!t || (t.kind !== 'record.match' && t.kind !== 'schedule') || !autopilotFor(wf)) continue;
       const s = t.schedule || { every: 'day', hour: 8 };
       const mine = st[wf.id];
       if (mine?.nextTry && now < mine.nextTry) continue;

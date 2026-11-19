@@ -183,7 +183,7 @@ export function readiness(tenantId = currentTenantId(), db: DbState = { configur
     {
       id: 'leads', label: 'Leads coming in (Facebook, TikTok, forms)',
       state: leads.length ? 'ok' : 'todo',
-      detail: leads.length ? `${leads.length} lead${leads.length === 1 ? '' : 's'}${leadsSheet?.url ? ', read from the leads sheet' : ''}.` : 'No leads yet.',
+      detail: leads.length ? `${leads.length} lead${leads.length === 1 ? '' : 's'}${leadsSheet?.provider === 'dialer' ? ', read from the dialer (the people it holds for Thuso)' : leadsSheet?.url ? ', read from the leads sheet' : ''}.` : 'No leads yet.',
       fix: leads.length ? '' : 'Lead Nurturing → Leads: paste the Google Sheet your ad leads land in (shared "Anyone with the link: Viewer"), or point Zapier/Make at the leads webhook (Channels & API). To test, add yourselves as rows.',
       href: '/nurture',
     },

@@ -306,13 +306,14 @@ export async function POST(req: Request) {
             name,
             kind: (String(src.kind || 'custom') as DataSourceKind),
             url: src.url !== undefined ? String(src.url) : undefined,
+            provider: src.provider === 'dialer' ? 'dialer' : src.provider === 'sheet' ? 'sheet' : undefined,
             departmentId: src.departmentId ? String(src.departmentId) : undefined,
             mapping: src.mapping && typeof src.mapping === 'object' ? (src.mapping as Partial<Record<RecordField, string>>) : undefined,
             tabs: Array.isArray(src.tabs) ? (src.tabs as { url: string; label?: string; mapping?: Partial<Record<RecordField, string>> }[]) : undefined,
             enabled: typeof src.enabled === 'boolean' ? src.enabled : undefined,
           });
           // Read it straight away (the first read is the baseline, so nobody is messaged for existing rows).
-          if (saved.url) await readSource(saved);
+          if (saved.url || saved.provider === 'dialer') await readSource(saved);
           return NextResponse.json({ ok: true, source: getSource(saved.id) });
         } catch (e) {
           return bad((e as Error).message);
@@ -325,7 +326,7 @@ export async function POST(req: Request) {
       }
       case 'syncSource': {
         const src = getSource(String(body.id || ''));
-        if (!src?.url) return bad('This source has no sheet link.');
+        if (!src?.url && src?.provider !== 'dialer') return bad('This source has no sheet link.');
         const events = await readSource(src);
         return NextResponse.json({ ok: true, source: getSource(src.id), changes: events.length });
       }

@@ -494,7 +494,8 @@ export async function syncMoodleCohort(options: {
           options.enqueue ||
           (options.triggerOnChanges !== false ? (await import('./automation')).enqueue : undefined);
 
-        const autoEnabled = Boolean(ti.autoRunMode || getState().settings.autoRunMode);
+        const { autopilotForKinds } = await import('./agentTriggers');
+        const autoEnabled = Boolean(ti.autoRunMode || getState().settings.autoRunMode) && autopilotForKinds(['student_success', 'learning']);
         if (options.triggerOnChanges !== false && autoEnabled && enqueueFn) {
           const inactivityWorkflow = workflowsForTrigger('login.gap')[0];
           const inactivityThreshold = inactivityWorkflow?.threshold ?? 5;

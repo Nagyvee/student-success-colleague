@@ -108,6 +108,7 @@ export default function DataSourcesSection({ origin, tenantSlug, isManager }: Pr
             {sources.map((s) => {
               const isLeads = s.id === LEADS_ID;
               const isMoodle = s.id === MOODLE_ID;
+              const fromDialer = s.provider === 'dialer';
               const connected = isLeads || Boolean(s.url) || (isMoodle && (s.rows ?? 0) > 0);
               const state = s.lastError ? 'bad' : connected ? 'ok' : 'off';
               return (
@@ -118,16 +119,18 @@ export default function DataSourcesSection({ origin, tenantSlug, isManager }: Pr
                       <b>{s.name}</b>
                       <span>{KIND_LABEL[s.kind]}{deptName(s.departmentId) ? ` · ${deptName(s.departmentId)}` : ''}</span>
                     </div>
-                    <span className={`src-state ${state}`}>{state === 'ok' ? (isLeads ? 'Webhook' : isMoodle ? 'Moodle' : 'Connected') : state === 'bad' ? 'Problem' : 'Not connected'}</span>
+                    <span className={`src-state ${state}`}>{state === 'ok' ? (isLeads ? (fromDialer ? 'Dialer' : s.url ? 'Sheet' : 'Webhook') : isMoodle ? 'Moodle' : 'Connected') : state === 'bad' ? 'Problem' : 'Not connected'}</span>
                   </div>
                   <div className="src-meta">
                     <span><Icon name="list" size={12} /> {s.rows ?? 0} {isLeads ? 'leads' : isMoodle ? 'students' : 'rows'}</span>
-                    {s.url && <span><Icon name="refresh" size={12} /> read {agoLabel(s.lastReadAt)}</span>}
+                    {(s.url || fromDialer) && <span><Icon name="refresh" size={12} /> read {agoLabel(s.lastReadAt)}</span>}
                     {!!s.columns?.length && <span><Icon name="layers" size={12} /> {s.columns.length} columns</span>}
                   </div>
                   {s.lastError && <p className="src-err">{s.lastError}</p>}
                   {!connected && !isMoodle && <p className="src-help">Paste the Google Sheet link for this list so the agents can use it.</p>}
-                  {isLeads && <p className="src-help">Filled by the leads webhook below (ads, forms, Zapier, Make).</p>}
+                  {isLeads && <p className="src-help">{fromDialer
+                    ? 'Read from the dialer: the people it holds for Thuso (its tabs marked "Thuso nurtures these leads first"). Thuso nurtures them and moves each one it qualifies to New in the dialer; anyone the team takes over there stops being nurtured.'
+                    : s.url ? 'Read from the leads sheet (and its tabs), and the leads webhook below.' : 'Filled by the leads webhook below (ads, forms, Zapier, Make).'}</p>}
                   {isMoodle && <p className="src-help">{connected ? 'Filled by the Moodle sync every 5 minutes: activity, overdue work, results and the next assessment for each student. Student Success and Learning & Assessment work from it.' : 'Fills in by itself once Moodle is connected (Channels & API) and the first sync has run.'}</p>}
                   {s.url && <span className="src-url" title={s.url}>{s.url}</span>}
                   {!!s.tabs?.length && <p className="src-help">Also reads {s.tabs.length} more tab{s.tabs.length === 1 ? '' : 's'}: {s.tabs.map((t) => t.label || 'tab').join(', ')}.</p>}
@@ -137,7 +140,18 @@ export default function DataSourcesSection({ origin, tenantSlug, isManager }: Pr
                         <Icon name={connected ? 'sliders' : 'link'} size={13} /> {connected ? 'Columns' : 'Connect sheet'}
                       </button>
                     )}
-                    {s.url && (
+                    {isLeads && isManager && (
+                      <button type="button" className="btn ghost sm" disabled={busy === `prov-${s.id}`} onClick={() => {
+                        const toDialer = !fromDialer;
+                        const ask = toDialer
+                          ? 'Read the leads from the dialer instead of the Google Sheet? Thuso will nurture the people the dialer holds for it (its tabs marked "Thuso nurtures these leads first") and move each one it qualifies to New there. The current list in Thuso is replaced by the dialer\'s.'
+                          : 'Stop reading leads from the dialer? Connect the leads sheet again afterwards if you want Thuso to read it.';
+                        if (window.confirm(ask)) void act(`prov-${s.id}`, { action: 'saveSource', source: { id: s.id, name: s.name, kind: s.kind, provider: toDialer ? 'dialer' : 'sheet', url: '' } }, toDialer ? 'Leads now come from the dialer.' : 'Leads no longer come from the dialer.');
+                      }}>
+                        <Icon name="phone" size={13} /> {fromDialer ? 'Stop reading from the dialer' : 'Read leads from the dialer'}
+                      </button>
+                    )}
+                    {(s.url || fromDialer) && (
                       <button type="button" className="btn ghost sm" disabled={busy === `sync-${s.id}`} onClick={() => void act(`sync-${s.id}`, { action: 'syncSource', id: s.id }, `${s.name} read.`)}>
                         <Icon name="refresh" size={13} /> {busy === `sync-${s.id}` ? 'Reading…' : 'Sync now'}
                       </button>
