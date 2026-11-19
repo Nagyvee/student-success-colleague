@@ -12,11 +12,17 @@
 
 param(
   [Parameter(Mandatory = $true)][string]$Domain,
-  [int]$Port = 3200
+  [int]$Port = 3200,
+  # Only register and start the tasks (the app is already installed and built).
+  [switch]$SkipBuild
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location $AppDir
+
+# Registering tasks that run at boot needs an elevated window (signed in as Administrator is not enough).
+$elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $elevated) { throw 'Run this in PowerShell opened with "Run as administrator" (right-click PowerShell in the Start menu). The title bar then starts with "Administrator:".' }
 
 function Need($cmd, $hint) { if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { throw "$cmd is not installed. $hint" } }
 Need node 'Install Node.js 20 LTS or newer from https://nodejs.org, then open a new PowerShell window.'
@@ -46,8 +52,12 @@ PGPASSWORD=
   exit 0
 }
 
-npm ci
-npm run build
+if (-not $SkipBuild) {
+  npm ci
+  if ($LASTEXITCODE -ne 0) { throw 'npm ci failed (see above).' }
+  npm run build
+  if ($LASTEXITCODE -ne 0) { throw 'The build failed (see above).' }
+}
 
 # The app: at boot, as SYSTEM, restarted by run-thuso.ps1 if it stops.
 $run = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSScriptRoot\run-thuso.ps1`" -AppDir `"$AppDir`" -Port $Port" -WorkingDirectory $AppDir

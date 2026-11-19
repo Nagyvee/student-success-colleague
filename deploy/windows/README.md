@@ -15,7 +15,7 @@ it needs a machine that never sleeps. A Windows VPS does that; no paid
 
 ## First install
 
-In PowerShell **as Administrator**:
+In PowerShell opened with **Run as administrator** (right-click PowerShell in the Start menu; the title bar starts with "Administrator:". Being signed in as Administrator is not enough):
 
 ```powershell
 cd C:\
@@ -30,7 +30,7 @@ The first run writes `.env.local` and stops. Open it in Notepad, add
 (`PGUSER`, `PGPASSWORD`; the `student-success` database already on this VPS),
 put `caddy.exe` into
 `deploy\windows\`, and run the same command again. It builds the app and
-registers three tasks that run with nobody logged in:
+registers three tasks that run with nobody logged in (if only that step failed, run it again with `-SkipBuild` to skip the build):
 
 | Task | What it does |
 |---|---|
