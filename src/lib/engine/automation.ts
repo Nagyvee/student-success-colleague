@@ -46,7 +46,7 @@ const SWEEP_GOAL = 'Weekly sweep: check every cohort and get every learner who i
 const SWEEP_DAY = 1;      // Monday
 const SWEEP_HOUR = 7;     // 07:00, server time (SAST)
 
-type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean };
+type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean };
 const g = globalThis as unknown as { __ssAutoMap?: Map<string, Hub>; __ssTimer?: ReturnType<typeof setInterval> | null; __thusoBoot?: Promise<void> };
 
 function hub(tenantId = currentTenantId()): Hub {
@@ -289,6 +289,14 @@ function tick() {
   const ti = getTenantIntegrations(tid);
   // Department agents: continue waiting runs, read the sheets, run scheduled checks.
   if (h.booted) {
+    // Once per start: lead scores the old field bug pulled back are rebuilt from what each lead did.
+    if (!h.repairedScores) {
+      h.repairedScores = true;
+      void import('@/lib/nurture/repair').then((r) => {
+        const n = r.repairLeadScores();
+        if (n) log('system', 'info', `Lead scores checked: ${n} lead${n === 1 ? '' : 's'} got back the points they earned.`, { dept: 'admissions' });
+      }).catch(() => { /* next start */ });
+    }
     resumeDueRuns();
     if (!h.lastSourcePoll || Date.now() - h.lastSourcePoll >= 5000) {
       h.lastSourcePoll = Date.now();

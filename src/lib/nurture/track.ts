@@ -74,6 +74,24 @@ const num = (v: string | undefined) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+export interface PointItem { kind: Exclude<EngagementKind, 'unsub'>; message: string; target: string; points: number }
+
+/** Where a lead's points come from: one item per action counted (from nurture_seen,
+ *  "kind:message:target", each counted once). `other` is any part of the score
+ *  recorded before this list was kept (or repaired from what they did). */
+export function pointsOf(fields: Record<string, string>): { items: PointItem[]; total: number; other: number; score: number } {
+  const items: PointItem[] = [];
+  for (const key of (fields.nurture_seen || '').split('|').filter(Boolean)) {
+    const [kind, message = '', ...rest] = key.split(':');
+    if (!(kind in SCORE)) continue;
+    const k = kind as PointItem['kind'];
+    items.push({ kind: k, message, target: rest.join(':'), points: SCORE[k] });
+  }
+  const total = items.reduce((n, x) => n + x.points, 0);
+  const score = num(fields.engagement_score);
+  return { items, total, other: Math.max(0, score - total), score };
+}
+
 /** The pure part: given the record's fields and an action, the field updates. */
 export function scoreUpdate(fields: Record<string, string>, kind: Exclude<EngagementKind, 'unsub'>, uniqueKey: string, now = new Date()): { updates: Record<string, string>; counted: boolean } {
   const seen = (fields.nurture_seen || '').split('|').filter(Boolean);

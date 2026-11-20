@@ -81,10 +81,14 @@ export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId
   const kept: Record<string, string> = {};
   for (const [k, v] of Object.entries(prev.fields)) {
     if (!k.startsWith(AGENT_FIELD_PREFIX)) continue;
-    kept[k] = v;
-    // and its plain alias (lead_score for agent_lead_score), unless the sheet has that column
+    // and its plain alias (lead_score for agent_lead_score), unless the sheet has that column.
+    // The plain copy holds the newest value (older code updated only that copy after the
+    // first write), so a lead it left behind gets its newest value back here.
     const alias = k.slice(AGENT_FIELD_PREFIX.length);
-    if (!(alias in input.fields)) kept[alias] = v;
+    const own = !(alias in input.fields);
+    const latest = own && alias in prev.fields ? prev.fields[alias] : v;
+    kept[k] = latest;
+    if (own) kept[alias] = latest;
   }
   const fields = { ...kept, ...input.fields };
   const changed: string[] = [];
@@ -97,7 +101,8 @@ export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId
   if (prev.phone !== input.phone) changed.push('phone');
   if (!changed.length) {
     // Only agent fields differ (e.g. which tab they came from): keep them, quietly.
-    const quiet = Object.entries(input.fields).filter(([k, v]) => k.startsWith(AGENT_FIELD_PREFIX) && prev.fields[k] !== v);
+    // (Also a copy the old code left behind: agent_<field> catches up with its plain copy.)
+    const quiet = Object.entries(fields).filter(([k, v]) => k.startsWith(AGENT_FIELD_PREFIX) && prev.fields[k] !== v);
     if (quiet.length) {
       for (const [k, v] of quiet) { prev.fields[k] = v; prev.fields[k.slice(AGENT_FIELD_PREFIX.length)] ??= v; }
       doc.save();
@@ -125,11 +130,15 @@ export function removeRecords(match: (r: DataRecord) => boolean): number {
 export function setRecordField(sourceId: string | null, key: string, field: string, value: string): DataRecord | null {
   const rec = getRecord(sourceId, key);
   if (!rec) return null;
-  const isColumn = field in rec.fields && !field.startsWith(AGENT_FIELD_PREFIX);
-  const name = isColumn ? field : field.startsWith(AGENT_FIELD_PREFIX) ? field : `${AGENT_FIELD_PREFIX}${field}`;
-  rec.fields[name] = value;
-  // Also expose it under its plain name so conditions and templates can use either.
-  if (!isColumn) rec.fields[field.replace(new RegExp(`^${AGENT_FIELD_PREFIX}`), '')] = value;
+  const plain = field.startsWith(AGENT_FIELD_PREFIX) ? field.slice(AGENT_FIELD_PREFIX.length) : field;
+  const own = `${AGENT_FIELD_PREFIX}${plain}`;
+  // A column of the sheet is written in place. Anything else is Thuso's own field: kept as
+  // agent_<field> (what survives a re-read) and shown as <field> too, so conditions and
+  // templates can use either. Both copies change every time: once Thuso has written a field
+  // its plain copy is not a sheet column (updating only that copy let the next re-read undo it).
+  const isColumn = !field.startsWith(AGENT_FIELD_PREFIX) && plain in rec.fields && !(own in rec.fields);
+  if (isColumn) rec.fields[plain] = value;
+  else { rec.fields[own] = value; rec.fields[plain] = value; }
   rec.updatedAt = Date.now();
   doc.save();
   return rec;

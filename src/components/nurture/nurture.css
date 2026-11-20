@@ -204,6 +204,13 @@
 .nu-lead dd { margin:2px 0 0; font-size:13px; font-weight:600; }
 .nu-said { margin:0; display:flex; gap:8px; padding:10px 12px; border-radius:10px; background:var(--surface-sunken); border-left:3px solid var(--accent); font-size:13px; color:var(--ink-2); line-height:1.5; }
 .nu-said svg { flex-shrink:0; margin-top:3px; color:var(--accent); }
+.nu-points h4 { margin:0 0 6px; font-size:13px; }
+.nu-points ul { list-style:none; margin:0; padding:0; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.nu-points li { display:flex; justify-content:space-between; gap:12px; padding:7px 12px; font-size:13px; border-top:1px solid var(--line); }
+.nu-points li:first-child { border-top:0; }
+.nu-points li b { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.nu-points li.is-other { color:var(--muted); }
+.nu-points li.is-total { background:var(--surface-sunken); font-weight:600; }
 .nu-lead-cols { display:grid; grid-template-columns:1fr 1.6fr; gap:16px; }
 .nu-lead-cols h4 { margin:0 0 8px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 .nu-got { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:4px; font-size:13px; }

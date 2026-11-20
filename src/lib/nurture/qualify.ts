@@ -120,8 +120,27 @@ export function dialerConnection(tenantId = currentTenantId()): { url: string; k
   return { url: s.dialerUrl, key: s.dialerKey };
 }
 
+/** Who in the sales team the dialer gave a lead to (their Discord ID or username when the dialer has it). */
+export interface Assignee { id: string; name: string; discord?: string }
+
+type DialerReply = { ok: boolean; outcome?: string; id?: string; error?: string; assigned?: Assignee };
+type AssignedJson = { assigned_to?: { id?: unknown; name?: unknown; discord_id?: unknown } | null };
+
+function assigneeOf(j: AssignedJson): Assignee | undefined {
+  const a = j.assigned_to;
+  if (!a || typeof a.id !== 'string' || typeof a.name !== 'string' || !a.name.trim()) return undefined;
+  const discord = typeof a.discord_id === 'string' && a.discord_id.trim() ? a.discord_id.trim().slice(0, 40) : undefined;
+  return { id: a.id, name: a.name.trim().slice(0, 80), ...(discord ? { discord } : {}) };
+}
+
+/** A Discord user ID (what pings someone), from "123456789012345678" or "<@123456789012345678>". */
+export function discordUserId(v: string | undefined): string | null {
+  const m = String(v || '').trim().match(/^<?@?!?(\d{15,21})>?$/);
+  return m ? m[1] : null;
+}
+
 /** A lead the dialer holds for Thuso comes in there as a new lead (POST /api/v1/nurture/<row>/release). */
-async function releaseInDialer(s: ReturnType<typeof handoffSettings>, rowId: string, q: QualifyInput, brief: string): Promise<{ ok: boolean; outcome?: string; id?: string; error?: string }> {
+async function releaseInDialer(s: ReturnType<typeof handoffSettings>, rowId: string, q: QualifyInput, brief: string): Promise<DialerReply> {
   try {
     const res = await fetch(`${s.dialerUrl}/api/v1/nurture/${encodeURIComponent(rowId)}/release`, {
       method: 'POST',
@@ -130,9 +149,9 @@ async function releaseInDialer(s: ReturnType<typeof handoffSettings>, rowId: str
       signal: AbortSignal.timeout(20000),
       cache: 'no-store',
     });
-    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; outcome?: string; lead_id?: string; lead?: { id?: string }; error?: string };
+    const j = (await res.json().catch(() => ({}))) as AssignedJson & { ok?: boolean; outcome?: string; lead_id?: string; lead?: { id?: string }; error?: string };
     if (!res.ok || !j.ok) return { ok: false, error: j.error || `HTTP ${res.status}` };
-    return { ok: true, outcome: j.outcome, id: j.lead?.id || j.lead_id };
+    return { ok: true, outcome: j.outcome, id: j.lead?.id || j.lead_id, assigned: assigneeOf(j) };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -146,16 +165,20 @@ export function discordWebhook(tenantId = currentTenantId()): string {
 export const isDiscordHook = (u: string) => /^https:\/\/(?:canary\.|ptb\.)?(?:discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(u);
 
 /** Posts a card in the team's Discord channel. Only the team sees it. */
-export async function postDiscord(webhook: string, card: { title: string; text: string; urgent: boolean; test?: boolean }): Promise<{ ok: boolean; error?: string }> {
+export async function postDiscord(webhook: string, card: { title: string; text: string; urgent: boolean; test?: boolean; assignee?: Assignee }): Promise<{ ok: boolean; error?: string }> {
   if (!isDiscordHook(webhook)) return { ok: false, error: 'That is not a Discord webhook address (Server settings → Integrations → Webhooks → Copy webhook URL).' };
+  // Whoever the dialer gave the lead to is tagged (a Discord user ID pings them; a username is only shown).
+  const ping = discordUserId(card.assignee?.discord);
+  const handle = card.assignee?.discord && !ping ? `@${card.assignee.discord.replace(/^@/, '')}` : '';
+  const forWho = card.assignee ? ` · ${ping ? `<@${ping}>` : handle || `**${card.assignee.name}**`}, this one is yours` : '';
   try {
     const res = await fetch(`${webhook}?wait=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: 'Thuso',
-        content: card.test ? '🧪 Test from Thuso: nothing to do.' : card.urgent ? '🔥 **Hot qualified lead: call immediately**' : '🔥 **Hot lead: call today**',
-        allowed_mentions: { parse: [] },
+        content: card.test ? '🧪 Test from Thuso: nothing to do.' : `${card.urgent ? '🔥 **Hot qualified lead: call immediately**' : '🔥 **Hot lead: call today**'}${forWho}`,
+        allowed_mentions: ping ? { parse: [], users: [ping] } : { parse: [] },
         embeds: [{ title: card.title.slice(0, 250), description: card.text.slice(0, 3900), color: card.urgent ? 0xff7300 : 0x720075, timestamp: new Date().toISOString() }],
       }),
       signal: AbortSignal.timeout(10000),
@@ -167,7 +190,7 @@ export async function postDiscord(webhook: string, card: { title: string; text: 
 }
 
 /** Adds (or updates) the lead in the dialer, with the brief in its notes. */
-async function pushToDialer(s: ReturnType<typeof handoffSettings>, rec: Pick<DataRecord, 'name' | 'email' | 'phone' | 'fields'>, q: QualifyInput, brief: string): Promise<{ ok: boolean; outcome?: string; id?: string; error?: string }> {
+async function pushToDialer(s: ReturnType<typeof handoffSettings>, rec: Pick<DataRecord, 'name' | 'email' | 'phone' | 'fields'>, q: QualifyInput, brief: string): Promise<DialerReply> {
   const phone = clean(q.phone || rec.phone, 30);
   if (!phone) return { ok: false, error: 'no phone number' };
   try {
@@ -180,13 +203,15 @@ async function pushToDialer(s: ReturnType<typeof handoffSettings>, rec: Pick<Dat
         source_detail: `Thuso qualified: ${QUALIFY_REASON[q.reason].said}`.slice(0, 200),
         programme: leadProgramme(rec.fields) || undefined,
         notes: brief,
+        // A qualified lead goes to someone straight away, at any hour (shared out fairly by the dialer).
+        assign_now: true,
       }),
       signal: AbortSignal.timeout(15000),
       cache: 'no-store',
     });
-    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; outcome?: string; lead?: { id?: string }; error?: string };
+    const j = (await res.json().catch(() => ({}))) as AssignedJson & { ok?: boolean; outcome?: string; lead?: { id?: string }; error?: string };
     if (!res.ok || !j.ok) return { ok: false, error: j.error || `HTTP ${res.status}` };
-    return { ok: true, outcome: j.outcome, id: j.lead?.id };
+    return { ok: true, outcome: j.outcome, id: j.lead?.id, assigned: assigneeOf(j) };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -223,6 +248,7 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
   // 1. The dialer first (it rings real people: only with Live Outreach on, never for a preview),
   //    so the Discord card can tell the team whether the lead is already there.
   let dialer = 'not connected';
+  let assignee: Assignee | undefined;
   if (preview) dialer = 'skipped: a preview lead';
   else if (!s.dialerUrl || !s.dialerKey) dialer = 'not connected';
   else if (!s.dialerOn) dialer = 'held: sending to the dialer is switched off';
@@ -232,17 +258,22 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
     const r = f.dialer_row_id ? await releaseInDialer(s, f.dialer_row_id, q, brief) : await pushToDialer(s, rec, q, brief);
     dialer = r.ok ? (r.outcome === 'already' ? 'already a lead in the dialer' : r.outcome === 'merged' ? 'already in the dialer: brief added' : 'moved to New in the dialer') : `failed: ${r.error}`;
     if (r.id) setRecordField(sourceId, key, 'dialer_lead_id', r.id);
+    assignee = r.assigned;
+    if (assignee) setRecordField(sourceId, key, 'dialer_assigned_to', assignee.name);
   }
   setRecordField(sourceId, key, 'dialer_status', dialer);
   const inDialer = /^(moved to New|already)/.test(dialer);
+  const first = assignee?.name.split(/\s+/)[0] || '';
   const dialerLine = inDialer
-    ? `In the dialer: ${dialer.replace(/ in the dialer$/, '')}. ${QUALIFY_REASON[q.reason].now ? 'Call now, or the dialer calls them.' : 'Call today, or the dialer calls them.'}`
+    ? assignee
+      ? `In the dialer: ${dialer.replace(/ in the dialer$/, '')}, assigned to ${assignee.name}. ${first}, ${QUALIFY_REASON[q.reason].now ? 'call now' : 'call today'}: they are in your leads.`
+      : `In the dialer: ${dialer.replace(/ in the dialer$/, '')}, not assigned to anyone yet. ${QUALIFY_REASON[q.reason].now ? 'Call now, or the dialer calls them.' : 'Call today, or the dialer calls them.'}`
     : `Not in the dialer (${dialer}): call from here.`;
 
   // 2. Discord (the team only).
   let discord = 'not connected';
   if (s.discordWebhook) {
-    const r = await postDiscord(s.discordWebhook, { title: `${preview ? '[TEST] ' : ''}${rec.name}: ${QUALIFY_REASON[q.reason].said}`, text: `${brief}\n\n${dialerLine}\nPhone: ${clean(q.phone || rec.phone, 30) || 'none'}${rec.email ? `\nEmail: ${rec.email}` : ''}\n${academy} · Thuso`, urgent: QUALIFY_REASON[q.reason].now, test: false });
+    const r = await postDiscord(s.discordWebhook, { title: `${preview ? '[TEST] ' : ''}${rec.name}: ${QUALIFY_REASON[q.reason].said}`, text: `${brief}\n\n${dialerLine}\nPhone: ${clean(q.phone || rec.phone, 30) || 'none'}${rec.email ? `\nEmail: ${rec.email}` : ''}\n${academy} · Thuso`, urgent: QUALIFY_REASON[q.reason].now, test: false, assignee });
     discord = r.ok ? 'sent' : `failed: ${r.error}`;
   }
 
@@ -251,7 +282,7 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
     const { stopRunsFor } = await import('@/lib/engine/agentRuns');
     stopRunsFor(rec.email, rec.key, `${rec.name} ${QUALIFY_REASON[q.reason].said}: handed to the sales team, so the nurturing emails stop.`, q.keepRunId);
   }
-  log('system', 'dispatch', `${preview ? '[preview] ' : ''}${rec.name} ${QUALIFY_REASON[q.reason].said} (${leadChannel(f)}). Qualified: Discord ${discord}; dialer ${dialer}.`);
+  log('system', 'dispatch', `${preview ? '[preview] ' : ''}${rec.name} ${QUALIFY_REASON[q.reason].said} (${leadChannel(f)}). Qualified: Discord ${discord}; dialer ${dialer}${assignee ? `, assigned to ${assignee.name}` : ''}.`);
   return { qualified: true, alreadyQualified: already, discord, dialer, brief };
 }
 

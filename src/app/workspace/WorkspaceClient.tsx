@@ -1095,13 +1095,13 @@ export default function WorkspaceClient() {
             <label className="switch" style={{ gridColumn: '1 / -1', alignItems: 'flex-start', lineHeight: 1.45 }}>
               <input
                 type="checkbox"
-                checked={Boolean(form.handoff?.reportOn)}
+                checked={form.handoff?.reportOn !== false}
                 onChange={(e) => updateField('handoff', { ...(form.handoff || {}), reportOn: e.target.checked })}
               />
               <i />
               <span style={{ display: 'block' }}>
                 <b style={{ color: 'var(--ink)' }}>Post the daily report in Discord</b><br />
-                Every weekday at 17:00, what happened since the last report. Check it with Preview first; then Save.
+                Every weekday at 17:00 (not on weekends): what happened since the last report. On unless you switch it off here.
               </span>
             </label>
           </div>

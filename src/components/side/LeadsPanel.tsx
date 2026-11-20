@@ -11,7 +11,7 @@ import { leadStage } from '@/lib/nurture/stage';
 interface LeadRow {
   key: string; name: string; programme: string; channel: string; score: number;
   engagement: 'cold' | 'warm' | 'hot'; qualified: boolean; optedOut: boolean; status: string;
-  sent: number; opens: number; clicks: number; lastClicked: string; fit: string; dialer: string;
+  sent: number; opens: number; clicks: number; lastClicked: string; fit: string; dialer: string; assignedTo?: string;
 }
 
 // The same stages as Lead Nurturing (one definition on the server).
@@ -88,7 +88,7 @@ export default function LeadsPanel() {
               {l.fit && <span>Quiz <b>{l.fit.split(' → ')[0]}</b></span>}
             </div>
             {(l.qualified && l.dialer) || l.lastClicked ? (
-              <div className="lrow-ev"><Icon name={l.qualified ? 'phoneCall' : 'activity'} size={12} />{l.qualified && l.dialer ? `Dialer: ${l.dialer}` : `Last opened ${l.lastClicked}`}</div>
+              <div className="lrow-ev"><Icon name={l.qualified ? 'phoneCall' : 'activity'} size={12} />{l.qualified && l.dialer ? `Dialer: ${l.dialer}${l.assignedTo ? ` · ${l.assignedTo} has them` : ''}` : `Last opened ${l.lastClicked}`}</div>
             ) : null}
           </a>
         );

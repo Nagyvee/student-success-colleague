@@ -58,7 +58,9 @@ export default function NurtureClient() {
           ? <Chip tone="warn"><Icon name="pause" size={12} /> Sending paused (test phase): messages stay in the Inbox</Chip>
           : data.liveOutreach ? <Chip tone="good"><Icon name="send" size={12} /> Live: messages are sent</Chip> : <Chip tone="warn">Safe Test Mode: messages stay in the Inbox</Chip>}
         <Chip tone={data.autopilot ? 'good' : 'muted'}><Icon name="zap" size={12} /> Autopilot {data.autopilot ? 'on: journeys start by themselves' : 'off: journeys start only when you press Run'}</Chip>
-        {data.leadsSource?.url ? <Chip tone="good"><Icon name="sheet" size={12} /> Leads sheet connected · {data.leadsSource.rows ?? 0} rows</Chip> : <Chip tone="warn"><Icon name="sheet" size={12} /> Leads sheet not connected</Chip>}
+        {data.leadsSource?.provider === 'dialer'
+          ? <Chip tone={data.leadsSource.lastError ? 'warn' : 'good'}><Icon name="phoneCall" size={12} /> Leads from the dialer · {data.funnel.total} in nurturing</Chip>
+          : data.leadsSource?.url ? <Chip tone="good"><Icon name="sheet" size={12} /> Leads sheet connected · {data.leadsSource.rows ?? 0} rows</Chip> : <Chip tone="warn"><Icon name="sheet" size={12} /> Leads sheet not connected</Chip>}
       </div>
       <Notice n={notice} onClose={clear} />
 
@@ -93,10 +95,12 @@ function Kpis({ data }: { data: Overview }) {
   const s = data.stats;
   const sends = s.librarySends + s.aiSends;
   const free = pct(s.librarySends, sends);
+  // The same stages and numbers as the Leads tab and the office's Leads drawer (each lead in one stage).
   const steps: { label: string; n: number; tone?: string }[] = [
-    { label: 'Leads', n: f.total }, { label: 'Contacted', n: f.contacted }, { label: 'Warm', n: f.warm + f.hot, tone: 'warm' },
-    { label: 'Hot', n: f.hot, tone: 'hot' }, { label: 'Applied', n: f.applied + f.enrolled, tone: 'good' }, { label: 'Enrolled', n: f.enrolled, tone: 'good' },
+    { label: 'Leads', n: f.total }, { label: 'Got a message', n: f.contacted }, { label: 'Warming up', n: f.warm, tone: 'warm' },
+    { label: 'Hot', n: f.hot, tone: 'hot' }, { label: 'Qualified', n: f.qualified ?? 0, tone: 'good' }, { label: 'Applied', n: f.applied + f.enrolled, tone: 'good' },
   ];
+  const did = data.did || { opened: s.opens, clicked: s.clicks, quiz: s.quizzes, video: s.videoViews, replied: 0 };
   const max = Math.max(1, f.total);
   return (
     <section className="nu-kpi-row">
@@ -111,7 +115,7 @@ function Kpis({ data }: { data: Overview }) {
             </div>
           ))}
         </div>
-        <p className="nu-kpi-foot">{f.quiz} took the career-fit quiz · {f.optedOut} unsubscribed</p>
+        <p className="nu-kpi-foot">{f.cold} not opened anything yet · {f.optedOut} unsubscribed</p>
       </div>
       <div className="nu-kpi nu-cost">
         <h3><Icon name="coins" size={14} /> What AI costs here</h3>
@@ -127,11 +131,12 @@ function Kpis({ data }: { data: Overview }) {
       <div className="nu-kpi nu-eng">
         <h3><Icon name="activity" size={14} /> What leads did</h3>
         <div className="nu-eng-grid">
-          <div><b>{s.opens}</b><span>opened</span></div>
-          <div><b>{s.clicks}</b><span>clicked</span></div>
-          <div><b>{s.quizzes}</b><span>took the quiz</span></div>
-          <div><b>{s.videoViews}</b><span>watched a video</span></div>
+          <div><b>{did.opened}</b><span>opened an email</span></div>
+          <div><b>{did.clicked}</b><span>clicked a link</span></div>
+          <div><b>{did.quiz}</b><span>took the quiz</span></div>
+          <div><b>{did.replied}</b><span>replied</span></div>
         </div>
+        <p className="nu-kpi-foot">People, each counted once{did.video ? ` · ${did.video} watched their video` : ''}</p>
       </div>
     </section>
   );

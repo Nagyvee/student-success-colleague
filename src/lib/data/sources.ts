@@ -5,7 +5,7 @@ import { getTenantIntegrations, updateTenantIntegrations } from '@/lib/auth/acco
 import { parseCsv, toCsvUrl } from '@/lib/lms/sheet';
 import { findSyncedLearnerByEmailOrId, mergeLearnerPatchByEmailOrId } from '@/lib/db/postgres';
 import { generateJSON, obj } from '@/lib/ai/llm';
-import { countRecords, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord, wasNurtured } from './records';
+import { countRecords, getRecord, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord, wasNurtured } from './records';
 import { daysUntil, isoDate, parseDate, parseMoney } from './conditions';
 import { leadProfile } from '@/lib/nurture/profile';
 
@@ -397,7 +397,7 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
 }
 
 /** The dialer's people waiting for Thuso (GET /api/v1/nurture), every page. */
-async function fetchNurturing(tenantId: string): Promise<{ id: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> }[]> {
+async function fetchNurturing(tenantId: string): Promise<{ id: string; kind?: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown> }[]> {
   const { dialerConnection } = await import('@/lib/nurture/qualify');
   const { url, key } = dialerConnection(tenantId);
   if (!url || !key) throw new Error('The dialer is not connected: add its address and API key in Channels & API → Qualified leads (or DIALER_URL and DIALER_API_KEY on the server).');
@@ -420,12 +420,15 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
   if (r.reading) return [];
   r.reading = true;
   try {
+    const startedAt = Date.now();
     const rows = await fetchNurturing(tenantId);
     const events: RecordEvent[] = [];
     const seen = new Set<string>();
     for (const row of rows) {
-      const headers = Object.keys(row.cells || {});
-      const values = headers.map((h) => String((row.cells as Record<string, unknown>)[h] ?? ''));
+      // A sheet row brings its columns; a lead the sales team moved to a nurturing stage brings its fields.
+      const cells = row.cells || row.values || {};
+      const headers = Object.keys(cells).filter((h) => cells[h] === null || typeof cells[h] !== 'object');
+      const values = headers.map((h) => String(cells[h] ?? ''));
       const rec = rowToRecord({ ...source, mapping: autoMap(headers) }, headers, values, 0);
       // The dialer's reading of the person: the name, number and email it will call and write to.
       const email = (row.email || rec.email || '').trim().toLowerCase();
@@ -439,7 +442,26 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
       rec.fields.agent_dialer_source = row.source || '';
       if (seen.has(rec.key)) continue;
       seen.add(rec.key);
+      // Back for nurturing: the team took them over (or Thuso handed them to sales) and later moved
+      // them to a nurturing stage in the dialer. They start again: not qualified, no points, the
+      // messages they already got are not sent twice.
+      const before = getRecord(source.id, rec.key);
+      const back = Boolean(before && (before.fields.dialer_left === 'yes'
+        // (handed over before this read began: a read already under way can still list someone just released)
+        || (before.fields.qualified === 'yes' && /^(moved to New|already)/.test(before.fields.dialer_status || '') && Date.parse(before.fields.qualified_at || '') < startedAt - 60_000)));
       const out = upsertRecord(source.id, rec);
+      if (back && before) {
+        const fresh: Record<string, string> = {
+          dialer_left: '', qualified: '', qualified_reason: '', status: 'new', dialer_status: '', dialer_assigned_to: '',
+          engagement_score: '0', engagement: 'cold', nurture_seen_before: before.fields.nurture_seen || '', nurture_seen: '',
+          back_for_nurturing_at: new Date().toISOString(),
+        };
+        for (const [k, v] of Object.entries(fresh)) setRecordField(source.id, rec.key, k, v);
+        const { log } = await import('@/lib/engine/store');
+        log('system', 'info', `${rec.name} is back for nurturing (moved to a nurturing stage in the dialer): Thuso starts again with them.`, { dept: 'admissions' });
+        events.push({ source, record: getRecord(source.id, rec.key) || out.record, kind: 'added', changed: [] });
+        continue;
+      }
       if (out.created) events.push({ source, record: out.record, kind: 'added', changed: [] });
       else if (out.changed.length) events.push({ source, record: out.record, kind: 'changed', changed: out.changed });
     }

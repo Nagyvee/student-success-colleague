@@ -86,7 +86,8 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
       value: qualified.length
         ? qualified.slice(0, 10).map((r) => {
           const reason = QUALIFY_REASON[r.fields.qualified_reason as QualifyReason]?.said || 'qualified';
-          return `• **${r.name}** ${reason}${r.fields.dialer_status ? ` · dialer: ${r.fields.dialer_status}` : ''}`;
+          const who = r.fields.dialer_assigned_to ? ` · ${r.fields.dialer_assigned_to.split(' ')[0]} has them` : '';
+          return `• **${r.name}** ${reason}${r.fields.dialer_status ? ` · dialer: ${r.fields.dialer_status}` : ''}${who}`;
         }).join('\n') + (qualified.length > 10 ? `\n…and ${qualified.length - 10} more` : '')
         : 'Nobody yet.',
     },
@@ -121,6 +122,11 @@ async function post(webhook: string, report: NurtureReport, preview: boolean): P
   }
 }
 
+/** The daily report posts unless it was switched off (Channels & API → Qualified leads). */
+export function reportSwitchedOn(tenantId = currentTenantId()): boolean {
+  return getTenantIntegrations(tenantId).handoff?.reportOn !== false;
+}
+
 /** Called once a minute by the always-on pump: posts the report when a weekday's 17:00 has come. */
 export async function maybeSendNurtureReport(tenantId = currentTenantId(), now = Date.now()): Promise<boolean> {
   const st = reportDoc.get(tenantId);
@@ -128,8 +134,8 @@ export async function maybeSendNurtureReport(tenantId = currentTenantId(), now =
   // First time: start counting from the most recent slot (no report for the past).
   if (!st.lastAt) { reportDoc.set({ lastAt: slot, stats: { ...meta(tenantId).stats } }, tenantId); return false; }
   if (slot <= st.lastAt) return false;
-  // Posting is a switch (Channels & API), off until someone has checked the preview.
-  const webhook = getTenantIntegrations(tenantId).handoff?.reportOn ? discordWebhook(tenantId) : '';
+  // Posting is a switch (Channels & API), on unless someone switched it off.
+  const webhook = reportSwitchedOn(tenantId) ? discordWebhook(tenantId) : '';
   const report = buildNurtureReport(st.lastAt, now, st.stats);
   // Not posting (switched off, or no Discord): the window still moves on, so the first post is never a huge backlog.
   if (webhook) {

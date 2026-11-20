@@ -44,8 +44,9 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
           <div>
             <h2><Icon name="users" size={16} /> Leads</h2>
             <p className="pg-sub">
-              Every open, click, quiz answer, video view and reply raises a lead&apos;s score. <b>Warm</b> means they are reading;
-              <b> hot</b> means they are deciding, and Zinhle gives them personal attention and asks a consultant to call.
+              Points: opening an email 1, a click 3, their video 4, the quiz 5, a reply 6 (each once per email). <b>Warming up</b> from 3 points:
+              they are reading. <b>Hot</b> from 8: they are deciding, so the team hears on Discord. <b>Qualified</b>: they said yes or asked
+              for a call, and the dialer has them. Open a lead to see where every point came from.
             </p>
           </div>
           <div className="nu-kpis">
@@ -75,7 +76,7 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
                     <td>{r.opens} · {r.clicks}</td>
                     <td>{r.sent}</td>
                     <td>{r.fit ? <span title={r.fit}>{r.fit.split('→')[0].trim()}</span> : <em>—</em>}</td>
-                    <td>{r.qualified && r.dialer ? <span title={`Dialer: ${r.dialer}`}>{r.status}{/^moved to New|^already/.test(r.dialer) ? ' · in the dialer' : ''}</span> : r.status}</td>
+                    <td>{r.qualified && r.dialer ? <span title={`Dialer: ${r.dialer}`}>{r.status}{/^moved to New|^already/.test(r.dialer) ? ` · in the dialer${r.assignedTo ? `, ${r.assignedTo.split(' ')[0]}` : ''}` : ''}</span> : r.status}</td>
                     <td>{ago(r.lastEngagedAt) || ago(r.firstSeenAt)}</td>
                   </tr>
                 ))}
@@ -94,6 +95,7 @@ interface LeadDetail {
   fields: Record<string, string>;
   got: string[];
   runs: { id: string; agentName: string; workflowName: string; status: string; startedAt: number; resumeAt: number | null; logs: AgentRunLog[] }[];
+  points?: { items: { label: string; points: number; kind: string }[]; other: number; score: number };
 }
 
 function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey: string; onClose: () => void; notify: (k: 'ok' | 'bad', t: string) => void; onChanged: () => Promise<void>; canManage: boolean }) {
@@ -131,6 +133,7 @@ function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey
             </dl>
           </div>
           {said && <blockquote className="nu-said"><Icon name="chat" size={13} /> “{said.slice(0, 400)}”</blockquote>}
+          {d.points && <Points p={d.points} />}
           <div className="nu-lead-cols">
             <div>
               <h4>Messages they got ({d.got.length})</h4>
@@ -149,6 +152,23 @@ function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Where a lead's points came from: one line per action, then the total. */
+function Points({ p }: { p: NonNullable<LeadDetail['points']> }) {
+  const next = p.score >= 8 ? '' : p.score >= 3 ? ` · ${8 - p.score} more to be hot` : ` · ${3 - p.score} more to be warming up`;
+  return (
+    <div className="nu-points">
+      <h4>Where the {p.score} point{p.score === 1 ? '' : 's'} came from</h4>
+      {p.items.length || p.other ? (
+        <ul>
+          {p.items.map((x, i) => <li key={i}><span>{x.label}</span><b>+{x.points}</b></li>)}
+          {p.other > 0 && <li className="is-other"><span>Earlier activity (opens, clicks, the quiz or replies recorded before 20 Nov)</span><b>+{p.other}</b></li>}
+          <li className="is-total"><span>Total{next}</span><b>{p.score}</b></li>
+        </ul>
+      ) : <p className="nu-hint">No points yet: they have not opened or clicked anything we sent.</p>}
+    </div>
   );
 }
 

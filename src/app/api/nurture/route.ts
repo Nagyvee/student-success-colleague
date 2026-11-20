@@ -17,7 +17,7 @@ import { liveAllowed, sendingPaused } from '@/lib/email/pause';
 import { LEADS_SOURCE_ID, getSource, liveFields, readSource, saveSource } from '@/lib/data/sources';
 import { getRecord, listRecords, upsertRecord } from '@/lib/data/records';
 import { meta, metaDoc } from '@/lib/nurture/store';
-import { addLink, addNote, deleteResource, importWhatsApp, importYouTube, listResources, updateResource } from '@/lib/nurture/bank';
+import { addLink, addNote, deleteResource, getResource, importWhatsApp, importYouTube, listResources, updateResource } from '@/lib/nurture/bank';
 import { approveMessage, deleteMessage, getMessage, listMessages, previewMessage, resolveMessage, saveMessage, sendLibraryMessage, setMessageStatus, writeLibraryMessage, writeStarterSet } from '@/lib/nurture/library';
 import { cancelCampaign, campaignSender, createCampaign, listCampaigns, segmentMembers } from '@/lib/nurture/campaigns';
 import { buildFitQuiz, ensureFitQuiz } from '@/lib/nurture/fit';
@@ -25,7 +25,7 @@ import { leadChannel } from '@/lib/nurture/qualify';
 import { leadStage, type LeadStage } from '@/lib/nurture/stage';
 import { buildMissingVideos, buildProgrammeVideo, listVideos } from '@/lib/nurture/video';
 import { leadProgramme, programmeList } from '@/lib/nurture/programmes';
-import { engagementFor, signTrack } from '@/lib/nurture/track';
+import { engagementFor, pointsOf, signTrack, type PointItem } from '@/lib/nurture/track';
 import { checkReplies, setWatch, watchStatus } from '@/lib/email/watch';
 import { buildSampleJourney } from '@/lib/nurture/sample';
 import { deleteMedia, listMedia, mediaUrl, updateMedia } from '@/lib/nurture/media';
@@ -56,8 +56,23 @@ function leadRow(r: DataRecord) {
     opens: Number(f.nurture_opens || 0), clicks: Number(f.nurture_clicks || 0), sent: Number(f.nurture_count || 0),
     lastClicked: f.last_clicked || '', fit: f.fit_track ? `${f.fit_track} → ${f.fit_programme}` : '', optedOut: f.opted_out === 'yes',
     firstSeenAt: r.firstSeenAt, lastEngagedAt: f.last_engaged_at || '',
-    qualified: f.qualified === 'yes', channel: leadChannel(f), dialer: f.dialer_status || '',
+    qualified: f.qualified === 'yes', channel: leadChannel(f), dialer: f.dialer_status || '', assignedTo: f.dialer_assigned_to || '',
   };
+}
+
+const CLICKED: Record<string, string> = { enrol: 'Yes, I want to enrol', call: 'Call me', apply: 'Start the application', quiz: 'the career-fit quiz', video: 'their programme video', reply: 'Reply', resource: 'a resource' };
+
+/** One line per point a lead earned: "Clicked \"Call me\" in Gentle check-in", +3. */
+function pointLine(p: PointItem): string {
+  const msg = p.message.startsWith('msg_') ? getMessage(p.message)?.name : '';
+  const inMsg = msg ? ` in "${msg}"` : '';
+  if (p.kind === 'open') return `Opened ${msg ? `"${msg}"` : 'an email'}`;
+  if (p.kind === 'quiz') return 'Took the career-fit quiz';
+  if (p.kind === 'video') return 'Watched their programme video';
+  if (p.kind === 'reply') return 'Replied to us';
+  const res = p.target.startsWith('res_') ? getResource(p.target)?.title : '';
+  const label = res || CLICKED[p.target] || 'a link';
+  return `Clicked "${label}"${inMsg}`;
 }
 
 /** A lead's stage, the same everywhere (Lead Nurturing, the office's Leads drawer, the counts):
@@ -86,6 +101,16 @@ function overview(manager: boolean, role: string) {
     optedOut: rows.filter((r) => r.optedOut).length,
     quiz: rows.filter((r) => r.fit).length,
   };
+  // What leads did: people, counted from each lead's own record (so the boxes, the funnel and the
+  // Leads list always agree). Each action counts once per lead.
+  const seen = (r: DataRecord, kind: string) => (r.fields.nurture_seen || '').split('|').some((k) => k.startsWith(`${kind}:`));
+  const did = {
+    opened: rows.filter((r) => r.opens > 0).length,
+    clicked: rows.filter((r) => r.clicks > 0 || r.lastClicked).length,
+    quiz: leads.filter((r) => r.fields.fit_done === 'yes' || r.fields.fit_track).length,
+    video: leads.filter((r) => seen(r, 'video')).length,
+    replied: leads.filter((r) => r.fields.replied === 'yes' || seen(r, 'reply')).length,
+  };
   const m = meta();
   const src = getSource(LEADS_SOURCE_ID);
   const ti = getTenantIntegrations(currentTenantId());
@@ -95,8 +120,9 @@ function overview(manager: boolean, role: string) {
     role, canManage: manager,
     stats: m.stats,
     funnel,
+    did,
     programmes: programmeList(),
-    leadsSource: src ? { id: src.id, name: src.name, url: src.url, rows: src.rows, lastReadAt: src.lastReadAt, lastError: src.lastError, columns: src.columns || [] } : null,
+    leadsSource: src ? { id: src.id, name: src.name, url: src.url, rows: src.rows, lastReadAt: src.lastReadAt, lastError: src.lastError, columns: src.columns || [], provider: src.provider || 'sheet' } : null,
     messages: listMessages(),
     resources: listResources().map((r) => ({ ...r, text: r.text ? r.text.slice(0, 1600) : undefined })),
     campaigns: listCampaigns().map(({ queue, ...c }) => ({ ...c, left: queue.length })),
@@ -173,7 +199,9 @@ export async function GET(req: Request) {
       const got = (f.nurture_sent || '').split('|').filter(Boolean).map((id) => getMessage(id)?.name || 'A message that was deleted');
       const runs = listAgentRuns({ limit: 300 }).filter((r) => r.record.key === rec.key).slice(0, 10)
         .map((r) => ({ id: r.id, agentName: r.agentName, workflowName: r.workflowName, status: r.status, startedAt: r.startedAt, resumeAt: r.resumeAt, logs: r.logs.slice(-12) }));
-      return NextResponse.json({ lead: leadRow(rec), fields: f, got, runs });
+      const pts = pointsOf(f);
+      const points = { items: pts.items.map((p) => ({ label: pointLine(p), points: p.points, kind: p.kind })), other: pts.other, score: pts.score };
+      return NextResponse.json({ lead: leadRow(rec), fields: f, got, runs, points });
     }
 
     return NextResponse.json(overview(manager, session.role));

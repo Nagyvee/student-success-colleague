@@ -11,7 +11,7 @@ export interface LeadRow {
   programme: string; interest: string; source: string; status: string;
   engagement: 'cold' | 'warm' | 'hot'; score: number; opens: number; clicks: number; sent: number;
   lastClicked: string; fit: string; optedOut: boolean; firstSeenAt: number; lastEngagedAt: string;
-  qualified?: boolean; channel?: string; dialer?: string;
+  qualified?: boolean; channel?: string; dialer?: string; assignedTo?: string;
 }
 
 export interface NurtureAgent {
@@ -26,8 +26,10 @@ export interface Overview {
   canManage: boolean;
   stats: NurtureStats;
   funnel: { total: number; contacted: number; cold: number; warm: number; hot: number; qualified: number; applied: number; enrolled: number; optedOut: number; quiz: number };
+  /** People who did each thing (from the leads' own records). */
+  did?: { opened: number; clicked: number; quiz: number; video: number; replied: number };
   programmes: string[];
-  leadsSource: { id: string; name: string; url: string; rows?: number; lastReadAt?: number | null; lastError?: string | null; columns: string[] } | null;
+  leadsSource: { id: string; name: string; url: string; rows?: number; lastReadAt?: number | null; lastError?: string | null; columns: string[]; provider?: 'sheet' | 'dialer' } | null;
   messages: NurtureMessage[];
   resources: NurtureResource[];
   campaigns: (Omit<NurtureCampaign, 'queue'> & { left: number })[];
