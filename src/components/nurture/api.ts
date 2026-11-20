@@ -11,7 +11,7 @@ export interface LeadRow {
   programme: string; interest: string; source: string; status: string;
   engagement: 'cold' | 'warm' | 'hot'; score: number; opens: number; clicks: number; sent: number;
   lastClicked: string; fit: string; optedOut: boolean; firstSeenAt: number; lastEngagedAt: string;
-  qualified?: boolean; channel?: string; dialer?: string; assignedTo?: string;
+  qualified?: boolean; channel?: string; dialer?: string; assignedTo?: string; inDialer?: boolean; dialerStage?: string;
 }
 
 export interface NurtureAgent {

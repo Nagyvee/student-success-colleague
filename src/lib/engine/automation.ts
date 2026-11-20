@@ -46,7 +46,7 @@ const SWEEP_GOAL = 'Weekly sweep: check every cohort and get every learner who i
 const SWEEP_DAY = 1;      // Monday
 const SWEEP_HOUR = 7;     // 07:00, server time (SAST)
 
-type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean };
+type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number };
 const g = globalThis as unknown as { __ssAutoMap?: Map<string, Hub>; __ssTimer?: ReturnType<typeof setInterval> | null; __thusoBoot?: Promise<void> };
 
 function hub(tenantId = currentTenantId()): Hub {
@@ -298,6 +298,11 @@ function tick() {
       }).catch(() => { /* next start */ });
     }
     resumeDueRuns();
+    // Thuso and the dialer in step: every qualified lead is there; applied and enrolled come back (every 30 minutes).
+    if (!h.lastDialerSync || Date.now() - h.lastDialerSync >= 30 * 60_000) {
+      h.lastDialerSync = Date.now();
+      void import('@/lib/nurture/pipeline').then((p) => p.dialerUpkeep(tid)).catch(() => { /* next time */ });
+    }
     if (!h.lastSourcePoll || Date.now() - h.lastSourcePoll >= 5000) {
       h.lastSourcePoll = Date.now();
       void pollSources().then((events) => dispatchRecordEvents(events)).catch(() => { /* status is on the source */ });

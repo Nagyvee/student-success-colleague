@@ -123,7 +123,7 @@ export function dialerConnection(tenantId = currentTenantId()): { url: string; k
 /** Who in the sales team the dialer gave a lead to (their Discord ID or username when the dialer has it). */
 export interface Assignee { id: string; name: string; discord?: string }
 
-type DialerReply = { ok: boolean; outcome?: string; id?: string; error?: string; assigned?: Assignee };
+type DialerReply = { ok: boolean; outcome?: string; id?: string; error?: string; assigned?: Assignee; stage?: string; was?: string; missing?: boolean };
 type AssignedJson = { assigned_to?: { id?: unknown; name?: unknown; discord_id?: unknown } | null };
 
 function assigneeOf(j: AssignedJson): Assignee | undefined {
@@ -151,10 +151,78 @@ async function releaseInDialer(s: ReturnType<typeof handoffSettings>, rowId: str
     });
     const j = (await res.json().catch(() => ({}))) as AssignedJson & { ok?: boolean; outcome?: string; lead_id?: string; lead?: { id?: string }; error?: string };
     if (!res.ok || !j.ok) return { ok: false, error: j.error || `HTTP ${res.status}` };
-    return { ok: true, outcome: j.outcome, id: j.lead?.id || j.lead_id, assigned: assigneeOf(j) };
+    // Released: it left the waiting list for New (unless it was in already, or joined a lead).
+    return { ok: true, outcome: j.outcome === 'already' || j.outcome === 'merged' ? j.outcome : 'released', id: j.lead?.id || j.lead_id, assigned: assigneeOf(j) };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+}
+
+/** Hands a qualified lead to the sales team in the dialer (POST /api/v1/handoff): released if it waits for
+ *  Thuso, added if new, back to New and given out fairly if it sat where nothing happens (voicemail, lost,
+ *  an old New), left with whoever is working it otherwise. `missing` when the dialer is older than this. */
+async function handOverInDialer(s: ReturnType<typeof handoffSettings>, rec: Pick<DataRecord, 'name' | 'email' | 'phone' | 'fields'>, q: QualifyInput, brief: string, qualifiedAt: string): Promise<DialerReply> {
+  const f = rec.fields;
+  try {
+    const res = await fetch(`${s.dialerUrl}/api/v1/handoff`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${s.dialerKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        row_id: f.dialer_row_id || undefined, lead_id: f.dialer_lead_id || undefined,
+        name: rec.name, phone: clean(q.phone || rec.phone, 30) || undefined, email: rec.email || undefined,
+        source: leadChannel(f), programme: leadProgramme(f) || undefined,
+        notes: brief, source_detail: `Thuso qualified: ${QUALIFY_REASON[q.reason].said}`.slice(0, 200),
+        qualified_at: qualifiedAt,
+      }),
+      signal: AbortSignal.timeout(25000),
+      cache: 'no-store',
+    });
+    if (res.status === 404) {
+      const j404 = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!j404.error) return { ok: false, missing: true, error: 'the dialer does not have the hand-over update yet' };
+      return { ok: false, error: j404.error };
+    }
+    const j = (await res.json().catch(() => ({}))) as AssignedJson & { ok?: boolean; outcome?: string; lead_id?: string; stage?: string | null; was?: string | null; error?: string };
+    if (!res.ok || !j.ok) return { ok: false, error: j.error || `HTTP ${res.status}` };
+    return { ok: true, outcome: j.outcome, id: j.lead_id || undefined, assigned: assigneeOf(j), stage: j.stage || undefined, was: j.was || undefined };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** What the dialer did with a qualified lead, in words (the leads list, the Discord card, the report). */
+export function dialerWords(r: DialerReply): string {
+  if (!r.ok) return `failed: ${r.error}`;
+  switch (r.outcome) {
+    case 'released': return 'moved to New in the dialer';
+    case 'created': return 'added to the dialer as a new lead';
+    case 'reset': return `moved back to New in the dialer${r.was ? ` (was in ${r.was})` : ''}`;
+    case 'kept': return `already with the sales team in the dialer${r.stage ? ` (${r.stage})` : ''}: brief added`;
+    case 'enrolled': return 'already enrolled in the dialer';
+    case 'merged': return 'already in the dialer: brief added';
+    case 'already': return 'already a lead in the dialer';
+    default: return 'moved to New in the dialer';
+  }
+}
+
+/** Puts a qualified lead in the dialer and remembers what happened on their record. */
+export async function sendToDialer(sourceId: string, key: string, q: QualifyInput, brief: string, tenantId = currentTenantId()): Promise<{ words: string; reply: DialerReply }> {
+  const rec = getRecord(sourceId, key);
+  if (!rec) return { words: 'skipped: no such lead', reply: { ok: false, error: 'no such lead' } };
+  const s = handoffSettings(tenantId);
+  const qualifiedAt = rec.fields.qualified_at || new Date().toISOString();
+  let r = await handOverInDialer(s, rec, q, brief, qualifiedAt);
+  // A dialer without the hand-over yet: the older calls (release a waiting row, or add the lead).
+  if (r.missing) r = rec.fields.dialer_row_id ? await releaseInDialer(s, rec.fields.dialer_row_id, q, brief) : await pushToDialer(s, rec, q, brief);
+  const words = dialerWords(r);
+  setRecordField(sourceId, key, 'dialer_status', words);
+  setRecordField(sourceId, key, 'dialer_in', r.ok ? 'yes' : '');
+  if (r.ok) setRecordField(sourceId, key, 'dialer_handed_over', 'yes');
+  setRecordField(sourceId, key, 'dialer_sent_at', new Date().toISOString());
+  if (r.id) setRecordField(sourceId, key, 'dialer_lead_id', r.id);
+  if (r.stage) setRecordField(sourceId, key, 'dialer_stage', r.stage);
+  if (r.assigned) setRecordField(sourceId, key, 'dialer_assigned_to', r.assigned.name);
+  return { words, reply: r };
 }
 
 /** The team's Discord webhook (Settings, else DISCORD_LEADS_WEBHOOK), or ''. */
@@ -254,20 +322,18 @@ export async function qualifyLead(sourceId: string, key: string, q: QualifyInput
   else if (!s.dialerOn) dialer = 'held: sending to the dialer is switched off';
   else if (!liveAllowed(getTenantIntegrations(tenantId).liveOutreachEnabled)) dialer = sendingPaused() ? 'held: test phase (sending is paused on this server)' : 'held: Live Outreach is off';
   else {
-    // Held in the dialer for Thuso: release it there; otherwise (a lead from elsewhere) add it.
-    const r = f.dialer_row_id ? await releaseInDialer(s, f.dialer_row_id, q, brief) : await pushToDialer(s, rec, q, brief);
-    dialer = r.ok ? (r.outcome === 'already' ? 'already a lead in the dialer' : r.outcome === 'merged' ? 'already in the dialer: brief added' : 'moved to New in the dialer') : `failed: ${r.error}`;
-    if (r.id) setRecordField(sourceId, key, 'dialer_lead_id', r.id);
-    assignee = r.assigned;
-    if (assignee) setRecordField(sourceId, key, 'dialer_assigned_to', assignee.name);
+    // Every qualified lead ends up in the dialer (released, added, or back to New), with the brief.
+    const sent = await sendToDialer(sourceId, key, q, brief, tenantId);
+    dialer = sent.words;
+    assignee = sent.reply.assigned;
   }
-  setRecordField(sourceId, key, 'dialer_status', dialer);
-  const inDialer = /^(moved to New|already)/.test(dialer);
+  if (!/^(moved|already|added|failed)/.test(dialer)) setRecordField(sourceId, key, 'dialer_status', dialer);
+  const inDialer = /^(moved|already|added)/.test(dialer);
   const first = assignee?.name.split(/\s+/)[0] || '';
   const dialerLine = inDialer
     ? assignee
-      ? `In the dialer: ${dialer.replace(/ in the dialer$/, '')}, assigned to ${assignee.name}. ${first}, ${QUALIFY_REASON[q.reason].now ? 'call now' : 'call today'}: they are in your leads.`
-      : `In the dialer: ${dialer.replace(/ in the dialer$/, '')}, not assigned to anyone yet. ${QUALIFY_REASON[q.reason].now ? 'Call now, or the dialer calls them.' : 'Call today, or the dialer calls them.'}`
+      ? `In the dialer: ${dialer.replace(/ in the dialer/, '')}, assigned to ${assignee.name}. ${first}, ${QUALIFY_REASON[q.reason].now ? 'call now' : 'call today'}: they are in your leads.`
+      : `In the dialer: ${dialer.replace(/ in the dialer/, '')}, not assigned to anyone yet. ${QUALIFY_REASON[q.reason].now ? 'Call now, or the dialer calls them.' : 'Call today, or the dialer calls them.'}`
     : `Not in the dialer (${dialer}): call from here.`;
 
   // 2. Discord (the team only).

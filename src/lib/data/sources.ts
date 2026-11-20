@@ -448,11 +448,12 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
       const before = getRecord(source.id, rec.key);
       const back = Boolean(before && (before.fields.dialer_left === 'yes'
         // (handed over before this read began: a read already under way can still list someone just released)
-        || (before.fields.qualified === 'yes' && /^(moved to New|already)/.test(before.fields.dialer_status || '') && Date.parse(before.fields.qualified_at || '') < startedAt - 60_000)));
+        || (before.fields.qualified === 'yes' && (before.fields.dialer_in === 'yes' || /^(moved|already|added)/.test(before.fields.dialer_status || '')) && Date.parse(before.fields.qualified_at || '') < startedAt - 60_000)));
       const out = upsertRecord(source.id, rec);
       if (back && before) {
         const fresh: Record<string, string> = {
           dialer_left: '', qualified: '', qualified_reason: '', status: 'new', dialer_status: '', dialer_assigned_to: '',
+          dialer_in: '', dialer_handed_over: '', dialer_stage: '', dialer_pipeline: '',
           engagement_score: '0', engagement: 'cold', nurture_seen_before: before.fields.nurture_seen || '', nurture_seen: '',
           back_for_nurturing_at: new Date().toISOString(),
         };

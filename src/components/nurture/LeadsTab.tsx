@@ -76,7 +76,7 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
                     <td>{r.opens} · {r.clicks}</td>
                     <td>{r.sent}</td>
                     <td>{r.fit ? <span title={r.fit}>{r.fit.split('→')[0].trim()}</span> : <em>—</em>}</td>
-                    <td>{r.qualified && r.dialer ? <span title={`Dialer: ${r.dialer}`}>{r.status}{/^moved to New|^already/.test(r.dialer) ? ` · in the dialer${r.assignedTo ? `, ${r.assignedTo.split(' ')[0]}` : ''}` : ''}</span> : r.status}</td>
+                    <td>{r.qualified || r.inDialer ? <DialerCell r={r} /> : r.status}</td>
                     <td>{ago(r.lastEngagedAt) || ago(r.firstSeenAt)}</td>
                   </tr>
                 ))}
@@ -153,6 +153,13 @@ function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey
       )}
     </Modal>
   );
+}
+
+/** A handed-over lead: where they are in the dialer and who has them, or why they are not there. */
+function DialerCell({ r }: { r: LeadRow }) {
+  if (!r.inDialer) return <span className="nu-dialer is-out" title={r.dialer ? `Dialer: ${r.dialer}` : undefined}>{r.status} · not in the dialer yet</span>;
+  const who = r.assignedTo ? r.assignedTo.split(' ')[0] : 'nobody yet';
+  return <span className="nu-dialer" title={`Dialer: ${r.dialer}`}>{/^(applied|enrolled)$/i.test(r.status) ? r.status : `Dialer: ${r.dialerStage || 'in'}`} · {who}</span>;
 }
 
 /** Where a lead's points came from: one line per action, then the total. */

@@ -57,6 +57,7 @@ function leadRow(r: DataRecord) {
     lastClicked: f.last_clicked || '', fit: f.fit_track ? `${f.fit_track} → ${f.fit_programme}` : '', optedOut: f.opted_out === 'yes',
     firstSeenAt: r.firstSeenAt, lastEngagedAt: f.last_engaged_at || '',
     qualified: f.qualified === 'yes', channel: leadChannel(f), dialer: f.dialer_status || '', assignedTo: f.dialer_assigned_to || '',
+    inDialer: f.dialer_in === 'yes' || /^(moved|already|added)/.test(f.dialer_status || ''), dialerStage: f.dialer_stage || '',
   };
 }
 

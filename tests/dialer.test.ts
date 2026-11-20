@@ -27,6 +27,10 @@ const T = <R>(fn: () => Promise<R> | R) => m.ctx.withTenant('default', fn);
 const queue: Record<string, unknown>[] = [];
 const released: { id: string; body: Record<string, unknown> }[] = [];
 const discordPosts: Record<string, unknown>[] = [];
+// The dialer's hand-over API (off until a test turns it on: the earlier tests use the older calls).
+let handoffApi = false;
+const handoffs: Record<string, unknown>[] = [];
+const pipeline: Record<string, unknown>[] = [];
 const realFetch = globalThis.fetch;
 
 const row = (id: string, cells: Record<string, string>, extra: Record<string, string> = {}) => ({
@@ -43,6 +47,16 @@ before(async () => {
     if (u.host !== 'dialer.example.test') return realFetch(input, init);
     if (u.pathname === '/api/v1/nurture') {
       return new Response(JSON.stringify({ ok: true, rows: queue, total: queue.length, page: 1, per: 500 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (handoffApi && u.pathname === '/api/v1/handoff' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body || '{}'));
+      handoffs.push(body);
+      return new Response(JSON.stringify({ ok: true, outcome: 'reset', lead_id: '11111111-1111-4111-8111-111111111111', stage: 'New Lead', was: 'Voicemail',
+        assigned_to: { id: 'ag-2', name: 'Siphumezo Vuke', discord_id: '223456789012345678' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (handoffApi && u.pathname === '/api/v1/handoff/status' && init?.method === 'POST') {
+      const ids = (JSON.parse(String(init.body || '{}')).ids || []) as string[];
+      return new Response(JSON.stringify({ ok: true, leads: pipeline.filter((p) => ids.includes(String(p.id))) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     const rel = /^\/api\/v1\/nurture\/([^/]+)\/release$/.exec(u.pathname);
     if (rel && init?.method === 'POST') {
@@ -144,4 +158,59 @@ test('someone the team moves back to a nurturing stage in the dialer starts agai
   assert.equal(thandi.qualified, '');
   assert.equal(thandi.engagement_score, '0');
   assert.equal(thandi.dialer_assigned_to, '');
+}));
+
+test('every qualified lead ends up in the dialer: one qualified before the hand-over goes back to New there, and the team hears who has it', () => T(async () => {
+  const { catchUpQualified } = await import('../src/lib/nurture/pipeline');
+  handoffApi = true;
+  // Like Rhass: qualified yesterday, already a lead in the dialer (with someone, in voicemail); only the brief was added.
+  m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key: 'rhass@example.com', name: 'Rhass Bagani', email: 'rhass@example.com', phone: '+27721884622', fields: { platform: 'ig' } });
+  for (const [k, v] of Object.entries({ qualified: 'yes', qualified_reason: 'ready', qualified_at: '2026-11-19T14:03:00.000Z', dialer_status: 'already in the dialer: brief added', lead_brief_sales: 'Thuso qualified: Rhass Bagani replied that they want to sign up. Call immediately.' })) {
+    m.rec.setRecordField(m.src.LEADS_SOURCE_ID, 'rhass@example.com', k, v);
+  }
+  process.env.SENDING_PAUSED = 'false';
+  const before = discordPosts.length;
+  const done = await catchUpQualified('default');
+  process.env.SENDING_PAUSED = 'true';
+  assert.deepEqual(done.map((d) => d.name), ['Rhass Bagani'], 'only the lead not handed over yet');
+  const sent = handoffs.at(-1)!;
+  assert.equal(sent.phone, '+27721884622');
+  assert.equal(sent.qualified_at, '2026-11-19T14:03:00.000Z', 'the dialer only keeps an owner given the lead after this');
+  assert.match(String(sent.notes), /^Thuso qualified: Rhass Bagani replied/);
+  const f = m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'rhass@example.com')!.fields;
+  assert.equal(f.dialer_status, 'moved back to New in the dialer (was in Voicemail)');
+  assert.equal(f.dialer_assigned_to, 'Siphumezo Vuke');
+  assert.equal(f.dialer_in, 'yes');
+  assert.equal(f.dialer_lead_id, '11111111-1111-4111-8111-111111111111');
+  // One Discord message for the team, pinging whoever has each lead.
+  assert.equal(discordPosts.length, before + 1);
+  const post = discordPosts.at(-1) as { content: string; allowed_mentions: { users: string[] } };
+  assert.match(post.content, /Qualified leads now in the dialer/);
+  assert.match(post.content, /Rhass Bagani\*\* → <@223456789012345678>/);
+  assert.deepEqual(post.allowed_mentions.users, ['223456789012345678']);
+  // Next time: nothing to do.
+  process.env.SENDING_PAUSED = 'false';
+  assert.deepEqual(await catchUpQualified('default'), []);
+  process.env.SENDING_PAUSED = 'true';
+}));
+
+test('applied and enrolled come back from the dialer; never backwards', () => T(async () => {
+  const { readPipeline } = await import('../src/lib/nurture/pipeline');
+  handoffApi = true;
+  pipeline.push({ id: '11111111-1111-4111-8111-111111111111', stage: 'Registration page', status: 'applied', assigned_to: { id: 'ag-2', name: 'Siphumezo Vuke' } });
+  assert.equal(await readPipeline('default'), 1);
+  let f = m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'rhass@example.com')!.fields;
+  assert.equal(f.status, 'applied');
+  assert.ok(f.applied_at);
+  assert.equal(f.dialer_stage, 'Registration page');
+  // Moved back a stage in the dialer: still applied here.
+  pipeline[0] = { ...pipeline[0], stage: 'Documents requested', status: 'with_sales' };
+  assert.equal(await readPipeline('default'), 0);
+  f = m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'rhass@example.com')!.fields;
+  assert.equal(f.status, 'applied');
+  assert.equal(f.dialer_stage, 'Documents requested');
+  // Won: enrolled.
+  pipeline[0] = { ...pipeline[0], stage: 'Enrolled', status: 'enrolled' };
+  assert.equal(await readPipeline('default'), 1);
+  assert.equal(m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'rhass@example.com')!.fields.status, 'enrolled');
 }));
