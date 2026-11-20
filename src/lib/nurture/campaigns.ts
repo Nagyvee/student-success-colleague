@@ -2,7 +2,7 @@ import type { DataRecord, StepCondition } from '@/lib/types';
 import type { NurtureCampaign } from './types';
 import { campaignDoc, nid } from './store';
 import { fitsFunding, isLive, resolveMessage, resolveMessage as getMessage, sendLibraryMessage } from './library';
-import { listRecords, getRecord } from '@/lib/data/records';
+import { listRecords, getRecord, setRecordField } from '@/lib/data/records';
 import { LEADS_SOURCE_ID, liveFields } from '@/lib/data/sources';
 import { matchesAll } from '@/lib/data/conditions';
 import { leadProgramme } from './programmes';
@@ -101,7 +101,7 @@ const busy = (g.__thusoCampaignBusy ??= new Set());
 /** Send the next few messages of every due campaign. Called by the always-on pump. */
 export async function pumpCampaigns(tenantId = currentTenantId()): Promise<void> {
   if (busy.has(tenantId)) return;
-  const due = campaignDoc.get(tenantId).filter((c) => (c.status === 'scheduled' && c.sendAt <= Date.now()) || c.status === 'sending');
+  const due = campaignDoc.get(tenantId).filter((c) => ((c.status === 'scheduled' && c.sendAt <= Date.now()) || c.status === 'sending') && !(c.pausedUntil && c.pausedUntil > Date.now()));
   if (!due.length) return;
   busy.add(tenantId);
   try {
@@ -119,11 +119,25 @@ export async function pumpCampaigns(tenantId = currentTenantId()): Promise<void>
         const rec = getRecord(c.sourceId, key);
         if (!rec || rec.fields.opted_out === 'yes' || (rec.fields.nurture_sent || '').split('|').includes(msg.id)) { c.skipped++; continue; }
         const r = await sendLibraryMessage({ rec, msg, sender, taskId: c.id });
-        if (r.skipped) c.skipped++;
-        else if (r.ok) c.sent++;
-        else c.failed++;
+        if (r.skipped) { c.skipped++; continue; }
+        if (r.ok) { c.sent++; continue; }
+        // The mail server said "not now": this lead waits at the front, and the campaign pauses.
+        if (r.throttled) {
+          c.queue.unshift(key);
+          const { isDailyLimit } = await import('@/lib/email/send');
+          const wait = isDailyLimit(r.error) ? 60 * 60_000 : 10 * 60_000;
+          c.pausedUntil = Date.now() + wait;
+          c.lastError = r.error;
+          log('system', 'info', `Campaign "${c.name}" paused for ${wait / 60_000} minutes: the mail server asked us to slow down (${(r.error || '').slice(0, 160)}). It carries on by itself.`);
+          break;
+        }
+        c.failed++;
+        c.lastError = r.error || r.detail;
+        (c.failedKeys ||= []).push(key);
+        if (c.failedKeys.length > 5000) c.failedKeys.splice(0, c.failedKeys.length - 5000);
       }
-      if (!c.queue.length) {
+      if (!c.queue.length && !(c.pausedUntil && c.pausedUntil > Date.now())) {
+        c.pausedUntil = undefined;
         c.status = 'done';
         c.finishedAt = Date.now();
         log('system', 'approve', `Campaign "${c.name}" finished: ${c.sent} sent, ${c.skipped} skipped${c.failed ? `, ${c.failed} failed` : ''}.`);
@@ -133,4 +147,43 @@ export async function pumpCampaigns(tenantId = currentTenantId()): Promise<void>
   } finally {
     busy.delete(tenantId);
   }
+}
+
+/**
+ * Send a campaign again to the leads it could not reach. A campaign from
+ * before Thuso kept that list: its message was wrongly remembered as received
+ * by everyone it was tried on, so the leads who have it but never had an email
+ * delivered since it started are taken as not reached (their record is
+ * corrected first). Returns how many are queued.
+ */
+export function retryCampaign(id: string): number {
+  const c = campaignDoc.get().find((x) => x.id === id);
+  if (!c || c.status === 'scheduled' || c.status === 'sending' || !c.failed) return 0;
+  let keys = [...new Set(c.failedKeys || [])];
+  if (!c.failedKeys) {
+    const started = c.sendAt || c.createdAt;
+    for (const r of listRecords(c.sourceId)) {
+      const sent = (r.fields.nurture_sent || '').split('|').filter(Boolean);
+      if (!sent.includes(c.messageId) || r.fields.preview === 'yes') continue;
+      const delivered = Date.parse(r.fields.nurture_delivered_at || '');
+      if (Number.isFinite(delivered) && delivered >= started) continue;
+      // Not reached: the message is not theirs yet.
+      setRecordField(r.sourceId, r.key, 'nurture_sent', sent.filter((x) => x !== c.messageId).join('|'));
+      setRecordField(r.sourceId, r.key, 'nurture_count', String(Math.max(0, Number(r.fields.nurture_count || 0) - 1)));
+      keys.push(r.key);
+    }
+    keys = [...new Set(keys)];
+  }
+  keys = keys.filter((k) => { const r = getRecord(c.sourceId, k); return r && r.fields.opted_out !== 'yes'; });
+  if (!keys.length) return 0;
+  c.queue = keys;
+  c.failed = Math.max(0, c.failed - keys.length);
+  c.failedKeys = [];
+  c.lastError = undefined;
+  c.pausedUntil = undefined;
+  c.status = 'sending';
+  c.finishedAt = null;
+  campaignDoc.save();
+  log('system', 'email', `Campaign "${c.name}": sending again to the ${keys.length} lead${keys.length === 1 ? '' : 's'} it could not reach.`);
+  return keys.length;
 }

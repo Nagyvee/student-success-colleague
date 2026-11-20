@@ -293,13 +293,19 @@ export function CampaignsTab({ data, notify, refresh, preselect }: { data: Overv
                   <div className="nu-msg-stats">
                     <span><b>{c.sent}</b> sent</span>
                     <span><b>{c.skipped}</b> skipped</span>
-                    {c.failed > 0 && <span className="t-bad"><b>{c.failed}</b> failed</span>}
+                    {c.failed > 0 && <span className="t-bad"><b>{c.failed}</b> could not be sent</span>}
                     <span><b>{c.total}</b> in the group</span>
                     {m && <span>{pct(m.stats.opened, m.stats.sent)}% opened · {pct(m.stats.clicked, m.stats.sent)}% clicked (all sends)</span>}
                     <span>by {c.createdBy} · {ago(c.createdAt)}</span>
                   </div>
+                  {c.pausedUntil && c.pausedUntil > Date.now() && c.status === 'sending' ? (
+                    <p className="nu-camp-why">Paused until {new Date(c.pausedUntil).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}: the mail server asked us to slow down. It carries on by itself.</p>
+                  ) : c.failed > 0 && c.lastError ? <p className="nu-camp-why">Why: {c.lastError.slice(0, 220)}</p> : null}
                   {data.canManage && (c.status === 'scheduled' || c.status === 'sending') && (
                     <button type="button" className="btn btn-sm btn-ghost" onClick={async () => { const r = await nurturePost({ action: 'cancelCampaign', id: c.id }); notify(r.error ? 'bad' : 'ok', r.error || 'Stopped.'); await refresh(); }}>Stop</button>
+                  )}
+                  {data.canManage && (c.status === 'done' || c.status === 'cancelled') && c.failed > 0 && (
+                    <button type="button" className="btn btn-sm btn-outline" onClick={async () => { const r = await nurturePost({ action: 'retryCampaign', id: c.id }); notify(r.error ? 'bad' : 'ok', r.error || `Sending again to the ${r.queued} it could not reach, a few at a time.`); await refresh(); }}>Send again to the {c.failed} it could not reach</button>
                   )}
                 </div>
               );

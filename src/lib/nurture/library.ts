@@ -380,7 +380,13 @@ export function pickOngoing(fields: Record<string, string>): NurtureMessage | nu
 
 /* ── Sending ──────────────────────────────────────────────────────────────── */
 
-export interface SendResult { ok: boolean; skipped?: boolean; detail: string; mailId?: string }
+export interface SendResult {
+  ok: boolean; skipped?: boolean; detail: string; mailId?: string;
+  /** Why the email did not go (the mail server's words). */
+  error?: string;
+  /** The mail server said "not now" (too fast, or the day's limit): try again later. */
+  throttled?: boolean;
+}
 
 /** Send a saved message to one lead. No AI unless a personal line was asked for. */
 export async function sendLibraryMessage(input: {
@@ -414,6 +420,7 @@ export async function sendLibraryMessage(input: {
   const out: string[] = [];
   let delivered = 0;
   let mailId: string | undefined;
+  let mailError: string | undefined;
 
   const email = input.test?.to || rec.email;
   if (channel !== 'whatsapp' && email) {
@@ -421,6 +428,7 @@ export async function sendLibraryMessage(input: {
     mailId = m.id;
     out.push(m.error ? `email failed (${m.error})` : m.delivery === 'smtp' ? 'email sent' : 'email kept in the Inbox (sending paused)');
     if (!m.error) delivered++;
+    else mailError = m.error;
   }
   if (!input.test && (channel === 'whatsapp' || channel === 'email_whatsapp') && rec.phone) {
     const tid = currentTenantId();
@@ -435,6 +443,11 @@ export async function sendLibraryMessage(input: {
   }
   if (!out.length) return { ok: false, detail: 'No email or phone number for this lead.' };
   if (input.test) return { ok: delivered > 0, detail: out.join('; '), mailId };
+  // Nothing reached them: not remembered as received (so it can go again), not counted as sent.
+  if (!delivered) {
+    const { isThrottled } = await import('@/lib/email/send');
+    return { ok: false, detail: `"${r.subject}": ${out.join('; ')}`, mailId, error: mailError || out.join('; '), throttled: isThrottled(mailError) };
+  }
 
   // Remember what they got, so nobody receives the same thing twice.
   const sent = [...(rec.fields.nurture_sent || '').split('|').filter(Boolean), msg.id].slice(-50).join('|');

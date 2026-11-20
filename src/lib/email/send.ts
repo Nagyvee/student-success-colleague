@@ -43,6 +43,41 @@ export function smtpReady(): boolean {
   return Boolean(c.host && c.user && c.pass);
 }
 
+/** The mail server pushing back: too many messages too fast, or the day's limit reached (try later, not "failed"). */
+export function isThrottled(error: string | null | undefined): boolean {
+  return /\b(421|450|451|452|454)\b|\b4\.7\.\d+|5\.4\.5|rate limit|sending limit|quota|too many|try again later|temporar|unusual rate/i.test(String(error || ''));
+}
+
+/** The day's sending limit (Gmail: 550 5.4.5 "Daily user sending limit exceeded"): wait an hour, not a minute. */
+export function isDailyLimit(error: string | null | undefined): boolean {
+  return /5\.4\.5|daily|sending limit|quota/i.test(String(error || ''));
+}
+
+/* Sending reuses one connection to the mail server, at most SMTP_PER_MINUTE
+ * messages a minute (default 20). A new connection and sign-in for every
+ * email, as fast as a campaign could go, is what made Gmail refuse them. */
+const g = globalThis as unknown as { __thusoSmtp?: Map<string, ReturnType<typeof nodemailer.createTransport>> };
+const pools = (g.__thusoSmtp ??= new Map());
+
+function pooledTransport(cfg: ReturnType<typeof smtpConfig>) {
+  if (!cfg.host || !cfg.user || !cfg.pass) return null;
+  const key = `${cfg.host}|${cfg.port}|${cfg.user}|${cfg.pass.length}:${cfg.pass.slice(-4)}`;
+  let t = pools.get(key);
+  if (!t) {
+    // Settings changed: the old connection goes.
+    for (const [k, old] of pools) if (k.startsWith(`${cfg.host}|${cfg.port}|${cfg.user}|`) || k.split('|')[2] === cfg.user) { old.close(); pools.delete(k); }
+    const perMinute = Math.max(1, Number(process.env.SMTP_PER_MINUTE || 20));
+    t = nodemailer.createTransport({
+      pool: true, maxConnections: 1, maxMessages: 100, rateDelta: 60_000, rateLimit: perMinute,
+      host: cfg.host, port: cfg.port, secure: cfg.port === 465,
+      auth: { user: cfg.user, pass: cfg.pass },
+      connectionTimeout: 8_000, greetingTimeout: 8_000, socketTimeout: 30_000,
+    });
+    pools.set(key, t);
+  }
+  return t;
+}
+
 function buildTransport(cfg: ReturnType<typeof smtpConfig>) {
   if (!cfg.host || !cfg.user || !cfg.pass) return null;
   return nodemailer.createTransport({
@@ -271,7 +306,7 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
   let providerId: string | null = null;
   let error: string | null = null;
   if (live) {
-    const t = buildTransport(cfg);
+    const t = pooledTransport(cfg);
     if (t) {
       try {
         const info = await t.sendMail({

@@ -19,7 +19,7 @@ import { getRecord, listRecords, upsertRecord } from '@/lib/data/records';
 import { meta, metaDoc } from '@/lib/nurture/store';
 import { addLink, addNote, deleteResource, getResource, importWhatsApp, importYouTube, listResources, updateResource } from '@/lib/nurture/bank';
 import { approveMessage, deleteMessage, getMessage, listMessages, previewMessage, resolveMessage, saveMessage, sendLibraryMessage, setMessageStatus, writeLibraryMessage, writeStarterSet } from '@/lib/nurture/library';
-import { cancelCampaign, campaignSender, createCampaign, listCampaigns, segmentMembers } from '@/lib/nurture/campaigns';
+import { cancelCampaign, campaignSender, createCampaign, listCampaigns, retryCampaign, segmentMembers } from '@/lib/nurture/campaigns';
 import { buildFitQuiz, ensureFitQuiz } from '@/lib/nurture/fit';
 import { leadChannel } from '@/lib/nurture/qualify';
 import { leadStage, type LeadStage } from '@/lib/nurture/stage';
@@ -126,7 +126,7 @@ function overview(manager: boolean, role: string) {
     leadsSource: src ? { id: src.id, name: src.name, url: src.url, rows: src.rows, lastReadAt: src.lastReadAt, lastError: src.lastError, columns: src.columns || [], provider: src.provider || 'sheet' } : null,
     messages: listMessages(),
     resources: listResources().map((r) => ({ ...r, text: r.text ? r.text.slice(0, 1600) : undefined })),
-    campaigns: listCampaigns().map(({ queue, ...c }) => ({ ...c, left: queue.length })),
+    campaigns: listCampaigns().map(({ queue, failedKeys, ...c }) => ({ ...c, left: queue.length })),
     fit: ensureFitQuiz(),
     videos: listVideos().map(({ slides, ...v }) => ({ ...v, scenes: slides.length + 1 })),
     agents: agents.map((a) => {
@@ -353,6 +353,10 @@ export async function POST(req: Request) {
           return NextResponse.json({ ok: true, campaign: { ...rest, left: queue.length } });
         }
         case 'cancelCampaign': return NextResponse.json({ ok: cancelCampaign(String(body.id || '')) });
+        case 'retryCampaign': {
+          const n = retryCampaign(String(body.id || ''));
+          return n ? NextResponse.json({ ok: true, queued: n }) : bad('Nobody to send it to again (they unsubscribed, or it already reached them).');
+        }
 
         /* ── Made once: the quiz and the videos ── */
         case 'buildFitQuiz': return NextResponse.json({ ok: true, fit: await buildFitQuiz() });

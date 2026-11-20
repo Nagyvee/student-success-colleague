@@ -139,6 +139,11 @@ export interface NurtureCampaign {
   createdAt: number;
   createdBy: string;
   finishedAt: number | null;
+  /** Leads it could not reach (to send again), and the mail server's last reason. */
+  failedKeys?: string[];
+  lastError?: string;
+  /** The mail server asked us to slow down: sending carries on at this time. */
+  pausedUntil?: number;
 }
 
 /* ── The career-fit quiz (one per academy, made once) ─────────────────────── */
