@@ -123,7 +123,7 @@ export function dialerConnection(tenantId = currentTenantId()): { url: string; k
 /** Who in the sales team the dialer gave a lead to (their Discord ID or username when the dialer has it). */
 export interface Assignee { id: string; name: string; discord?: string }
 
-type DialerReply = { ok: boolean; outcome?: string; id?: string; error?: string; assigned?: Assignee; stage?: string; was?: string; missing?: boolean };
+type DialerReply = { ok: boolean; outcome?: string; id?: string; error?: string; assigned?: Assignee; stage?: string; was?: string; wasOwner?: string; missing?: boolean };
 type AssignedJson = { assigned_to?: { id?: unknown; name?: unknown; discord_id?: unknown } | null };
 
 function assigneeOf(j: AssignedJson): Assignee | undefined {
@@ -182,13 +182,16 @@ async function handOverInDialer(s: ReturnType<typeof handoffSettings>, rec: Pick
       if (!j404.error) return { ok: false, missing: true, error: 'the dialer does not have the hand-over update yet' };
       return { ok: false, error: j404.error };
     }
-    const j = (await res.json().catch(() => ({}))) as AssignedJson & { ok?: boolean; outcome?: string; lead_id?: string; stage?: string | null; was?: string | null; error?: string };
+    const j = (await res.json().catch(() => ({}))) as AssignedJson & { ok?: boolean; outcome?: string; lead_id?: string; stage?: string | null; was?: string | null; was_owner?: string | null; error?: string };
     if (!res.ok || !j.ok) return { ok: false, error: j.error || `HTTP ${res.status}` };
-    return { ok: true, outcome: j.outcome, id: j.lead_id || undefined, assigned: assigneeOf(j), stage: j.stage || undefined, was: j.was || undefined };
+    return { ok: true, outcome: j.outcome, id: j.lead_id || undefined, assigned: assigneeOf(j), stage: j.stage || undefined, was: j.was || undefined, wasOwner: j.was_owner || undefined };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
 }
+
+/** The hand-over every qualified lead has had (older ones are checked again once by the catch-up). */
+export const HANDED_OVER = '2';
 
 /** What the dialer did with a qualified lead, in words (the leads list, the Discord card, the report). */
 export function dialerWords(r: DialerReply): string {
@@ -198,6 +201,7 @@ export function dialerWords(r: DialerReply): string {
     case 'created': return 'added to the dialer as a new lead';
     case 'reset': return `moved back to New in the dialer${r.was ? ` (was in ${r.was})` : ''}`;
     case 'kept': return `already with the sales team in the dialer${r.stage ? ` (${r.stage})` : ''}: brief added`;
+    case 'reassigned': return `moved to ${r.assigned?.name || 'a new owner'} in the dialer${r.stage ? ` (${r.stage})` : ''}`;
     case 'enrolled': return 'already enrolled in the dialer';
     case 'merged': return 'already in the dialer: brief added';
     case 'already': return 'already a lead in the dialer';
@@ -217,7 +221,8 @@ export async function sendToDialer(sourceId: string, key: string, q: QualifyInpu
   const words = dialerWords(r);
   setRecordField(sourceId, key, 'dialer_status', words);
   setRecordField(sourceId, key, 'dialer_in', r.ok ? 'yes' : '');
-  if (r.ok) setRecordField(sourceId, key, 'dialer_handed_over', 'yes');
+  // "2": handed over since Thuso's leads go only to the people it tags (the catch-up checks the rest once).
+  if (r.ok) setRecordField(sourceId, key, 'dialer_handed_over', HANDED_OVER);
   setRecordField(sourceId, key, 'dialer_sent_at', new Date().toISOString());
   if (r.id) setRecordField(sourceId, key, 'dialer_lead_id', r.id);
   if (r.stage) setRecordField(sourceId, key, 'dialer_stage', r.stage);

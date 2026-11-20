@@ -51,6 +51,11 @@ before(async () => {
     if (handoffApi && u.pathname === '/api/v1/handoff' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body || '{}'));
       handoffs.push(body);
+      const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      // In New with Larreth, who takes no Thuso leads: given to Thabile.
+      if (body.name === 'Vuyo Memani') return json({ ok: true, outcome: 'reassigned', lead_id: '22222222-2222-4222-8222-222222222222', stage: 'New Lead', was_owner: 'Larreth Jimu', assigned_to: { id: 'ag-1', name: 'Thabile Mhlanga', discord_id: '123456789012345678' } });
+      // Being worked by Siphumezo already: nothing changes.
+      if (body.name === 'Kept Lead') return json({ ok: true, outcome: 'kept', lead_id: '33333333-3333-4333-8333-333333333333', stage: 'Contacted on WhatsApp', assigned_to: { id: 'ag-2', name: 'Siphumezo Vuke', discord_id: '223456789012345678' } });
       return new Response(JSON.stringify({ ok: true, outcome: 'reset', lead_id: '11111111-1111-4111-8111-111111111111', stage: 'New Lead', was: 'Voicemail',
         assigned_to: { id: 'ag-2', name: 'Siphumezo Vuke', discord_id: '223456789012345678' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -185,7 +190,7 @@ test('every qualified lead ends up in the dialer: one qualified before the hand-
   // One Discord message for the team, pinging whoever has each lead.
   assert.equal(discordPosts.length, before + 1);
   const post = discordPosts.at(-1) as { content: string; allowed_mentions: { users: string[] } };
-  assert.match(post.content, /Qualified leads now in the dialer/);
+  assert.match(post.content, /Qualified leads: who has them now/);
   assert.match(post.content, /Rhass Bagani\*\* → <@223456789012345678>/);
   assert.deepEqual(post.allowed_mentions.users, ['223456789012345678']);
   // Next time: nothing to do.
@@ -213,4 +218,31 @@ test('applied and enrolled come back from the dialer; never backwards', () => T(
   pipeline[0] = { ...pipeline[0], stage: 'Enrolled', status: 'enrolled' };
   assert.equal(await readPipeline('default'), 1);
   assert.equal(m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'rhass@example.com')!.fields.status, 'enrolled');
+}));
+
+test('a qualified lead given to someone who takes no Thuso leads goes to someone who does; the team hears only about changes', () => T(async () => {
+  const { catchUpQualified } = await import('../src/lib/nurture/pipeline');
+  handoffApi = true;
+  const add = (key: string, name: string, fields: Record<string, string>) => {
+    m.rec.upsertRecord(m.src.LEADS_SOURCE_ID, { key, name, email: key, phone: '+27620790261', fields: { platform: 'fb' } });
+    for (const [k, v] of Object.entries(fields)) m.rec.setRecordField(m.src.LEADS_SOURCE_ID, key, k, v);
+  };
+  // Handed over before the rule (marker "yes"): Vuyo went to Larreth; the other is with Siphumezo already.
+  add('vuyo@example.com', 'Vuyo Memani', { qualified: 'yes', qualified_reason: 'hot', qualified_at: new Date().toISOString(), dialer_handed_over: 'yes', dialer_assigned_to: 'Larreth Jimu', dialer_status: 'moved to New in the dialer' });
+  add('kept@example.org', 'Kept Lead', { qualified: 'yes', qualified_reason: 'call', qualified_at: new Date().toISOString(), dialer_handed_over: 'yes', dialer_assigned_to: 'Siphumezo Vuke', dialer_status: 'moved to New in the dialer' });
+  process.env.SENDING_PAUSED = 'false';
+  const before = discordPosts.length;
+  const done = await catchUpQualified('default');
+  process.env.SENDING_PAUSED = 'true';
+  assert.deepEqual(done.map((d) => [d.name, d.changed]).sort(), [['Kept Lead', false], ['Vuyo Memani', true]]);
+  const vuyo = m.rec.getRecord(m.src.LEADS_SOURCE_ID, 'vuyo@example.com')!.fields;
+  assert.equal(vuyo.dialer_assigned_to, 'Thabile Mhlanga');
+  assert.equal(vuyo.dialer_status, 'moved to Thabile Mhlanga in the dialer (New Lead)');
+  assert.equal(vuyo.dialer_handed_over, '2');
+  // One message, about Vuyo only.
+  assert.equal(discordPosts.length, before + 1);
+  const post = discordPosts.at(-1) as { content: string; allowed_mentions: { users: string[] } };
+  assert.match(post.content, /Vuyo Memani\*\* → <@123456789012345678> \(was Larreth Jimu\) · New Lead/);
+  assert.doesNotMatch(post.content, /Kept Lead/);
+  assert.deepEqual(post.allowed_mentions.users, ['123456789012345678']);
 }));

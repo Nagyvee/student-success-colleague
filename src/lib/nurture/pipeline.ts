@@ -4,15 +4,17 @@ import { getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { liveAllowed } from '@/lib/email/pause';
 import { log as storeLog } from '@/lib/engine/store';
-import { QUALIFY_REASON, dialerConnection, discordUserId, discordWebhook, isDiscordHook, leadBrief, sendToDialer, type QualifyReason } from './qualify';
+import { HANDED_OVER, QUALIFY_REASON, dialerConnection, discordUserId, discordWebhook, isDiscordHook, leadBrief, sendToDialer, type QualifyReason } from './qualify';
 
 /* Thuso and the dialer, kept in step (every 30 minutes, and when the server starts).
  *
  * 1. Every qualified lead is in the dialer. A lead qualified before the
  *    hand-over existed (or whose hand-over failed) is handed over now: back
  *    to New and given out fairly if nothing was happening with them there,
- *    left with whoever is working them otherwise. Once per lead; the team
- *    gets one Discord message saying who has which lead.
+ *    left with whoever is working them otherwise; one sitting in New with
+ *    someone who does not take Thuso's leads (no Discord ID in the dialer)
+ *    goes to someone who does. Once per lead; the team gets one Discord
+ *    message saying who has each lead whose owner changed.
  * 2. Where each lead is in the dialer comes back: the stage, who has them,
  *    and "applied" once the sales team moves them to the registration stage
  *    (or past it), "enrolled" when won. Lead Nurturing shows it, and the
@@ -37,36 +39,42 @@ export async function dialerUpkeep(tenantId = currentTenantId()): Promise<void> 
 }
 
 /** Qualified leads not yet handed over the new way go to the dialer now. Returns what happened to each. */
-export async function catchUpQualified(tenantId = currentTenantId()): Promise<{ name: string; words: string; assignee?: string; discord?: string }[]> {
+export async function catchUpQualified(tenantId = currentTenantId()): Promise<{ name: string; words: string; where?: string; assignee?: string; discord?: string; was?: string; changed?: boolean }[]> {
   const ti = getTenantIntegrations(tenantId);
   if (!ti.handoff?.dialerOn || !liveAllowed(ti.liveOutreachEnabled)) return [];
   const due = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.qualified === 'yes' && r.fields.preview !== 'yes'
-    && r.fields.opted_out !== 'yes' && r.fields.dialer_handed_over !== 'yes');
-  const done: { name: string; words: string; assignee?: string; discord?: string }[] = [];
+    && r.fields.opted_out !== 'yes' && r.fields.dialer_handed_over !== HANDED_OVER);
+  const done: { name: string; words: string; where?: string; assignee?: string; discord?: string; was?: string; changed?: boolean }[] = [];
   for (const r of due) {
     const reason = (QUALIFY_REASON[r.fields.qualified_reason as QualifyReason] ? r.fields.qualified_reason : 'hot') as QualifyReason;
     const q = { reason, bestTime: r.fields.best_time_to_call || undefined, phone: r.fields.callback_phone || undefined, note: r.fields.call_note || undefined };
     const brief = (r.fields.lead_brief_sales || '').trim() || leadBrief(r, q);
+    const hadOwner = r.fields.dialer_assigned_to || '';
     const sent = await sendToDialer(r.sourceId, r.key, q, brief, tenantId);
     // A dialer without the hand-over yet: try again next time.
     if (sent.reply.missing) return done;
     if (!sent.reply.ok) { done.push({ name: r.name, words: sent.words }); continue; }
-    setRecordField(r.sourceId, r.key, 'dialer_handed_over', 'yes');
-    done.push({ name: r.name, words: sent.words, assignee: sent.reply.assigned?.name, discord: sent.reply.assigned?.discord });
+    const assignee = sent.reply.assigned?.name;
+    // Worth telling the team: a lead that moved, or whose owner is new.
+    const changed = ['released', 'created', 'merged', 'reset', 'reassigned'].includes(sent.reply.outcome || '') || Boolean(assignee && assignee !== hadOwner);
+    // What the team reads: "back to New (was in Voicemail)", "New Lead"...
+    const where = sent.reply.outcome === 'reassigned' ? (sent.reply.stage || 'New') : sent.words.replace(/ in the dialer/, '');
+    done.push({ name: r.name, words: sent.words, where, assignee, discord: sent.reply.assigned?.discord, was: sent.reply.wasOwner || (hadOwner && hadOwner !== assignee ? hadOwner : undefined), changed });
   }
   if (!done.length) return done;
   const ok = done.filter((d) => !/^failed/.test(d.words));
   log('system', 'dispatch', `Qualified leads checked in the dialer: ${ok.length} in, ${done.length - ok.length} could not be sent. ${done.map((d) => `${d.name}: ${d.words}${d.assignee ? `, ${d.assignee}` : ''}`).join('; ')}.`);
-  // One message for the team: who has which lead now.
+  // One message for the team: who has each lead whose owner changed.
+  const moved = ok.filter((d) => d.changed);
   const hook = discordWebhook(tenantId);
-  if (ok.length && isDiscordHook(hook)) {
-    const pings = [...new Set(ok.map((d) => discordUserId(d.discord)).filter((x): x is string => Boolean(x)))];
-    const who = (d: (typeof ok)[number]) => {
+  if (moved.length && isDiscordHook(hook)) {
+    const pings = [...new Set(moved.map((d) => discordUserId(d.discord)).filter((x): x is string => Boolean(x)))];
+    const who = (d: (typeof moved)[number]) => {
       const id = discordUserId(d.discord);
       return id ? `<@${id}>` : d.discord ? `@${d.discord}` : d.assignee ? `**${d.assignee}**` : 'nobody yet';
     };
-    const lines = ok.map((d) => `• **${d.name}** → ${who(d)} · ${d.words.replace(/ in the dialer/, '')}`);
-    const content = `📋 **Qualified leads now in the dialer** (${ok.length}). Each one has Thuso's brief in its notes.\n${lines.join('\n')}`.slice(0, 1990);
+    const lines = moved.map((d) => `• **${d.name}** → ${who(d)}${d.was ? ` (was ${d.was})` : ''} · ${d.where}`);
+    const content = `📋 **Qualified leads: who has them now** (${moved.length}). Each one has Thuso's brief in its notes in the dialer.\n${lines.join('\n')}`.slice(0, 1990);
     await fetch(`${hook}?wait=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
