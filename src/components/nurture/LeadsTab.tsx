@@ -26,6 +26,7 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [cleanup, setCleanup] = useState(false);
 
   const load = useCallback(async () => {
     const r = await fetch(`/api/nurture?leads=1&stage=${encodeURIComponent(filter)}&q=${encodeURIComponent(q)}`, { cache: 'no-store' });
@@ -61,6 +62,7 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
             {FILTERS.map((x) => <button key={x.id} type="button" className={filter === x.id ? 'on' : ''} onClick={() => setFilter(x.id)}>{x.label}{counts && x.id ? ` ${counts[x.id] ?? 0}` : counts && !x.id ? ` ${counts.all ?? 0}` : ''}</button>)}
           </div>
           <input className="in nu-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, programme, source…" />
+          {data.canManage && <button type="button" className="btn btn-sm btn-ghost" onClick={() => setCleanup(true)}><Icon name="trash" size={13} /> Clean up</button>}
         </div>
         {!rows ? <div className="nu-loading"><Icon name="spinner" size={15} className="spin" /> Loading…</div> : rows.length ? (
           <div className="nu-table-wrap">
@@ -86,6 +88,7 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
         ) : <Empty icon="inbox" title={filter || q ? 'Nobody matches' : 'No leads yet'}>{filter || q ? 'Try another filter.' : 'Connect your leads sheet on the Journey tab, or send leads to the webhook (Channels & API).'}</Empty>}
       </section>
       {open && <LeadPanel leadKey={open} onClose={() => setOpen(null)} notify={notify} onChanged={async () => { await load(); await refresh(); }} canManage={data.canManage} />}
+      {cleanup && <Cleanup onClose={() => setCleanup(false)} notify={notify} onDone={async () => { await load(); await refresh(); }} />}
     </div>
   );
 }
@@ -149,6 +152,46 @@ function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey
               )) : <p className="nu-hint">No agent has worked on this lead yet{d.lead.sent ? ' (they got campaign messages only)' : ''}.</p>}
             </div>
           </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+interface CleanupPlan { keep: number; clear: number; why: Record<string, number>; gmailChecked: boolean; sample: string[] }
+
+/** Start fresh: clear the old sheet rows Thuso never reached (checked first, then confirmed). */
+function Cleanup({ onClose, notify, onDone }: { onClose: () => void; notify: (k: 'ok' | 'bad', t: string) => void; onDone: () => Promise<void> }) {
+  const [plan, setPlan] = useState<CleanupPlan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    void nurturePost<{ plan?: CleanupPlan }>({ action: 'cleanupPreview' }).then((r) => { if (r.plan) setPlan(r.plan); else setError(r.error || 'Could not check the leads.'); });
+  }, []);
+  async function go() {
+    setBusy(true);
+    const r = await nurturePost<{ plan?: CleanupPlan }>({ action: 'cleanupLeads' });
+    setBusy(false);
+    if (!r.plan) { notify('bad', r.error || 'That did not work.'); return; }
+    notify('ok', `${r.plan.clear} old leads cleared; ${r.plan.keep} stay.`);
+    await onDone();
+    onClose();
+  }
+  return (
+    <Modal title="Clean up the leads list" sub="Keep the leads Thuso really reached and the new ones; clear the old sheet rows it never reached." onClose={onClose}
+      foot={<>
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-cta" disabled={!plan || !plan.clear || busy} onClick={() => void go()}>{busy ? 'Clearing…' : plan ? `Clear ${plan.clear} leads` : 'Checking…'}</button>
+      </>}>
+      {error ? <p className="nu-hint">{error}</p> : !plan ? <div className="nu-loading"><Icon name="spinner" size={15} className="spin" /> Checking every lead{' '}(and Gmail&apos;s Sent folder)…</div> : (
+        <div className="nu-cleanup">
+          <p><b>{plan.keep}</b> stay:</p>
+          <ul>{Object.entries(plan.why).sort((a, b) => b[1] - a[1]).map(([k, v]) => <li key={k}><b>{v}</b> {k}</li>)}</ul>
+          <p><b>{plan.clear}</b> are cleared: old rows from the sheet that never got an email from Thuso (never messaged, or every email failed){plan.sample.length ? `, e.g. ${plan.sample.slice(0, 4).join(', ')}` : ''}.</p>
+          <p className="nu-hint">
+            {plan.gmailChecked ? 'Checked against Gmail\'s Sent folder, so nobody who got an email is cleared. ' : 'Gmail\'s Sent folder could not be read, so anyone Thuso may have emailed stays. '}
+            Cleared leads do not come back from the sheet unless they fill in a form again. The numbers on this page then count only real leads.
+          </p>
         </div>
       )}
     </Modal>
@@ -304,7 +347,7 @@ export function CampaignsTab({ data, notify, refresh, preselect }: { data: Overv
                   {data.canManage && (c.status === 'scheduled' || c.status === 'sending') && (
                     <button type="button" className="btn btn-sm btn-ghost" onClick={async () => { const r = await nurturePost({ action: 'cancelCampaign', id: c.id }); notify(r.error ? 'bad' : 'ok', r.error || 'Stopped.'); await refresh(); }}>Stop</button>
                   )}
-                  {data.canManage && (c.status === 'done' || c.status === 'cancelled') && c.failed > 0 && (
+                  {data.canManage && (c.status === 'done' || c.status === 'cancelled') && c.failed > 0 && c.retryable !== false && (
                     <button type="button" className="btn btn-sm btn-outline" onClick={async () => { const r = await nurturePost({ action: 'retryCampaign', id: c.id }); notify(r.error ? 'bad' : 'ok', r.error || `Sending again to the ${r.queued} it could not reach, a few at a time.`); await refresh(); }}>Send again to the {c.failed} it could not reach</button>
                   )}
                 </div>

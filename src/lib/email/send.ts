@@ -286,7 +286,11 @@ export async function sendManyChat(input: {
       }),
       signal: AbortSignal.timeout(8_000),
     });
-    return sendRes.ok ? { ok: true, detail: 'Delivered via ManyChat API' } : { ok: false, detail: `ManyChat send HTTP ${sendRes.status}` };
+    if (sendRes.ok) return { ok: true, detail: 'Delivered via ManyChat API' };
+    // Usually WhatsApp's rule: free text only within 24 hours of the person's last message; anyone else needs an approved template (a ManyChat flow).
+    const why = (await sendRes.json().catch(() => ({}))) as { message?: string; details?: { messages?: { message?: string }[] } };
+    const reason = [why.message, ...(why.details?.messages || []).map((x) => x.message)].filter(Boolean).join(' ').slice(0, 200);
+    return { ok: false, detail: `ManyChat did not send (HTTP ${sendRes.status}${reason ? `: ${reason}` : ''})` };
   } catch (e) {
     return { ok: false, detail: (e as Error).message };
   }

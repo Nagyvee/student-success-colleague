@@ -7,6 +7,7 @@ import { findSyncedLearnerByEmailOrId, mergeLearnerPatchByEmailOrId } from '@/li
 import { generateJSON, obj } from '@/lib/ai/llm';
 import { countRecords, getRecord, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord, wasNurtured } from './records';
 import { daysUntil, isoDate, parseDate, parseMoney } from './conditions';
+import { isCleared } from './cleared';
 import { leadProfile } from '@/lib/nurture/profile';
 
 /* Data sources: where the agents read their records.
@@ -376,6 +377,8 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
     }
     const events: RecordEvent[] = [];
     for (const rec of merged.values()) {
+      // Cleared from the list (and not a new enquiry): left out.
+      if (isCleared(source.id, rec, tenantId)) continue;
       const out = upsertRecord(source.id, rec);
       if (baseline) {
         if (out.created) setRecordField(source.id, out.record.key, 'imported_quietly', 'yes');
@@ -442,6 +445,7 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
       rec.fields.agent_dialer_source = row.source || '';
       if (seen.has(rec.key)) continue;
       seen.add(rec.key);
+      if (isCleared(source.id, rec, tenantId)) continue;
       // Back for nurturing: the team took them over (or Thuso handed them to sales) and later moved
       // them to a nurturing stage in the dialer. They start again: not qualified, no points, the
       // messages they already got are not sent twice.

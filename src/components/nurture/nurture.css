@@ -344,3 +344,5 @@
 .nu-music { display:flex; flex-direction:column; gap:8px; }
 .nu-music-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; border-radius:11px; border:1px solid var(--line); background:var(--surface-raised); font-size:13px; }
 .nu-music-row audio { height:32px; max-width:260px; }
+.nu-cleanup p { margin:0 0 8px; font-size:13.5px; line-height:1.5; }
+.nu-cleanup ul { margin:0 0 12px; padding-left:18px; font-size:13px; line-height:1.6; }

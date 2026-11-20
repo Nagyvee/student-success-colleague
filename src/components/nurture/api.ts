@@ -32,7 +32,7 @@ export interface Overview {
   leadsSource: { id: string; name: string; url: string; rows?: number; lastReadAt?: number | null; lastError?: string | null; columns: string[]; provider?: 'sheet' | 'dialer' } | null;
   messages: NurtureMessage[];
   resources: NurtureResource[];
-  campaigns: (Omit<NurtureCampaign, 'queue'> & { left: number })[];
+  campaigns: (Omit<NurtureCampaign, 'queue' | 'failedKeys'> & { left: number; retryable?: boolean })[];
   fit: FitQuiz | null;
   videos: (Omit<ProgrammeVideo, 'slides'> & { scenes: number })[];
   agents: NurtureAgent[];

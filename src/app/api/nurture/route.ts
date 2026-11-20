@@ -126,7 +126,7 @@ function overview(manager: boolean, role: string) {
     leadsSource: src ? { id: src.id, name: src.name, url: src.url, rows: src.rows, lastReadAt: src.lastReadAt, lastError: src.lastError, columns: src.columns || [], provider: src.provider || 'sheet' } : null,
     messages: listMessages(),
     resources: listResources().map((r) => ({ ...r, text: r.text ? r.text.slice(0, 1600) : undefined })),
-    campaigns: listCampaigns().map(({ queue, failedKeys, ...c }) => ({ ...c, left: queue.length })),
+    campaigns: listCampaigns().map(({ queue, failedKeys, ...c }) => ({ ...c, left: queue.length, retryable: c.failed > 0 && (!failedKeys || failedKeys.length > 0) })),
     fit: ensureFitQuiz(),
     videos: listVideos().map(({ slides, ...v }) => ({ ...v, scenes: slides.length + 1 })),
     agents: agents.map((a) => {
@@ -353,6 +353,15 @@ export async function POST(req: Request) {
           return NextResponse.json({ ok: true, campaign: { ...rest, left: queue.length } });
         }
         case 'cancelCampaign': return NextResponse.json({ ok: cancelCampaign(String(body.id || '')) });
+        /* ── Starting fresh: clear the old rows Thuso never reached ── */
+        case 'cleanupPreview': {
+          const { previewCleanup } = await import('@/lib/nurture/cleanup');
+          return NextResponse.json({ ok: true, plan: await previewCleanup() });
+        }
+        case 'cleanupLeads': {
+          const { runCleanup } = await import('@/lib/nurture/cleanup');
+          return NextResponse.json({ ok: true, plan: await runCleanup() });
+        }
         case 'retryCampaign': {
           const n = retryCampaign(String(body.id || ''));
           return n ? NextResponse.json({ ok: true, queued: n }) : bad('Nobody to send it to again (they unsubscribed, or it already reached them).');
