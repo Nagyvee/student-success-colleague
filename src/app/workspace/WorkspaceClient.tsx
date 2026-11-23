@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../../components/Icon';
 import DataSourcesSection from '../../components/sources/DataSourcesSection';
+import WhatsAppCard from '../../components/nurture/WhatsAppCard';
 import { ESCALATION_LABEL, ESCALATION_TYPES } from '../../lib/escalation';
 import type {
   OutreachChannel,
@@ -1316,6 +1317,13 @@ export default function WorkspaceClient() {
             </button>
           </div>
         </section>
+
+        <WhatsAppCard
+          value={form.whatsappFollowups || {}}
+          onChange={(whatsappFollowups) => updateField('whatsappFollowups', whatsappFollowups)}
+          onSave={() => saveIntegrations({ whatsappFollowups: form.whatsappFollowups || {} }, 'WhatsApp follow-ups')}
+          saving={busy === 'WhatsApp follow-ups'}
+        />
 
         {/* 6. PostgreSQL */}
         <section className="pg-card">

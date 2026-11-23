@@ -66,7 +66,7 @@ const CLICKED: Record<string, string> = { enrol: 'Yes, I want to enrol', call: '
 /** One line per point a lead earned: "Clicked \"Call me\" in Gentle check-in", +3. */
 function pointLine(p: PointItem): string {
   const msg = p.message.startsWith('msg_') ? getMessage(p.message)?.name : '';
-  const inMsg = msg ? ` in "${msg}"` : '';
+  const inMsg = msg ? ` in "${msg}"` : p.message.startsWith('wa_') ? ' on WhatsApp' : '';
   if (p.kind === 'open') return `Opened ${msg ? `"${msg}"` : 'an email'}`;
   if (p.kind === 'quiz') return 'Took the career-fit quiz';
   if (p.kind === 'video') return 'Watched their programme video';
@@ -198,6 +198,8 @@ export async function GET(req: Request) {
       if (!rec) return NextResponse.json({ error: 'No such lead.' }, { status: 404 });
       const f = liveFields(rec);
       const got = (f.nurture_sent || '').split('|').filter(Boolean).map((id) => getMessage(id)?.name || 'A message that was deleted');
+      if (f.whatsapp_nudge_at) got.push(`WhatsApp: the quiz nudge (${f.whatsapp_nudge_at.slice(0, 10)})`);
+      if (f.whatsapp_video_at) got.push(`WhatsApp: their programme video (${f.whatsapp_video_at.slice(0, 10)})`);
       const runs = listAgentRuns({ limit: 300 }).filter((r) => r.record.key === rec.key).slice(0, 10)
         .map((r) => ({ id: r.id, agentName: r.agentName, workflowName: r.workflowName, status: r.status, startedAt: r.startedAt, resumeAt: r.resumeAt, logs: r.logs.slice(-12) }));
       const pts = pointsOf(f);
@@ -353,6 +355,27 @@ export async function POST(req: Request) {
           return NextResponse.json({ ok: true, campaign: { ...rest, left: queue.length } });
         }
         case 'cancelCampaign': return NextResponse.json({ ok: cancelCampaign(String(body.id || '')) });
+        /* ── WhatsApp follow-ups: check the connection, who is due, a test to one number ── */
+        case 'whatsappCheck': {
+          const { checkWhatsApp } = await import('@/lib/nurture/whatsapp');
+          return NextResponse.json(await checkWhatsApp());
+        }
+        case 'whatsappPreview': {
+          const { previewWhatsApp } = await import('@/lib/nurture/whatsapp');
+          return NextResponse.json({ ok: true, plan: previewWhatsApp() });
+        }
+        case 'whatsappTest': {
+          const { testWhatsApp } = await import('@/lib/nurture/whatsapp');
+          // Links in a test belong to a hidden test lead, never a real one.
+          const key = `preview:${session.userId}`;
+          const prev = getRecord(LEADS_SOURCE_ID, key);
+          upsertRecord(LEADS_SOURCE_ID, {
+            key, name: session.name || 'Preview', email: '', phone: '',
+            fields: { ...(prev?.fields || {}), first_name: (session.name || 'Preview').split(/\s+/)[0], interest: prev?.fields.interest || programmeList()[0] || '', preview: 'yes', source: 'a preview' },
+          });
+          return NextResponse.json(await testWhatsApp(body.kind === 'video' ? 'video' : 'nudge', String(body.phone || '').replace(/[\s()-]/g, '').slice(0, 20), { sourceId: LEADS_SOURCE_ID, key }));
+        }
+
         /* ── Starting fresh: clear the old rows Thuso never reached ── */
         case 'cleanupPreview': {
           const { previewCleanup } = await import('@/lib/nurture/cleanup');

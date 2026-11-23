@@ -46,7 +46,7 @@ const SWEEP_GOAL = 'Weekly sweep: check every cohort and get every learner who i
 const SWEEP_DAY = 1;      // Monday
 const SWEEP_HOUR = 7;     // 07:00, server time (SAST)
 
-type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number };
+type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number; lastWhatsApp?: number };
 const g = globalThis as unknown as { __ssAutoMap?: Map<string, Hub>; __ssTimer?: ReturnType<typeof setInterval> | null; __thusoBoot?: Promise<void> };
 
 function hub(tenantId = currentTenantId()): Hub {
@@ -302,6 +302,11 @@ function tick() {
     if (!h.lastDialerSync || Date.now() - h.lastDialerSync >= 30 * 60_000) {
       h.lastDialerSync = Date.now();
       void import('@/lib/nurture/pipeline').then((p) => p.dialerUpkeep(tid)).catch(() => { /* next time */ });
+    }
+    // WhatsApp follow-ups (approved templates, a few a day), while Admissions is on autopilot.
+    if ((!h.lastWhatsApp || Date.now() - h.lastWhatsApp >= 10 * 60_000) && autopilotForKinds(['admissions'])) {
+      h.lastWhatsApp = Date.now();
+      void import('@/lib/nurture/whatsapp').then((w) => w.pumpWhatsApp(tid)).catch(() => { /* next time */ });
     }
     if (!h.lastSourcePoll || Date.now() - h.lastSourcePoll >= 5000) {
       h.lastSourcePoll = Date.now();

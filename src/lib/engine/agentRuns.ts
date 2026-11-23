@@ -1,4 +1,4 @@
-import { sendingPaused } from '@/lib/email/pause';
+import { liveAllowed, sendingPaused } from '@/lib/email/pause';
 import type {
   AgentRun,
   AgentRunLog,
@@ -282,7 +282,7 @@ const SENDING_STEPS = new Set<AgentStep['kind']>(['ai_message', 'send_library', 
 export function nextEmailAllowedAt(fields: Record<string, string>, trigger: string, now = Date.now(), hours = spacingHours()): number | null {
   if (!hours || /reply/i.test(trigger)) return null;
   const t = (v: string | undefined) => { const n = v ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : 0; };
-  const last = Math.max(t(fields.nurture_delivered_at), t(fields.nurture_last_sent_at));
+  const last = Math.max(t(fields.nurture_delivered_at), t(fields.nurture_last_sent_at), t(fields.whatsapp_last_at));
   if (!last) return null;
   const at = last + hours * 3_600_000;
   return at > now ? at : null;
@@ -655,12 +655,17 @@ async function deliver(run: AgentRun, step: AgentStep | null, draft: DraftMessag
   if ((channel === 'whatsapp' || channel === 'email_whatsapp') && run.record.phone) {
     const ti = getTenantIntegrations(currentTenantId());
     const text = channel === 'whatsapp' ? `${draft.body}\n\n${draft.ask}` : whatsappText(draft, first, run.agentName);
-    const r = ti.whatsappUrl || (currentTenantId() === DEFAULT_TENANT_ID && process.env.WHATSAPP_API_URL)
+    const own = Boolean(ti.whatsappUrl || (currentTenantId() === DEFAULT_TENANT_ID && process.env.WHATSAPP_API_URL));
+    // Through ManyChat a lead gets WhatsApp only as an approved template, by the follow-up rules (nurture/whatsapp.ts).
+    const byRules = !own && Boolean(ti.manychatApiKey) && run.record.sourceId === LEADS_SOURCE_ID && liveAllowed(ti.liveOutreachEnabled);
+    const r = byRules
+      ? { ok: false, detail: 'only by the WhatsApp follow-up rules' }
+      : own
       ? await sendWhatsApp({ toPhone: run.record.phone, learnerName: run.record.name, text })
       : ti.manychatApiKey
         ? await sendManyChat({ email: run.record.email, phone: run.record.phone, learnerName: run.record.name, text })
         : { ok: false, detail: 'WhatsApp is not connected (Channels & API)' };
-    sent.push(`WhatsApp: ${r.detail}`);
+    if (!byRules || !sent.length) sent.push(`WhatsApp: ${r.detail}`);
     if (r.ok) delivered++;
   }
   if (!sent.length) sent.push('nothing sent: no email or phone for this channel');

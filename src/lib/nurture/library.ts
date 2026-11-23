@@ -8,6 +8,7 @@ import { leadProfile } from './profile';
 import { trackUrl } from './track';
 import type { VoucherOffer } from './types';
 import { dateText, expiresFor, getOffer, issueVoucher, offerLive, valueText, voucherVars } from './vouchers';
+import { liveAllowed } from '@/lib/email/pause';
 import { unsubscribeHeaders } from '@/lib/email/send';
 import { auditAgentMessage } from '@/lib/engine/agentAudit';
 import { complete, generateJSON, isStr, noEmoji, obj } from '@/lib/ai/llm';
@@ -15,6 +16,7 @@ import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
 import { emailShell, esc, formatHtmlParagraphs, sendMail, sendManyChat, sendWhatsApp, signatureBlock } from '@/lib/email/send';
 import { appendConversation, getConversation, getRecord, setRecordField } from '@/lib/data/records';
+import { LEADS_SOURCE_ID } from '@/lib/data/sources';
 import { isoDate } from '@/lib/data/conditions';
 import { getState, log as storeLog } from '@/lib/engine/store';
 
@@ -433,12 +435,17 @@ export async function sendLibraryMessage(input: {
   if (!input.test && (channel === 'whatsapp' || channel === 'email_whatsapp') && rec.phone) {
     const tid = currentTenantId();
     const ti = getTenantIntegrations(tid);
-    const w = ti.whatsappUrl || (tid === DEFAULT_TENANT_ID && process.env.WHATSAPP_API_URL)
+    const own = Boolean(ti.whatsappUrl || (tid === DEFAULT_TENANT_ID && process.env.WHATSAPP_API_URL));
+    // Through ManyChat a lead gets WhatsApp only as an approved template, by the follow-up rules (whatsapp.ts).
+    const byRules = !own && Boolean(ti.manychatApiKey) && rec.sourceId === LEADS_SOURCE_ID && liveAllowed(ti.liveOutreachEnabled);
+    const w = byRules
+      ? { ok: false, detail: 'only by the WhatsApp follow-up rules' }
+      : own
       ? await sendWhatsApp({ toPhone: rec.phone, learnerName: rec.name, text: r.whatsapp })
       : ti.manychatApiKey
         ? await sendManyChat({ email: rec.email, phone: rec.phone, learnerName: rec.name, text: r.whatsapp })
         : { ok: false, detail: 'WhatsApp is not connected (Channels & API)' };
-    out.push(`WhatsApp: ${w.detail}`);
+    if (!byRules || !out.length) out.push(`WhatsApp: ${w.detail}`);
     if (w.ok) delivered++;
   }
   if (!out.length) return { ok: false, detail: 'No email or phone number for this lead.' };

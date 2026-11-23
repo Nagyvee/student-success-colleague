@@ -55,6 +55,7 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
   const channels = new Map<string, number>();
   for (const r of fresh) { const c = leadChannel(r.fields); channels.set(c, (channels.get(c) || 0) + 1); }
   const emailed = recs.filter((r) => inWindow(stamp(r.fields.nurture_delivered_at))).length;
+  const whatsapps = recs.reduce((n, r) => n + [r.fields.whatsapp_nudge_at, r.fields.whatsapp_video_at].filter((v) => inWindow(stamp(v))).length, 0);
   const replied = recs.filter((r) => inWindow(stamp(r.fields.replied_at_ms)));
   const quizzes = recs.filter((r) => inWindow(stamp(r.fields.fit_at))).length;
   const qualified = recs.filter((r) => inWindow(stamp(r.fields.qualified_at)));
@@ -77,6 +78,7 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
   const fields: NurtureReport['fields'] = [
     { name: '🆕 New leads', value: fresh.length ? `**${fresh.length}**\n${[...channels].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c}: ${n}`).join('\n')}` : '0', inline: true },
     { name: '✉️ Emails sent', value: `**${sent}**${emailed ? `\nto ${plural(emailed, 'lead')}` : ''}`, inline: true },
+    ...(whatsapps ? [{ name: '📱 WhatsApps sent', value: `**${whatsapps}**`, inline: true }] : []),
     { name: '👀 Opened · clicked', value: `**${diff('opens')}** · **${diff('clicks')}**`, inline: true },
     { name: '🧭 Quizzes · 🎬 videos', value: `**${Math.max(quizzes, diff('quizzes'))}** · **${diff('videoViews')}**`, inline: true },
     { name: '💬 Replies', value: replied.length ? `**${replied.length}**\n${replied.slice(0, 6).map((r) => r.name).join(', ')}` : '0', inline: true },

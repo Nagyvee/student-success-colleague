@@ -364,6 +364,19 @@ export function getMaskedIntegrations(tenantId = currentTenantId()): TenantInteg
   };
 }
 
+function mergeWhatsapp(next: TenantIntegrations['whatsappFollowups'], prev: TenantIntegrations['whatsappFollowups']): TenantIntegrations['whatsappFollowups'] {
+  if (!next) return prev;
+  const p = prev || {};
+  const flow = (v: unknown, old?: string) => (typeof v === 'string' ? v.trim().slice(0, 80) : old);
+  return {
+    on: typeof next.on === 'boolean' ? next.on : p.on,
+    nudgeFlow: flow(next.nudgeFlow, p.nudgeFlow),
+    videoFlow: flow(next.videoFlow, p.videoFlow),
+    perDay: Number.isFinite(Number(next.perDay)) && Number(next.perDay) > 0 ? Math.min(200, Math.round(Number(next.perDay))) : p.perDay,
+    addContacts: typeof next.addContacts === 'boolean' ? next.addContacts : p.addContacts,
+  };
+}
+
 function mergeHandoff(next: TenantIntegrations['handoff'], prev: TenantIntegrations['handoff']): TenantIntegrations['handoff'] {
   if (!next) return prev;
   const p = prev || {};
@@ -426,6 +439,7 @@ export function updateTenantIntegrations(tenantId: string, patch: Partial<Tenant
     manychatFlowNs: patch.manychatFlowNs !== undefined ? patch.manychatFlowNs.trim() : prev.manychatFlowNs,
     manychatTag: patch.manychatTag !== undefined ? patch.manychatTag.trim() : prev.manychatTag,
     manychatChannel: patch.manychatChannel ?? prev.manychatChannel,
+    whatsappFollowups: mergeWhatsapp(patch.whatsappFollowups, prev.whatsappFollowups),
     defaultChannel: patch.defaultChannel ?? prev.defaultChannel,
     tutorLanguage: patch.tutorLanguage ?? prev.tutorLanguage,
     academyFocus: patch.academyFocus !== undefined ? patch.academyFocus.trim() : prev.academyFocus,

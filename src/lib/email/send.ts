@@ -195,12 +195,12 @@ export async function testManyChatConnection(override?: { apiKey?: string }): Pr
       headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(8_000),
     });
-    const json = (await res.json().catch(() => ({}))) as { status?: string; message?: string; data?: { name?: string } };
+    const json = (await res.json().catch(() => ({}))) as { status?: string; message?: string; data?: { id?: number | string; name?: string } };
     if (!res.ok || json.status === 'error') {
       return { ok: false, error: json.message || `ManyChat API HTTP ${res.status}` };
     }
     const pageName = json.data?.name || 'Connected';
-    return { ok: true, pageName, detail: `ManyChat connected (${pageName})` };
+    return { ok: true, pageName, detail: `ManyChat connected (${pageName}${json.data?.id ? `, account ${json.data.id}` : ''})` };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -251,8 +251,9 @@ export async function sendManyChat(input: {
           last_name: parts.slice(1).join(' ') || 'Learner',
           ...(input.phone ? { phone: input.phone, whatsapp_phone: input.phone } : {}),
           ...(input.email ? { email: input.email } : {}),
-          has_opt_in_sms: Boolean(input.phone),
-          has_opt_in_email: Boolean(input.email),
+          // They did not agree to SMS or ManyChat email: never recorded as if they had.
+          has_opt_in_sms: false,
+          has_opt_in_email: false,
         }),
         signal: AbortSignal.timeout(8_000),
       });
