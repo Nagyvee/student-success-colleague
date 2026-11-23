@@ -74,6 +74,7 @@
 @keyframes vlBar { 0%, 100% { height:25%; } 50% { height:100%; } }
 .vl-cc { position:absolute; left:50%; bottom:2.6cqw; transform:translateX(-50%); z-index:3; width:max-content; max-width:min(80%, 860px); margin:0; padding:.45em .9em; border-radius:10px;
   background:rgba(4,9,24,.74); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); font-size:clamp(12px, 1.85cqw, 21px); line-height:1.4; text-align:center; color:#f2f6ff; }
+.vl-unheard { position:absolute; left:50%; top:1.8cqw; transform:translateX(-50%); z-index:4; display:inline-flex; align-items:center; gap:.5em; min-height:40px; padding:.5em 1.1em; border:none; border-radius:999px; background:var(--a); color:#0a1733; font:inherit; font-weight:700; font-size:clamp(13px, 1.5cqw, 16px); cursor:pointer; }
 .vl-pausedcover { position:absolute; inset:0; z-index:4; border:none; background:rgba(4,9,24,.38); color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; }
 .vl-pausedcover svg { width:clamp(52px, 8cqw, 92px); height:auto; padding:1.6cqw; border-radius:50%; background:rgba(255,255,255,.14); box-sizing:content-box; }
 
@@ -205,6 +206,7 @@
   .vl-chapter, .vl-presenter { font-size:clamp(10px, 3.2cqw, 13px); }
   .vl-chapter { top:4cqw; left:4cqw; max-width:48%; }
   .vl-presenter { top:3cqw; right:3cqw; }
+  .vl-unheard { top:calc(3cqw + 52px); }
   .vl-title h1 { font-size:clamp(40px, 14cqw, 72px); }
   .vl-title p { font-size:clamp(14px, 4.4cqw, 19px); }
   .vl-controls { flex-wrap:wrap; }

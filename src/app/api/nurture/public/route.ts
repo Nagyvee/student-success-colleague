@@ -12,7 +12,8 @@ import { ensureFitQuiz, submitFit, trackExtras } from '@/lib/nurture/fit';
 import { countView, lessonForLead, videoFor } from '@/lib/nurture/video';
 import { leadProgramme } from '@/lib/nurture/programmes';
 import { noteEngagement } from '@/lib/nurture/track';
-import { slideAudio, ttsProvider, warmLessonAudio } from '@/lib/media/tts';
+import { slideAudio, ttsProvider, voiceReady, warmLessonAudio } from '@/lib/media/tts';
+import { serveMedia } from '@/lib/media/serve';
 import { claimShared, dateText, findVoucher, getOffer, valueText } from '@/lib/nurture/vouchers';
 import { programmeList } from '@/lib/nurture/programmes';
 import { footageFor, musicFor } from '@/lib/nurture/media';
@@ -137,14 +138,16 @@ export async function GET(req: Request) {
         ctaKicker: `Your next step, ${first}`,
         footage: footageFor(lesson.slides, video.programme === 'general' ? programme : video.programme, 'lead'),
         music: musicFor(),
-        audioVersion: createHash('sha1').update(lesson.slides.map((s) => s.say).join('|')).digest('hex').slice(0, 12),
+        voice: voiceReady(),
+        // "r2": sound kept by a phone from before it was served in pieces is not used again.
+        audioVersion: createHash('sha1').update(`r2|${lesson.slides.map((s) => s.say).join('|')}`).digest('hex').slice(0, 12),
       });
     }
 
     const audio = url.searchParams.get('audio');
     if (audio) {
       if (!video) return NextResponse.json({ error: 'No video.' }, { status: 404 });
-      if (audio === 'probe') return NextResponse.json({ available: Boolean(ttsProvider()) }, { headers: { 'Cache-Control': 'no-store' } });
+      if (audio === 'probe') return NextResponse.json({ available: voiceReady() }, { headers: { 'Cache-Control': 'no-store' } });
       const n = Number(audio);
       const { lesson, personal } = lessonForLead(video, rec);
       if (!Number.isInteger(n) || n < 0 || n >= lesson.slides.length || !ttsProvider()) return NextResponse.json({ error: 'No audio.' }, { status: 404 });
@@ -152,7 +155,7 @@ export async function GET(req: Request) {
       const own = n <= personal;
       const clip = await slideAudio(p.t, own ? `${video.id}_${rec.key.replace(/[^a-z0-9]/gi, '').slice(0, 30)}` : video.id, own ? n : n - 1 - personal, lesson.slides[n].say);
       if (!clip) return NextResponse.json({ error: 'The voice is unavailable right now.' }, { status: 404 });
-      return new Response(new Uint8Array(clip), { headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': String(clip.length), 'Cache-Control': 'private, max-age=86400', 'X-Robots-Tag': 'noindex' } });
+      return serveMedia(req, clip, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, max-age=86400', 'X-Robots-Tag': 'noindex' });
     }
 
     return NextResponse.json({ error: 'Say what you need: fit, watch or audio.' }, { status: 400 });

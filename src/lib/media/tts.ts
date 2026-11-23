@@ -103,8 +103,15 @@ export function speakable(text: string): string {
     .slice(0, MAX_CHARS);
 }
 
-const g = globalThis as unknown as { __thusoTts?: Map<string, Promise<Buffer | null>> };
+const g = globalThis as unknown as { __thusoTts?: Map<string, Promise<Buffer | null>>; __thusoVoice?: { okAt: number; failAt: number; error: string } };
 const inflight = (g.__thusoTts ??= new Map());
+const health = (g.__thusoVoice ??= { okAt: 0, failAt: 0, error: '' });
+
+/** The provider's last answer, when it was a refusal ('' when all is well). */
+export const voiceError = () => (health.failAt > health.okAt ? health.error : '');
+
+/** A voice is set up and did not just fail (a player that knows starts with the device's own voice, inside the tap). */
+export const voiceReady = () => Boolean(ttsProvider()) && !(health.failAt > health.okAt && Date.now() - health.failAt < 2 * 60_000);
 
 /** The narration for one slide as MP3, from the disk cache or freshly made.
  *  Null when no provider is configured or the provider failed: never throws. */
@@ -124,12 +131,15 @@ export async function slideAudio(tenantId: string, quizId: string, slide: number
         : p === 'openai' ? await openai(text, ctrl.signal)
           : await deepgram(text, ctrl.signal);
       if (audio.length < 512) throw new Error('empty audio');
+      health.okAt = Date.now();
       try {
         await fs.promises.mkdir(path.dirname(file), { recursive: true });
         await fs.promises.writeFile(file, audio);
       } catch { /* read-only disk: serve it uncached */ }
       return audio;
     } catch (e) {
+      health.failAt = Date.now();
+      health.error = (e as Error).message.slice(0, 160);
       console.warn(`[thuso] lesson voice (${p}) failed: ${(e as Error).message}; the player will use the browser voice.`);
       return null;
     } finally {

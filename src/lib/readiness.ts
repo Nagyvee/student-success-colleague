@@ -12,6 +12,7 @@ import { listMessages } from '@/lib/nurture/library';
 import { listOffers } from '@/lib/nurture/vouchers';
 import { meta as nurtureMeta } from '@/lib/nurture/store';
 import { listMedia } from '@/lib/nurture/media';
+import { ttsProvider, voiceError } from '@/lib/media/tts';
 import { ESCALATION_LABEL, ESCALATION_TYPES } from '@/lib/escalation';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -127,9 +128,9 @@ export function readiness(tenantId = currentTenantId(), db: DbState = { configur
     },
     {
       id: 'voice', label: 'Voice for videos (Deepgram)',
-      state: env('DEEPGRAM_API_KEY') || env('DEEPGRAM_KEY') || env('DG_API_KEY') ? 'ok' : 'optional',
-      detail: env('DEEPGRAM_API_KEY') || env('DEEPGRAM_KEY') || env('DG_API_KEY') ? 'Set.' : 'Not set: videos use the browser voice.',
-      fix: 'Set DEEPGRAM_API_KEY for a natural voice.',
+      state: !ttsProvider() || voiceError() ? 'todo' : 'ok',
+      detail: !ttsProvider() ? 'Not set: the presenter is silent on many phones (they only get captions).' : voiceError() ? `Set, but the last try failed: ${voiceError()}.` : 'Set.',
+      fix: ttsProvider() ? 'Check the Deepgram key and its credit.' : 'Set DEEPGRAM_API_KEY on the server and restart Thuso.',
     },
     {
       id: 'whatsapp', label: 'WhatsApp',

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { findQuiz } from '@/lib/engine/quiz';
 import { findTenantForQuiz } from '@/lib/auth/requestTenant';
 import { withTenant } from '@/lib/auth/tenantContext';
-import { slideAudio, ttsProvider } from '@/lib/media/tts';
+import { slideAudio, ttsProvider, voiceReady } from '@/lib/media/tts';
+import { serveMedia } from '@/lib/media/serve';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,7 +28,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ quizId: string 
     if (!d || !slides.length) return NextResponse.json({ error: 'No lesson with that id.' }, { status: 404 });
 
     if (url.searchParams.get('probe')) {
-      return NextResponse.json({ available: Boolean(ttsProvider()), slides: slides.length }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ available: voiceReady(), slides: slides.length }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     const n = Number(url.searchParams.get('slide'));
@@ -36,13 +37,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ quizId: string 
 
     const audio = await slideAudio(tid, quizId, n, slides[n].say);
     if (!audio) return NextResponse.json({ error: 'The lesson voice is unavailable right now.' }, { status: 404 });
-    return new Response(new Uint8Array(audio), {
-      headers: {
-        'Content-Type': 'audio/mpeg',
-        'Content-Length': String(audio.length),
-        'Cache-Control': 'private, max-age=86400',
-        'X-Robots-Tag': 'noindex',
-      },
-    });
+    return serveMedia(req, audio, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, max-age=86400', 'X-Robots-Tag': 'noindex' });
   });
 }

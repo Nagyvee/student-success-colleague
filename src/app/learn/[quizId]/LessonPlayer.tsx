@@ -50,6 +50,8 @@ interface View {
   music?: string | null;
   /** Changes when the script changes: a different programme or a rebuilt video never replays a cached voice. */
   audioVersion?: string;
+  /** The natural voice is ready (known with the video, so pressing play at once still uses it). */
+  voice?: boolean;
 }
 
 type Phase = 'title' | 'playing' | 'paused' | 'done';
@@ -69,6 +71,19 @@ function chunk(say: string): string[] {
   }
   if (cur) out.push(cur);
   return out;
+}
+
+/** A tenth of a second of silence: played inside the tap, so a phone lets the voice start when it arrives. */
+function silence(): string {
+  const n = 800;
+  const b = new Uint8Array(44 + n).fill(128);
+  const v = new DataView(b.buffer);
+  const word = (at: number, t: string) => { for (let k = 0; k < 4; k++) b[at + k] = t.charCodeAt(k); };
+  word(0, 'RIFF'); v.setUint32(4, 36 + n, true); word(8, 'WAVE'); word(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  word(36, 'data'); v.setUint32(40, n, true);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
 }
 
 /** The best voice the device has: natural/neural voices first, South African English
@@ -103,7 +118,14 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
   const [i, setI] = useState(0);
   const [progress, setProgress] = useState(0);
   const [voice, setVoice] = useState<Voice>('browser');
+  // The voice in use now: scenes that follow use it, even if it was not known yet when play was pressed.
+  const voiceRef = useRef<Voice>('browser');
+  voiceRef.current = voice;
+  // Nothing could be heard on this scene (captions show, and a tap tries again).
+  const [unheard, setUnheard] = useState(false);
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  mutedRef.current = muted;
   // Captions: off when a real voice narrates (it is a video, not a reading), on when muted or silent.
   const [ccChoice, setCc] = useState<boolean | null>(null);
   const [full, setFull] = useState(false);
@@ -116,9 +138,10 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
 
   const playerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const preloadRef = useRef<HTMLAudioElement | null>(null);
+  // Each scene's voice, downloaded whole and played from memory: phones differ in how they stream sound.
+  const clips = useRef(new Map<string, { url: string | null; job: Promise<string | null> }>());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clock = useRef({ start: 0, pausedAt: 0, pausedTotal: 0, dur: 5000, mode: 'timer' as 'audio' | 'speech' | 'timer' });
+  const clock = useRef({ start: 0, pausedAt: 0, pausedTotal: 0, dur: 5000, mode: 'timer' as 'audio' | 'speech' | 'timer', loading: false });
   const runId = useRef(0);
   const speechVoice = useRef<SpeechSynthesisVoice | null>(null);
 
@@ -140,7 +163,7 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
   /* ── load the lesson and pick the voice ─────────────────────────────── */
   useEffect(() => {
     fetch(dataUrl, { cache: 'no-store' })
-      .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Not found'); setView(d as View); })
+      .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Not found'); setView(d as View); if ((d as View).voice) setVoice('server'); })
       .catch((e) => setErr((e as Error).message));
     fetch(audioUrl('probe'), { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
@@ -159,6 +182,32 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
     pick();
     window.speechSynthesis.onvoiceschanged = pick;
     return () => { window.speechSynthesis.cancel(); };
+  }, []);
+
+  /** The voice of one scene as a local address (null: it could not be had; asked for again next time). */
+  const clip = (k: number) => {
+    const src = audioUrl(k);
+    const have = clips.current.get(src);
+    if (have) return have;
+    const entry: { url: string | null; job: Promise<string | null> } = { url: null, job: Promise.resolve(null) };
+    entry.job = fetch(src)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        entry.url = URL.createObjectURL(await r.blob());
+        return entry.url;
+      })
+      .catch(() => { clips.current.delete(src); return null; });
+    clips.current.set(src, entry);
+    return entry;
+  };
+  // Their greeting is ready before they press play.
+  useEffect(() => {
+    if (voice === 'server' && slides.length) clip(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice, slides]);
+  useEffect(() => {
+    const all = clips.current;
+    return () => { for (const c of all.values()) if (c.url) URL.revokeObjectURL(c.url); all.clear(); };
   }, []);
 
   /* ── the playback engine ─────────────────────────────────────────────── */
@@ -181,27 +230,48 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
     setPhase('playing');
     const c = clock.current;
     c.start = performance.now(); c.pausedTotal = 0; c.pausedAt = 0; c.dur = estimateMs(s.say);
+    c.loading = false;
+    setUnheard(false);
 
     const next = () => {
       if (run !== runId.current) return;
       timerRef.current = setTimeout(() => {
         if (run !== runId.current) return;
         if (n0 + 1 >= slides.length) { setProgress(1); setPhase('done'); stopAll(); }
-        else playSlide(n0 + 1, opts);
+        else playSlide(n0 + 1, { muted: mutedRef.current, voice: voiceRef.current });
       }, 650);
     };
     const timed = (ms: number) => { c.mode = 'timer'; timerRef.current = setTimeout(next, ms); };
+    // No sound is possible: the captions carry the scene, for as long as it takes to read.
+    let hushed = false;
+    const quiet = () => {
+      if (hushed || run !== runId.current) return;
+      hushed = true;
+      if (!opts.muted) setUnheard(true);
+      timed(Math.max(2500, c.dur - (performance.now() - c.start - c.pausedTotal)));
+    };
     const speak = () => {
-      if (opts.muted || opts.voice === 'silent' || typeof window === 'undefined' || !('speechSynthesis' in window)) { timed(c.dur); return; }
+      if (opts.muted) { timed(c.dur); return; }
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) { quiet(); return; }
       c.mode = 'speech';
       const parts = chunk(s.say);
+      let began = false;
       window.speechSynthesis.cancel();
+      // Phones drop speech silently (outside a tap, inside another app's browser): never pretend she is speaking.
+      const watch = () => setTimeout(() => {
+        if (run !== runId.current || began) return;
+        if (c.pausedAt) { watch(); return; }
+        window.speechSynthesis.cancel();
+        quiet();
+      }, 2500);
+      watch();
       parts.forEach((p, k) => {
         const u = new SpeechSynthesisUtterance(p);
         if (speechVoice.current) u.voice = speechVoice.current;
         u.rate = 1; u.pitch = 1;
-        if (k === parts.length - 1) u.onend = next;
-        u.onerror = (ev) => { if (run === runId.current && ev.error !== 'interrupted' && ev.error !== 'canceled') timed(Math.max(800, c.dur - (performance.now() - c.start))); };
+        u.onstart = () => { began = true; };
+        if (k === parts.length - 1) u.onend = () => { if (began) next(); };
+        u.onerror = (ev) => { if (run === runId.current && ev.error !== 'interrupted' && ev.error !== 'canceled') quiet(); };
         window.speechSynthesis.speak(u);
       });
     };
@@ -211,17 +281,40 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
       if (!a) { speak(); return; }
       c.mode = 'audio';
       a.muted = opts.muted;
-      a.src = audioUrl(n0);
-      a.onended = next;
-      a.onerror = () => { if (run !== runId.current) return; setVoice('browser'); speak(); };
-      a.play().catch(() => { if (run !== runId.current) return; speak(); });
-      // Warm the next slide's audio so there is no gap between scenes.
-      if (n0 + 1 < slides.length) {
-        const pre = preloadRef.current || (preloadRef.current = new Audio());
-        pre.preload = 'auto';
-        pre.src = audioUrl(n0 + 1);
-        pre.load();
+      // The scene's sound would not load or play: once, whichever way the browser says so.
+      let failed = false;
+      const fail = () => {
+        if (failed || run !== runId.current) return;
+        failed = true; c.loading = false; a.onerror = null; a.onended = null;
+        c.start = performance.now(); c.pausedTotal = 0;
+        speak();
+      };
+      const play = () => a.play().catch((e: { name?: string }) => {
+        if (run !== runId.current || c.loading || e?.name === 'AbortError') return; // paused, or on to another scene
+        if (e?.name !== 'NotAllowedError') { fail(); return; }
+        // The phone wants a tap before sound: wait on the play button instead of playing silently.
+        c.pausedAt = performance.now();
+        setPhase('paused');
+      });
+      const sound = (url: string) => {
+        c.loading = false;
+        a.src = url;
+        a.onended = next;
+        a.onerror = fail;
+        c.start = performance.now(); c.pausedTotal = 0;
+        if (!c.pausedAt) void play();
+      };
+      const mine = clip(n0);
+      if (mine.url) sound(mine.url);
+      else {
+        // Not here yet: the tap's permission is kept with a moment of silence until it arrives.
+        c.loading = true;
+        a.src = silence();
+        void play();
+        void mine.job.then((url) => { if (run !== runId.current) return; if (url) sound(url); else if (!c.pausedAt) fail(); else c.loading = false; });
       }
+      // The next scene's voice, so there is no gap.
+      if (n0 + 1 < slides.length) clip(n0 + 1);
     } else {
       speak();
     }
@@ -236,7 +329,8 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
       const c = clock.current;
       const a = audioRef.current;
       let p: number;
-      if (c.mode === 'audio' && a && Number.isFinite(a.duration) && a.duration > 0) p = a.currentTime / a.duration;
+      if (c.mode === 'audio' && c.loading) p = 0;
+      else if (c.mode === 'audio' && a && Number.isFinite(a.duration) && a.duration > 0) p = a.currentTime / a.duration;
       else p = (performance.now() - c.start - c.pausedTotal) / c.dur;
       setProgress(Math.max(0, Math.min(1, p)));
       raf = requestAnimationFrame(tick);
@@ -265,6 +359,8 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
   }, [i, phase, cutKind, whoosh, reduced]);
   const counted = useRef(false);
   const start = () => {
+    // Heard even when an iPhone's side switch is on silent, like any video.
+    try { const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession; if (session) session.type = 'playback'; } catch { /* not supported */ }
     // A lead pressing play counts once towards how interested they are.
     if (lead && !counted.current) {
       counted.current = true;
@@ -285,8 +381,10 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
     if (phase !== 'paused') return;
     const c = clock.current;
     c.pausedTotal += performance.now() - c.pausedAt;
+    c.pausedAt = 0;
     setPhase('playing');
-    if (c.mode === 'audio') { void audioRef.current?.play().catch(() => playSlide(i, { muted, voice: 'browser' })); }
+    if (c.mode === 'audio' && !audioRef.current?.onended) playSlide(i, { muted, voice }); // its sound had not arrived yet
+    else if (c.mode === 'audio') { void audioRef.current?.play().catch(() => playSlide(i, { muted, voice: 'browser' })); }
     else if (c.mode === 'speech') {
       window.speechSynthesis.resume();
       // Some phones drop paused speech: if nothing is speaking, restart the slide.
@@ -341,8 +439,8 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
   const captions = useMemo(() => (slide ? chunk(slide.say) : []), [slide]);
   const caption = captions[Math.min(captions.length - 1, Math.floor(progress * captions.length))] || '';
   const brand = view?.brand || { base: '#0a1733', deep: '#5e0743', accent: '#ff7300' };
-  const cc = ccChoice ?? (muted || voice !== 'server');
-  const speaking = phase === 'playing' && !muted && voice !== 'silent';
+  const cc = ccChoice ?? (muted || unheard || voice !== 'server');
+  const speaking = phase === 'playing' && !muted && !unheard && voice !== 'silent';
   const evidenceScore = typeof view?.evidence?.scorePct === 'number' ? Math.round(view.evidence.scorePct) : null;
   const isLead = Boolean(lead);
   const sceneFootage = (view?.footage || [])[phase === 'title' ? 0 : i] || null;
@@ -415,6 +513,9 @@ export default function LessonPlayer({ quizId, lead }: { quizId: string; lead?: 
                       <span className="vl-wavebars" aria-hidden="true"><i /><i /><i /><i /><i /></span>
                     </div>
                     {cc && caption && <p className="vl-cc" aria-live="polite">{caption}</p>}
+                    {unheard && phase === 'playing' && (
+                      <button type="button" className="vl-unheard" onClick={() => playSlide(i, { muted: false, voice })}><Volume2 size={15} />Tap for sound</button>
+                    )}
                     {phase === 'paused' && (
                       <button type="button" className="vl-pausedcover" onClick={resume} aria-label="Resume"><Play size={30} fill="currentColor" /></button>
                     )}
