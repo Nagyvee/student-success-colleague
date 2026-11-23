@@ -52,6 +52,9 @@ export function fileTime(file: string): number | null {
   try { return fs.statSync(file).mtimeMs; } catch { return null; }
 }
 
+/** More than one machine writes to the same database (not the case on the VPS). */
+export const preferDb = () => /^(1|true|yes|on)$/i.test((process.env.THUSO_PREFER_DB || '').trim());
+
 /** Seconds of slack for clocks and the gap between writing the file and the database. */
 const SLACK_MS = 2000;
 
@@ -67,7 +70,7 @@ export function localWins(localMs: number | null, confirmedMs: number | null, db
   // backup. Comparing times could load an outdated database copy over newer work (a lead's score, an
   // agent's progress), so the local copy wins whenever it exists. THUSO_PREFER_DB=true brings back the
   // comparison, for a setup where more than one machine writes to the same database.
-  if (!/^(1|true|yes|on)$/i.test((process.env.THUSO_PREFER_DB || '').trim())) return true;
+  if (!preferDb()) return true;
   if (confirmedMs != null) return localMs > confirmedMs + SLACK_MS;
   if (dbMs == null) return true;
   return localMs > dbMs + SLACK_MS;

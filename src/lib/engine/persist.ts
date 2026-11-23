@@ -15,6 +15,11 @@ function fileFor(tenantId = currentTenantId()): string {
     : path.join(DIR, 'tenants', tenantId, 'world.json');
 }
 
+/** Is there a saved copy on this machine? */
+export function hasArchive(tenantId = currentTenantId()): boolean {
+  return fs.existsSync(fileFor(tenantId));
+}
+
 export type Archive = Pick<WorldState, 'deliverables' | 'inbox' | 'learners' | 'metrics' | 'tasks' | 'feed' | 'pendingOutreach'>;
 
 export function loadArchive(tenantId = currentTenantId()): Partial<Archive> | null {

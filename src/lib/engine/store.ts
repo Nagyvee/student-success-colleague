@@ -6,7 +6,8 @@ import type {
   LearnerCard, Metrics, PendingOutreach, RoomMood, Settings, Task, ToolCallLog, Visitor, WorldState,
 } from '@/lib/types';
 import { AGENTS, ROOMS } from '@/lib/office/layout';
-import { loadArchive, scheduleSave, clearArchive } from './persist';
+import { hasArchive, loadArchive, scheduleSave, clearArchive } from './persist';
+import { preferDb } from '@/lib/db/syncState';
 import { officeClearedDoc } from './officeCleared';
 import { dbConfigured, loadWorldFromDb, syncWorldToDb } from '@/lib/db/postgres';
 import { sandboxLearnerCards } from '@/lib/lms/sandboxData';
@@ -15,7 +16,7 @@ import { DEFAULT_TENANT_ID, currentTenantId } from '@/lib/auth/tenantContext';
 import { getTenantIntegrations, publicTenantSummary } from '@/lib/auth/accounts';
 
 type Listener = (s: WorldState) => void;
-interface Hub { state: WorldState; listeners: Set<Listener>; scheduled: boolean }
+interface Hub { state: WorldState; listeners: Set<Listener>; scheduled: boolean; hadArchive?: boolean }
 
 const g = globalThis as unknown as { __czHubs?: Map<string, Hub>; __ssPublic?: Map<string, string | null> };
 
@@ -143,7 +144,8 @@ export function freshWorld(keepArchive = true, tenantId = currentTenantId()): Wo
 export function hub(tenantId = currentTenantId()): Hub {
   if (!g.__czHubs) g.__czHubs = new Map();
   if (!g.__czHubs.has(tenantId)) {
-    g.__czHubs.set(tenantId, { state: freshWorld(true, tenantId), listeners: new Set(), scheduled: false });
+    const hadArchive = hasArchive(tenantId);
+    g.__czHubs.set(tenantId, { state: freshWorld(true, tenantId), listeners: new Set(), scheduled: false, hadArchive });
   }
   const h = g.__czHubs.get(tenantId)!;
   upgrade(h.state);
@@ -205,8 +207,14 @@ export function listenerCount() { return hub().listeners.size; }
 
 export async function hydrateStoreFromDb(): Promise<boolean> {
   if (!dbConfigured()) return false;
-  const loaded = await loadWorldFromDb();
   const s = hub().state;
+  // One server writes everything: what it saved stands, and the database gets a copy. Merging an older
+  // database in would bring back old approvals, activity and counts.
+  if (hub().hadArchive && !preferDb()) {
+    void syncWorldToDb({ learners: s.learners, deliverables: s.deliverables, inbox: s.inbox, metrics: s.metrics, tasks: s.tasks, feed: s.feed, pendingOutreach: s.pendingOutreach || [] });
+    return false;
+  }
+  const loaded = await loadWorldFromDb();
   if (!loaded) {
     // First boot against an empty Postgres DB: seed current snapshot immediately.
     void syncWorldToDb({

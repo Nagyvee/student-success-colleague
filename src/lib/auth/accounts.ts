@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { confirmedAt, fileTime, localWins, markSynced } from '@/lib/db/syncState';
+import { confirmedAt, fileTime, localWins, markSynced, preferDb } from '@/lib/db/syncState';
 import path from 'node:path';
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { TenantIntegrations, TenantSummary, UserSummary } from '@/lib/types';
@@ -27,6 +27,7 @@ type AuthStore = {
   tenants: StoredTenantRow[];
   users: StoredUserRow[];
   hydrated: boolean;
+  hadFile?: boolean;
 };
 
 const g = globalThis as unknown as { __thusoAuth?: AuthStore; __thusoSessionSecret?: string };
@@ -82,6 +83,8 @@ function store(): AuthStore {
   if (!g.__thusoAuth) {
     let tenants: StoredTenantRow[] = [];
     let users: StoredUserRow[] = [];
+    // Before anything here can write it: a server with no accounts file takes them from the database.
+    const hadFile = fileTime(FILE) != null;
     try {
       const raw = JSON.parse(fs.readFileSync(FILE, 'utf8')) as { tenants?: StoredTenantRow[]; users?: StoredUserRow[] };
       if (Array.isArray(raw.tenants)) tenants = raw.tenants;
@@ -89,7 +92,7 @@ function store(): AuthStore {
     } catch { /* fresh start */ }
     if (!tenants.some((t) => t.id === DEFAULT_TENANT_ID)) tenants.unshift(defaultTenant());
     const rotated = rotateDemoSecrets(tenants);
-    g.__thusoAuth = { tenants, users, hydrated: false };
+    g.__thusoAuth = { tenants, users, hydrated: false, hadFile };
     for (const t of rotated) saveAuth(t);
   }
   return g.__thusoAuth;
@@ -127,8 +130,15 @@ export async function hydrateAuthFromDb(): Promise<void> {
     for (const u of s.users) void upsertUserToDb(u);
     return;
   }
+  // One server writes everything: its accounts stand, and the database gets a copy. Taking any from an older
+  // database would bring back a changed password, a removed member or a deleted workspace.
+  if (s.hadFile && !preferDb() && s.users.length) {
+    for (const t of s.tenants) void upsertTenantToDb(t).then((ok) => { if (ok) markSynced('auth', t.id); });
+    for (const u of s.users) void upsertUserToDb(u);
+    return;
+  }
   // Per workspace, the newer copy wins: settings changed here while the database was unreachable are sent up, not lost.
-  const localMs = fileTime(FILE);
+  const localMs = s.hadFile ? fileTime(FILE) : null;
   const byT = new Map(s.tenants.map((t) => [t.id, t]));
   for (const t of loaded.tenants) {
     const mine = byT.get(t.id);

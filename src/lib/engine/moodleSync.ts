@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/postgres';
 import { getState, log, setAutomation, setLearners } from './store';
 import { saveGradebooks, saveRoster, savedRoster } from '@/lib/lms/gradebook';
+import { preferDb } from '@/lib/db/syncState';
 import { renderWorkflowGoal, workflowsForTrigger } from './workflows';
 
 export interface MoodleSyncResult {
@@ -121,18 +122,21 @@ export async function getCachedLearnersSnapshot(tenantId = currentTenantId()): P
     loadSyncedLearnersFromDb(tenantId),
     loadMoodleSyncMetaFromDb(tenantId),
   ]);
-  if (dbRows.length) {
+  // A database that missed the last syncs is older than the roster saved here.
+  const saved = savedRoster(tenantId);
+  const dbAt = Number(meta?.lastSyncedAt || 0);
+  const savedIsNewer = !preferDb() && saved.rows.length > 0 && (saved.syncedAt || 0) > dbAt + 15 * 60_000;
+  if (dbRows.length && !savedIsNewer) {
     return {
       learners: dbRows,
       diagnostics: (meta?.diagnostics as MoodleDiagnostics & { lastSyncedAt?: number | null }) || null,
     };
   }
-  // No database: the last full sync saved in Thuso (courses, groups, grades, progress), not the short summary.
-  const saved = savedRoster(tenantId);
+  // No database (or an older one): the last full sync saved in Thuso (courses, groups, grades, progress), not the short summary.
   if (saved.rows.length) {
     return {
       learners: saved.rows,
-      diagnostics: (meta?.diagnostics as MoodleDiagnostics & { lastSyncedAt?: number | null }) || (saved.syncedAt ? { coursesFound: new Set(saved.rows.flatMap((r) => (r.courses || []).map((c) => c.id))).size, studentsFound: saved.rows.length, lastSyncAt: saved.syncedAt, lastSyncedAt: saved.syncedAt, lastError: null, warnings: [] } : null),
+      diagnostics: (!savedIsNewer && (meta?.diagnostics as MoodleDiagnostics & { lastSyncedAt?: number | null })) || (saved.syncedAt ? { coursesFound: new Set(saved.rows.flatMap((r) => (r.courses || []).map((c) => c.id))).size, studentsFound: saved.rows.length, lastSyncAt: saved.syncedAt, lastSyncedAt: saved.syncedAt, lastError: null, warnings: [] } : null),
     };
   }
   const stateCards = getState().learners;

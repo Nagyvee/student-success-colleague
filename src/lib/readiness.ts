@@ -77,10 +77,10 @@ export function readiness(tenantId = currentTenantId(), db: DbState = { configur
         ? 'In the .data folder on this machine. On the VPS that is enough: the disk keeps it across restarts.'
         : db.reachable
           ? `Postgres at ${db.where} answers, plus a copy in the .data folder.`
-          : `Postgres is set (${db.where}${/^127\.0\.0\.1:5433$/.test(db.where) ? ', the SSH tunnel to the VPS' : ''}) but does not answer (${db.error || 'no reply'}). Changes are kept in .data and sent up when it is back; the newer copy wins.`,
+          : `Postgres is set (${db.where}${/^127\.0\.0\.1:5433$/.test(db.where) ? ', the SSH tunnel to the VPS' : ''}) but does not answer (${db.error || 'no reply'}). Nothing is lost: Thuso runs on its .data folder, and sends the copy up when Postgres is back.`,
       fix: !db.configured
         ? 'Back the .data folder up every night (deploy/windows/backup.ps1 does it). Postgres is optional.'
-        : db.reachable ? '' : 'Restart the SSH tunnel to the VPS (port 5433). Once the app runs on the VPS itself, set PGHOST=127.0.0.1 and PGPORT=5432 there: no tunnel needed.',
+        : db.reachable ? '' : 'On the server: check that the postgresql service runs and that PGPORT in .env.local is the port it listens on, then restart the Thuso task. (On a laptop: restart the SSH tunnel.)',
     },
     {
       id: 'secret', label: 'Sign-in and link key',
