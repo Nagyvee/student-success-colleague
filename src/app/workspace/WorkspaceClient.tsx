@@ -1320,6 +1320,7 @@ export default function WorkspaceClient() {
 
         <WhatsAppCard
           value={form.whatsappFollowups || {}}
+          saved={data?.integrations?.whatsappFollowups || {}}
           onChange={(whatsappFollowups) => updateField('whatsappFollowups', whatsappFollowups)}
           onSave={() => saveIntegrations({ whatsappFollowups: form.whatsappFollowups || {} }, 'WhatsApp follow-ups')}
           saving={busy === 'WhatsApp follow-ups'}

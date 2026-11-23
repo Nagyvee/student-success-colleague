@@ -16,11 +16,22 @@ interface Plan {
   perDay: number; sentToday: number; on: boolean; live: boolean; hours: boolean; pausedUntil: number; lastError: string;
 }
 
-export default function WhatsAppCard({ value, onChange, onSave, saving, replyUrl, replyKey }: { value: Value; onChange: (v: Value) => void; onSave: () => Promise<void> | void; saving: boolean; replyUrl: string; replyKey: string }) {
+/** What matters of the settings, to tell typed from saved. */
+const asSaved = (v: Value) => JSON.stringify([Boolean(v.on), (v.nudgeFlow || '').trim(), (v.videoFlow || '').trim(), Number(v.perDay) || 20, Boolean(v.addContacts), (v.leaveOutTags ?? LEAVE_OUT_DEFAULT).trim()]);
+
+export default function WhatsAppCard({ value, saved, onChange, onSave, saving, replyUrl, replyKey }: { value: Value; saved: Value; onChange: (v: Value) => void; onSave: () => Promise<void> | void; saving: boolean; replyUrl: string; replyKey: string }) {
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [phone, setPhone] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
+  // Check, Who is due and the tests use what is saved, so they wait for Save.
+  const unsaved = asSaved(value) !== asSaved(saved);
+
+  async function save() {
+    setNote(null);
+    setPlan(null);
+    await onSave();
+  }
 
   async function run(id: string, body: Record<string, unknown>) {
     setBusy(id);
@@ -60,7 +71,7 @@ export default function WhatsAppCard({ value, onChange, onSave, saving, replyUrl
         <label className="field" style={{ gridColumn: '1 / -1' }}>
           <span>Leave out people with these ManyChat tags</span>
           <input type="text" value={value.leaveOutTags ?? LEAVE_OUT_DEFAULT} onChange={(e) => onChange({ ...value, leaveOutTags: e.target.value })} placeholder="tag-one, tag-two" spellCheck={false} />
-          <small className="pg-hint">People another bot (Abigail) is talking to, or a person has taken over. If Thuso messaged them, that bot could catch their reply.</small>
+          <small style={{ fontSize: 11.5, color: 'var(--muted)', lineHeight: 1.4 }}>People another bot (Abigail) is talking to, or a person has taken over. If Thuso messaged them, that bot could catch their reply.</small>
         </label>
         <label className="switch" style={{ gridColumn: '1 / -1', alignItems: 'flex-start', lineHeight: 1.45 }}>
           <input type="checkbox" checked={Boolean(value.addContacts)} onChange={(e) => onChange({ ...value, addContacts: e.target.checked })} />
@@ -87,8 +98,13 @@ export default function WhatsAppCard({ value, onChange, onSave, saving, replyUrl
         Header <code>X-Thuso-Token</code>: {replyKey ? <button type="button" className="btn ghost sm" onClick={() => { void navigator.clipboard.writeText(replyKey).then(() => setNote({ ok: true, text: 'Key copied. Paste it in ManyChat yourself; do not share it in a chat.' })); }}>Copy the key</button> : 'only owners and admins can copy the key'}
       </div>
 
-      {note && <p className={`pg-banner ${note.ok ? 'ok' : 'bad'}`} role="status">{note.text}</p>}
-      {plan && (
+      <p className={`pg-banner ${unsaved ? 'warn' : 'ok'}`} role="status">
+        {unsaved
+          ? <span>Not saved yet. Press Save: the check, the list and the tests use what is saved.{value.on && !saved.on ? <b> Saving this starts WhatsApps to real leads.</b> : null}</span>
+          : <span>Saved. WhatsApp follow-ups are <b>{saved.on ? 'on' : 'off'}</b>, at most {saved.perDay ?? 20} a day.</span>}
+      </p>
+      {note && !unsaved && <p className={`pg-banner ${note.ok ? 'ok' : 'bad'}`} role="status">{note.text}</p>}
+      {plan && !unsaved && (
         <div className="pg-banner" role="status">
           <div>
             <b>{plan.nudge}</b> due the quiz nudge and <b>{plan.video}</b> due their video, before ManyChat&apos;s own checks (in ManyChat, opted in, not chatting).
@@ -100,12 +116,12 @@ export default function WhatsAppCard({ value, onChange, onSave, saving, replyUrl
       )}
 
       <div className="pg-actions" style={{ flexWrap: 'wrap' }}>
-        <button type="button" className="btn primary sm" disabled={saving} onClick={() => void onSave()}>{saving ? 'Saving…' : 'Save'}</button>
-        <button type="button" className="btn ghost sm" disabled={Boolean(busy)} onClick={() => void run('check', { action: 'whatsappCheck' })}>{busy === 'check' ? 'Checking…' : 'Check ManyChat'}</button>
-        <button type="button" className="btn ghost sm" disabled={Boolean(busy)} onClick={() => void run('preview', { action: 'whatsappPreview' })}>{busy === 'preview' ? 'Reading…' : 'Who is due'}</button>
+        <button type="button" className="btn primary sm" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
+        <button type="button" className="btn ghost sm" disabled={Boolean(busy) || unsaved} onClick={() => void run('check', { action: 'whatsappCheck' })}>{busy === 'check' ? 'Checking…' : 'Check ManyChat'}</button>
+        <button type="button" className="btn ghost sm" disabled={Boolean(busy) || unsaved} onClick={() => void run('preview', { action: 'whatsappPreview' })}>{busy === 'preview' ? 'Reading…' : 'Who is due'}</button>
         <input className="in" style={{ maxWidth: 190 }} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+27821234567" aria-label="Your WhatsApp number for a test" />
-        <button type="button" className="btn ghost sm" disabled={Boolean(busy) || !phone.trim()} onClick={() => void run('t1', { action: 'whatsappTest', kind: 'nudge', phone })}>{busy === 't1' ? 'Sending…' : 'Test the nudge'}</button>
-        <button type="button" className="btn ghost sm" disabled={Boolean(busy) || !phone.trim()} onClick={() => void run('t2', { action: 'whatsappTest', kind: 'video', phone })}>{busy === 't2' ? 'Sending…' : 'Test the video'}</button>
+        <button type="button" className="btn ghost sm" disabled={Boolean(busy) || unsaved || !phone.trim()} onClick={() => void run('t1', { action: 'whatsappTest', kind: 'nudge', phone })}>{busy === 't1' ? 'Sending…' : 'Test the nudge'}</button>
+        <button type="button" className="btn ghost sm" disabled={Boolean(busy) || unsaved || !phone.trim()} onClick={() => void run('t2', { action: 'whatsappTest', kind: 'video', phone })}>{busy === 't2' ? 'Sending…' : 'Test the video'}</button>
       </div>
     </section>
   );
