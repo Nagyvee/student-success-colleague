@@ -15,7 +15,7 @@ interface Plan {
   perDay: number; sentToday: number; on: boolean; live: boolean; hours: boolean; pausedUntil: number; lastError: string;
 }
 
-export default function WhatsAppCard({ value, onChange, onSave, saving }: { value: Value; onChange: (v: Value) => void; onSave: () => Promise<void> | void; saving: boolean }) {
+export default function WhatsAppCard({ value, onChange, onSave, saving, replyUrl, replyKey }: { value: Value; onChange: (v: Value) => void; onSave: () => Promise<void> | void; saving: boolean; replyUrl: string; replyKey: string }) {
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [phone, setPhone] = useState('');
@@ -72,6 +72,13 @@ export default function WhatsAppCard({ value, onChange, onSave, saving }: { valu
             Off until you switch it on and Save. Check and test first: Meta charges for each marketing message.
           </span>
         </label>
+      </div>
+
+      <div className="pg-hint" style={{ margin: '12px 0', fontSize: 13, lineHeight: 1.6 }}>
+        <b style={{ color: 'var(--ink)' }}>What leads type comes to Thuso.</b> Every lead Thuso messages gets the ManyChat tag <code>thuso_lead</code>. ManyChat&apos;s Default Reply sends people with that tag here
+        (an External Request, POST, Full Contact Data), and Naledi or Zinhle answers on WhatsApp.<br />
+        Address: <code style={{ wordBreak: 'break-all' }}>{replyUrl}</code><br />
+        Header <code>X-Thuso-Token</code>: {replyKey ? <button type="button" className="btn ghost sm" onClick={() => { void navigator.clipboard.writeText(replyKey).then(() => setNote({ ok: true, text: 'Key copied. Paste it in ManyChat yourself; do not share it in a chat.' })); }}>Copy the key</button> : 'only owners and admins can copy the key'}
       </div>
 
       {note && <p className={`pg-banner ${note.ok ? 'ok' : 'bad'}`} role="status">{note.text}</p>}

@@ -30,6 +30,8 @@ const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor,
 
 export type WaKind = 'nudge' | 'video';
 export const WA_FIELDS = ['thuso_programme', 'thuso_quiz', 'thuso_video', 'thuso_call'] as const;
+/** On every contact Thuso messages: ManyChat passes what they type to Thuso, not to another bot. */
+export const LEAD_TAG = 'thuso_lead';
 const STOP_TAG = 'thuso_whatsapp_stop';
 const CHATTING_TAG = /^wa\s*-\s*replied$/i;
 const WA_NAME: Record<WaKind, string> = { nudge: 'the quiz nudge', video: 'their programme video' };
@@ -112,6 +114,10 @@ async function deliver(mc: ReturnType<typeof manychat>, contact: McContact, who:
   // No line breaks or long text: WhatsApp refuses a template whose fields have them.
   const programme = (who.programme || 'a tech career').replace(/\s+/g, ' ').trim().slice(0, 60);
   const values: Record<(typeof WA_FIELDS)[number], string> = { thuso_programme: programme, thuso_quiz: link('quiz'), thuso_video: link('video'), thuso_call: link('call') };
+  // Theirs is a Thuso conversation from the first message: without the tag their reply would go to another bot.
+  const tagged = await mc.tag(contact.id, LEAD_TAG);
+  if (!tagged.ok) return { result: 'account', detail: `the tag ${LEAD_TAG} could not be set: ${tagged.error}` };
+  setRecordField(who.sourceId, who.key, 'manychat_id', String(contact.id));
   // Templates have no fallback for an empty field, so every field must be in before anything is sent.
   for (const name of WA_FIELDS) {
     const r = await mc.setField(contact.id, name, values[name]);
@@ -155,7 +161,10 @@ async function sendTo(mc: ReturnType<typeof manychat>, rec: DataRecord, kind: Wa
       if (tags.includes(STOP_TAG)) set('whatsapp_stopped', 'yes'); else later(30);
       return { result: 'skipped', detail: tags.includes(STOP_TAG) ? 'sent STOP on WhatsApp' : 'not opted in to WhatsApp in ManyChat' };
     }
-    if (tags.some((t) => CHATTING_TAG.test(t.trim())) || at(contact.last_interaction || '') > Date.now() - 7 * DAY) {
+    // Someone else's chat is never interrupted. In a chat that is already Thuso's, a day's quiet is enough.
+    const ours = tags.includes(LEAD_TAG);
+    const lastWrote = at(contact.last_interaction || '');
+    if (ours ? lastWrote > Date.now() - DAY : tags.some((t) => CHATTING_TAG.test(t.trim())) || lastWrote > Date.now() - 7 * DAY) {
       later(7);
       return { result: 'skipped', detail: 'already chatting on WhatsApp' };
     }
@@ -302,6 +311,8 @@ export async function testWhatsApp(kind: WaKind, phone: string, preview: { sourc
   if (!found.contact) return { ok: false, detail: 'ManyChat could not find that number. Open your contact in ManyChat and put the number in its Phone field (or "SA Phone"), then try again.' };
   if (!(found.contact.first_name || '').trim()) return { ok: false, detail: 'Your ManyChat contact has no first name. Add one, then try again.' };
   const out = await deliver(mc, found.contact, { ...preview, programme: leadProgramme(liveFields(rec)) }, kind, s.flows[kind], tenantId, () => undefined);
+  // Typing a reply to a test gets a real answer, for the test lead.
+  if (out.result === 'sent') setRecordField(preview.sourceId, preview.key, 'whatsapp_test_at', new Date().toISOString());
   return out.result === 'sent'
     ? { ok: true, detail: `ManyChat accepted ${WA_NAME[kind]}. Check that it arrives on ${phone}.` }
     : { ok: false, detail: out.detail };

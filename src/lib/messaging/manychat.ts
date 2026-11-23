@@ -17,6 +17,7 @@ export interface McContact {
   whatsapp_phone?: string | null;
   optin_whatsapp?: boolean | null;
   last_interaction?: string | null;
+  last_input_text?: string | null;
   tags?: { name?: string }[];
 }
 
@@ -58,6 +59,19 @@ export function manychat(apiKey: string, timeoutMs = 10_000) {
     },
     fields: () => call<McField[]>('GET', '/fb/page/getCustomFields'),
     setField: (id: string | number, name: string, value: string) => call('POST', '/fb/subscriber/setCustomFieldByName', { body: { subscriber_id: Number(id), field_name: name, field_value: value } }),
+    /** Tags a contact (the tag is made first when ManyChat does not have it). */
+    async tag(id: string | number, name: string): Promise<McReply> {
+      const add = () => call('POST', '/fb/subscriber/addTagByName', { body: { subscriber_id: Number(id), tag_name: name } });
+      const r = await add();
+      if (r.ok || !/tag/i.test(r.error)) return r;
+      const made = await call('POST', '/fb/page/createTag', { body: { name } });
+      return made.ok || /exist/i.test(made.error) ? add() : r;
+    },
+    /** A typed WhatsApp. Only to someone who wrote in the last 24 hours (WhatsApp refuses it otherwise). */
+    sendText: (id: string | number, text: string) => call('POST', '/fb/sending/sendContent', {
+      body: { subscriber_id: Number(id), data: { version: 'v2', content: { type: 'whatsapp', messages: [{ type: 'text', text }] } } },
+    }),
+    info: (id: string | number) => call<McContact>('GET', '/fb/subscriber/getInfo', { query: { subscriber_id: String(id) } }),
     sendFlow: (id: string | number, ns: string) => call('POST', '/fb/sending/sendFlow', { body: { subscriber_id: Number(id), flow_ns: ns } }),
 
     /** The contact with this WhatsApp number, or null when ManyChat has none. A contact found some other way

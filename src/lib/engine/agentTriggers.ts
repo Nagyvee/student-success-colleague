@@ -2,13 +2,13 @@ import type { AgentTrigger, DataRecord, WorkflowDef, WorkflowTrigger } from '@/l
 import { tenantDoc } from './tenantDoc';
 import { getState, log } from './store';
 import { listWorkflows } from './workflows';
-import { noteFacts, noteReply, ranRecently, startAgentRun, type RunRecord } from './agentRuns';
+import { agentWorkedWith, hasActiveRun, noteFacts, noteReply, ranRecently, startAgentRun, type RunRecord } from './agentRuns';
 import { appendConversation, findRecordsByEmail, getRecord, listRecords, setRecordField, upsertRecord, recordKey } from '@/lib/data/records';
 import { LEADS_SOURCE_ID, MOODLE_SOURCE_ID, getSource, liveFields, listSources, type RecordEvent } from '@/lib/data/sources';
 import { matchesAll } from '@/lib/data/conditions';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { getTenantIntegrations } from '@/lib/auth/accounts';
-import { listOffices } from './offices';
+import { listCustomAgents, listOffices } from './offices';
 
 /* What starts an agent.
  *
@@ -207,6 +207,38 @@ export async function dispatchReply(email: string, text: string, name?: string, 
     if (r.run) started++;
   }
   return started;
+}
+
+/** A lead typed something on WhatsApp. 'busy': the agent is still on their last message (try again); 'nobody': no agent answers now. */
+export async function dispatchWhatsAppReply(rec: DataRecord, text: string, meta: { contactId: string; at: number }): Promise<'started' | 'busy' | 'nobody'> {
+  // A test reply (from a hidden test lead) is answered whether or not autopilot is on.
+  const manual = rec.fields.preview === 'yes';
+  const wfs = agentWorkflows().filter((w) => w.agentTrigger?.kind === 'reply.received' && w.agentTrigger.sourceId === rec.sourceId && (manual || autopilotFor(w)));
+  const can = manual || autopilotOn();
+  // Looked at before anything is noted, so trying again never notes it twice.
+  if (can && wfs.some((w) => hasActiveRun(w.id, rec.key))) return 'busy';
+  appendConversation(rec.sourceId, rec.key, 'them', text);
+  noteReply(rec.email, text, (field, value) => { setRecordField(rec.sourceId, rec.key, field, value); }, rec.key);
+  const { noteEngagement } = await import('@/lib/nurture/track');
+  await noteEngagement({ t: currentTenantId(), s: rec.sourceId, k: rec.key, m: `reply_${meta.at.toString(36)}`, x: 'reply' }, 'reply').catch(() => null);
+  // Unsubscribed (nothing is sent by an agent): a person answers what they asked.
+  if (!can || rec.fields.opted_out === 'yes') return 'nobody';
+  // Whoever they have been hearing from: Zinhle once she has worked with them, otherwise Naledi (who signs the WhatsApps).
+  const agents = listCustomAgents();
+  const speaker = agents.find((a) => a.id === (agentWorkedWith('ag_zinhle', rec.key) ? 'ag_zinhle' : 'ag_naledi'));
+  let started = 0;
+  for (const wf of wfs) {
+    const r = await startAgentRun({
+      workflow: wf, record: toRunRecord(getRecord(rec.sourceId, rec.key) || rec), trigger: 'a WhatsApp reply', force: true, as: speaker?.name,
+      vars: {
+        last_reply: text.slice(0, 1500),
+        _extra: `They just wrote on WhatsApp (answer this): "${text.slice(0, 1500)}"\nYou are answering in the same WhatsApp chat: short, plain text, no subject, no links you were not given.`,
+        _wa_id: meta.contactId, _wa_at: String(meta.at),
+      },
+    });
+    if (r.run) started++;
+  }
+  return started ? 'started' : 'nobody';
 }
 
 /* ── Schedules ────────────────────────────────────────────────────────────── */

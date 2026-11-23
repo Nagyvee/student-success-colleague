@@ -31,6 +31,8 @@ let flowAnswer: 'ok' | 'timeout' | 'refused' = 'ok';
 const set: { id: number; name: string; value: string }[] = [];
 const sent: { id: number; ns: string }[] = [];
 const created: Record<string, unknown>[] = [];
+const tagged: { id: number; tag: string }[] = [];
+let tagOk = true;
 const realFetch = globalThis.fetch;
 
 type M = {
@@ -62,6 +64,11 @@ before(async () => {
       }
       case '/fb/subscriber/findByCustomField': return ok(contacts.filter((x) => x.sa && x.sa === u.searchParams.get('field_value')));
       case '/fb/subscriber/createSubscriber': { created.push(body); return ok({ id: 900 + created.length, first_name: body.first_name }); }
+      case '/fb/subscriber/addTagByName':
+        if (!tagOk) return bad(400, 'Tag could not be added');
+        tagged.push({ id: body.subscriber_id, tag: body.tag_name });
+        return ok(null);
+      case '/fb/page/createTag': return bad(400, 'No permission');
       case '/fb/subscriber/setCustomFieldByName':
         if (failField) return bad(failField.status, failField.message);
         set.push({ id: body.subscriber_id, name: body.field_name, value: body.field_value });
@@ -94,7 +101,7 @@ const f = (key: string) => m.rec.getRecord(L(), key)!.fields;
 
 beforeEach(() => T(() => {
   for (const r of m.rec.listRecords(L())) m.rec.removeRecords((x) => x.key === r.key);
-  contacts = []; set.length = 0; sent.length = 0; created.length = 0; failField = null; flowAnswer = 'ok';
+  contacts = []; set.length = 0; sent.length = 0; created.length = 0; tagged.length = 0; tagOk = true; failField = null; flowAnswer = 'ok';
   flows = [{ ns: NUDGE, name: 'Thuso - Quiz nudge' }, { ns: VIDEO, name: 'Thuso - Programme video' }];
   m.acc.updateTenantIntegrations('default', { liveOutreachEnabled: true, manychatApiKey: 'mc_key', whatsappFollowups: { on: true, nudgeFlow: NUDGE, videoFlow: VIDEO, perDay: 20, addContacts: false } });
 }));
@@ -142,6 +149,9 @@ test('a due lead gets the nudge once, with all four fields filled first', () => 
   assert.deepEqual([quiz.k, quiz.x, quiz.m], [a.key, 'quiz', 'wa_nudge']);
   assert.equal(m.track.readTrack(set[3].value)!.x, 'call');
   assert.ok(f(a.key).whatsapp_nudge_at && f(a.key).whatsapp_last_at);
+  // Marked as Thuso's first, so what they type comes to Thuso.
+  assert.deepEqual(tagged, [{ id: 11, tag: 'thuso_lead' }]);
+  assert.equal(f(a.key).manychat_id, '11');
   assert.equal(await m.wa.pumpWhatsApp('default', NOW + 600_000), 0, 'never twice');
   assert.equal(sent.length, 1);
 }));
@@ -272,3 +282,22 @@ test('an email waits a day after a WhatsApp', async () => {
   const { nextEmailAllowedAt } = await import('../src/lib/engine/agentRuns');
   assert.equal(nextEmailAllowedAt({ whatsapp_last_at: iso(NOW - 3_600_000) }, 'new row', NOW, 24), NOW + 23 * 3_600_000);
 });
+
+test('without the thuso_lead tag nothing is sent (the reply would go to another bot)', () => T(async () => {
+  await unpause();
+  const a = lead();
+  contacts = [{ id: 81, first_name: 'Thandi', phone: a.phone }];
+  tagOk = false;
+  assert.equal(await m.wa.pumpWhatsApp('default', NOW), 0);
+  assert.equal(sent.length, 0);
+  assert.ok(!f(a.key).whatsapp_nudge_at);
+}));
+
+test('in a chat that is already with Thuso, a day of quiet is enough', () => T(async () => {
+  await unpause();
+  const quiet = lead(); const talking = lead();
+  const tags = [{ name: 'thuso_lead' }, { name: 'WA - replied' }];
+  contacts = [{ id: 91, first_name: 'A', phone: quiet.phone, tags, last_interaction: iso(Date.now() - 2 * DAY) }, { id: 92, first_name: 'B', phone: talking.phone, tags, last_interaction: iso(Date.now() - 3_600_000) }];
+  assert.equal(await m.wa.pumpWhatsApp('default', NOW), 1);
+  assert.deepEqual(sent.map((x) => x.id), [91]);
+}));

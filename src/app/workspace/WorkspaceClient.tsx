@@ -1323,6 +1323,8 @@ export default function WorkspaceClient() {
           onChange={(whatsappFollowups) => updateField('whatsappFollowups', whatsappFollowups)}
           onSave={() => saveIntegrations({ whatsappFollowups: form.whatsappFollowups || {} }, 'WhatsApp follow-ups')}
           saving={busy === 'WhatsApp follow-ups'}
+          replyUrl={`${origin}/api/webhooks/whatsapp-reply?tenant=${encodeURIComponent(tenant?.slug || 'default')}`}
+          replyKey={tenant?.inboundToken || ''}
         />
 
         {/* 6. PostgreSQL */}

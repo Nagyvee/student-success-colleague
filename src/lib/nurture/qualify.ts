@@ -262,6 +262,17 @@ export async function postDiscord(webhook: string, card: { title: string; text: 
   }
 }
 
+/** A short note in the team's Discord channel (nobody is pinged). */
+export async function postDiscordNote(webhook: string, text: string): Promise<boolean> {
+  if (!isDiscordHook(webhook)) return false;
+  const res = await fetch(`${webhook}?wait=true`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'Thuso', content: text.slice(0, 1900), allowed_mentions: { parse: [] } }),
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => null);
+  return Boolean(res?.ok);
+}
+
 /** Adds (or updates) the lead in the dialer, with the brief in its notes. */
 async function pushToDialer(s: ReturnType<typeof handoffSettings>, rec: Pick<DataRecord, 'name' | 'email' | 'phone' | 'fields'>, q: QualifyInput, brief: string): Promise<DialerReply> {
   const phone = clean(q.phone || rec.phone, 30);

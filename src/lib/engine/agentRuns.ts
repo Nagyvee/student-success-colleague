@@ -189,6 +189,8 @@ export async function startAgentRun(input: {
   vars?: Record<string, string>;
   /** Ignore the cooldown (someone pressed Run). */
   force?: boolean;
+  /** Speak as this agent (a WhatsApp reply is answered by whoever the lead has been hearing from). */
+  as?: string;
 }): Promise<{ run: AgentRun | null; reason?: string }> {
   const wf = input.workflow;
   if (!wf.steps?.length) return { run: null, reason: 'This agent has no steps yet.' };
@@ -208,7 +210,7 @@ export async function startAgentRun(input: {
     workflowId: wf.id,
     workflowName: wf.name,
     agentId: agent?.id || null,
-    agentName: agent?.name || wf.name,
+    agentName: input.as || agent?.name || wf.name,
     departmentId: dept?.id || null,
     departmentName: dept?.name || wf.officeName || 'Operations',
     record: input.record,
@@ -527,7 +529,9 @@ function fill(t: string, f: Record<string, string>) {
 
 /* ── Messages ─────────────────────────────────────────────────────────────── */
 
-async function doMessage(run: AgentRun, step: AgentStep) {
+async function doMessage(run: AgentRun, given: AgentStep) {
+  // They wrote on WhatsApp: the answer goes there.
+  const step: AgentStep = run.vars._wa_id ? { ...given, channel: 'whatsapp' } : given;
   const channel: MessageChannel = step.channel || 'email';
   const f = fieldsFor(run);
   if (f.opted_out === 'yes') {
@@ -539,7 +543,7 @@ async function doMessage(run: AgentRun, step: AgentStep) {
     addLog(run, step, 'fail', 'No email address on the record, so nothing was sent.');
     return;
   }
-  if (channel === 'whatsapp' && !run.record.phone) {
+  if (channel === 'whatsapp' && !run.record.phone && !run.vars._wa_id) {
     addLog(run, step, 'fail', 'No phone number on the record, so no WhatsApp was sent.');
     return;
   }
@@ -644,7 +648,16 @@ async function deliver(run: AgentRun, step: AgentStep | null, draft: DraftMessag
   // A reply to their email stays in the same thread.
   const replyTo = run.vars._reply_msgid || '';
   const threadSubject = replyTo && run.vars._reply_subject ? (/^re:/i.test(run.vars._reply_subject) ? run.vars._reply_subject : `Re: ${run.vars._reply_subject}`) : '';
-  if (channel !== 'whatsapp' && run.record.email) {
+  // The answer to a WhatsApp goes back on WhatsApp while its 24 hours last; after that, by email.
+  let waAnswered = false;
+  if (run.vars._wa_id && channel === 'whatsapp') {
+    const { answerWhatsApp } = await import('@/lib/nurture/waReplies');
+    const r = await answerWhatsApp(run.vars._wa_id, Number(run.vars._wa_at || 0), `${draft.body}${draft.ask ? `\n\n${draft.ask}` : ''}`);
+    sent.push(`WhatsApp: ${r.detail}`);
+    waAnswered = true;
+    if (r.ok) delivered++;
+  }
+  if ((channel !== 'whatsapp' || (waAnswered && !delivered)) && run.record.email) {
     const mailInput = { recipientName: run.record.name, subject: draft.subject, body: draft.body, ask: draft.ask, agentName: run.agentName, officeName: run.departmentName, extraHtml: extras?.cardsHtml, extra: extras ? { footer: extras.footer, pixel: extras.pixel } : undefined };
     // To a lead it is a note from one person (lands in the main inbox, reads as human); to a student, the academy's letterhead.
     const mail = extras ? personalEmail(mailInput) : workflowEmail(mailInput);
@@ -652,7 +665,7 @@ async function deliver(run: AgentRun, step: AgentStep | null, draft: DraftMessag
     sent.push(m.error ? `email failed (${m.error})` : m.delivery === 'smtp' ? 'email sent' : 'email saved to the Inbox (Safe Test Mode)');
     if (!m.error) delivered++;
   }
-  if ((channel === 'whatsapp' || channel === 'email_whatsapp') && run.record.phone) {
+  if (!waAnswered && (channel === 'whatsapp' || channel === 'email_whatsapp') && run.record.phone) {
     const ti = getTenantIntegrations(currentTenantId());
     const text = channel === 'whatsapp' ? `${draft.body}\n\n${draft.ask}` : whatsappText(draft, first, run.agentName);
     const own = Boolean(ti.whatsappUrl || (currentTenantId() === DEFAULT_TENANT_ID && process.env.WHATSAPP_API_URL));
@@ -978,13 +991,13 @@ export function stopRunsFor(email: string, key: string, why: string, exceptRunId
 }
 
 /** A contact replied: their follow-up loops stop at the next check, and the reply is on the record. */
-export function noteReply(email: string, text: string, recordUpdates: (field: string, value: string) => void) {
+export function noteReply(email: string, text: string, recordUpdates: (field: string, value: string) => void, key = '') {
   const e = email.trim().toLowerCase();
   recordUpdates('replied', 'yes');
   recordUpdates('replied_at_ms', String(Date.now()));
   recordUpdates('last_reply', text.slice(0, 600));
   for (const r of doc.get()) {
-    if (ACTIVE.includes(r.status) && r.record.email.toLowerCase() === e) {
+    if (ACTIVE.includes(r.status) && ((e && r.record.email.toLowerCase() === e) || (key && r.record.key === key))) {
       r.vars.replied = 'yes';
       r.vars.replied_at_ms = String(Date.now());
       r.vars.last_reply = text.slice(0, 600);
@@ -1003,6 +1016,16 @@ export function noteFacts(email: string, facts: Record<string, string>) {
     Object.assign(r.vars, facts);
     saveRun(r);
   }
+}
+
+/** Is this workflow busy with this person (running, waiting, or its message waiting for approval)? */
+export function hasActiveRun(workflowId: string, key: string): boolean {
+  return doc.get().some((r) => r.workflowId === workflowId && r.record.key === key && ACTIVE.includes(r.status));
+}
+
+/** Has this agent worked with this person? */
+export function agentWorkedWith(agentId: string, key: string): boolean {
+  return doc.get().some((r) => r.agentId === agentId && r.record.key === key);
 }
 
 /** Was a run started for this workflow and record within the last hours? (scheduled checks use it) */
