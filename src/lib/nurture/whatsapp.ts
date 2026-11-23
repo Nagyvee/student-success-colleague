@@ -10,6 +10,7 @@ import { manychat, type McContact } from '@/lib/messaging/manychat';
 import { leadProgramme } from './programmes';
 import { videoFor } from './video';
 import { signTrack } from './track';
+import { LEAD_TAG, isChattingTag, isStopTag, tagList } from './waTags';
 
 /* WhatsApp follow-ups: a few, where email is not enough.
  *
@@ -23,17 +24,14 @@ import { signTrack } from './track';
  * Each goes once per lead, at most one WhatsApp a week, never within a day of
  * an email, only in daytime. Never to anyone who unsubscribed or sent STOP,
  * qualified or applied, replied to us, is with the sales team, or is in a
- * WhatsApp chat already (Abigail or a person answers those). Old sheet rows
- * are left alone. Off until someone switches it on (Channels & API). */
+ * WhatsApp chat already. Someone another bot has (Abigail's tags) is left out
+ * too: its open question would catch their reply. Old sheet rows are left
+ * alone. Off until someone switches it on (Channels & API). */
 
 const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 
 export type WaKind = 'nudge' | 'video';
 export const WA_FIELDS = ['thuso_programme', 'thuso_quiz', 'thuso_video', 'thuso_call'] as const;
-/** On every contact Thuso messages: ManyChat passes what they type to Thuso, not to another bot. */
-export const LEAD_TAG = 'thuso_lead';
-const STOP_TAG = 'thuso_whatsapp_stop';
-const CHATTING_TAG = /^wa\s*-\s*replied$/i;
 const WA_NAME: Record<WaKind, string> = { nudge: 'the quiz nudge', video: 'their programme video' };
 
 const DAY = 86_400_000;
@@ -101,6 +99,7 @@ function settings(tenantId: string) {
     key: (ti.manychatApiKey || '').trim(), on: Boolean(w.on), live: liveAllowed(ti.liveOutreachEnabled),
     flows: { nudge: (w.nudgeFlow || '').trim(), video: (w.videoFlow || '').trim() } as Record<WaKind, string>,
     perDay: Math.max(1, Math.min(200, Number(w.perDay) || 20)), addContacts: Boolean(w.addContacts),
+    leaveOut: tagList(w.leaveOutTags),
   };
 }
 
@@ -157,14 +156,18 @@ async function sendTo(mc: ReturnType<typeof manychat>, rec: DataRecord, kind: Wa
     contact = { ...made.data, first_name: made.data.first_name || firstNameOf(rec) };
   } else {
     const tags = (contact.tags || []).map((t) => t?.name || '');
-    if (tags.includes(STOP_TAG) || contact.optin_whatsapp === false) {
-      if (tags.includes(STOP_TAG)) set('whatsapp_stopped', 'yes'); else later(30);
-      return { result: 'skipped', detail: tags.includes(STOP_TAG) ? 'sent STOP on WhatsApp' : 'not opted in to WhatsApp in ManyChat' };
+    // Opted out with any bot is opted out: it is the same WhatsApp number.
+    const stopped = tags.some(isStopTag);
+    if (stopped || contact.optin_whatsapp === false) {
+      if (stopped) set('whatsapp_stopped', 'yes'); else later(30);
+      return { result: 'skipped', detail: stopped ? 'sent STOP on WhatsApp' : 'not opted in to WhatsApp in ManyChat' };
     }
+    const other = tags.find((t) => s.leaveOut.includes(t.trim().toLowerCase()));
+    if (other) { later(3); return { result: 'skipped', detail: `tagged ${other} in ManyChat (with another bot or a person)` }; }
     // Someone else's chat is never interrupted. In a chat that is already Thuso's, a day's quiet is enough.
     const ours = tags.includes(LEAD_TAG);
     const lastWrote = at(contact.last_interaction || '');
-    if (ours ? lastWrote > Date.now() - DAY : tags.some((t) => CHATTING_TAG.test(t.trim())) || lastWrote > Date.now() - 7 * DAY) {
+    if (ours ? lastWrote > Date.now() - DAY : tags.some(isChattingTag) || lastWrote > Date.now() - 7 * DAY) {
       later(7);
       return { result: 'skipped', detail: 'already chatting on WhatsApp' };
     }
@@ -313,7 +316,8 @@ export async function testWhatsApp(kind: WaKind, phone: string, preview: { sourc
   const out = await deliver(mc, found.contact, { ...preview, programme: leadProgramme(liveFields(rec)) }, kind, s.flows[kind], tenantId, () => undefined);
   // Typing a reply to a test gets a real answer, for the test lead.
   if (out.result === 'sent') setRecordField(preview.sourceId, preview.key, 'whatsapp_test_at', new Date().toISOString());
+  const theirs = (found.contact.tags || []).map((t) => (t?.name || '').trim()).filter((t) => s.leaveOut.includes(t.toLowerCase()));
   return out.result === 'sent'
-    ? { ok: true, detail: `ManyChat accepted ${WA_NAME[kind]}. Check that it arrives on ${phone}.` }
+    ? { ok: true, detail: `ManyChat accepted ${WA_NAME[kind]}. Check that it arrives on ${phone}.${theirs.length ? ` Your contact is tagged ${theirs.join(', ')}, so another bot may answer what you type (a lead with that tag would be left out).` : ''}` }
     : { ok: false, detail: out.detail };
 }

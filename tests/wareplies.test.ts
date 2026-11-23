@@ -14,6 +14,7 @@ for (const k of ['DATABASE_URL', 'PGHOST', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY'
 process.env.SENDING_PAUSED = 'false';
 
 const texts: { id: number; text: string }[] = [];
+const tags: { id: number; tag: string }[] = [];
 const discord: string[] = [];
 const realFetch = globalThis.fetch;
 
@@ -38,6 +39,7 @@ before(async () => {
       const b = JSON.parse(String(init?.body));
       texts.push({ id: b.subscriber_id, text: b.data.content.messages[0].text });
     }
+    if (u.pathname === '/fb/subscriber/addTagByName') { const b = JSON.parse(String(init?.body)); tags.push({ id: b.subscriber_id, tag: b.tag_name }); }
     return new Response(JSON.stringify({ status: 'success', data: {} }), { status: 200 });
   }) as typeof fetch;
   m = {
@@ -137,6 +139,37 @@ test('an answer still waiting: their next message is kept, not lost, and the tea
   assert.equal(await m.wr.pumpWaReplies('default', t + 31 * 60_000), 0);
   assert.match(discord.at(-1)!, /wrote again while an earlier answer is not finished/);
   setMode({ requireApproval: false });
+}));
+
+test('stop, in words: no agent, no score, one confirmation, and an answer waiting for approval never goes', () => T(async () => {
+  const { optOutWords } = await import('../src/lib/nurture/waTags');
+  for (const s of ['STOP', 'Stop please.', 'opt out', 'OPT-OUT', 'Please don\u2019t message me again', 'stop sending me messages']) assert.equal(optOutWords(s), 'whatsapp', s);
+  for (const s of ['Unsubscribe me', 'remove me from your list', 'Do not contact me', 'stop contacting me']) assert.equal(optOutWords(s), 'all', s);
+  for (const s of ['When do classes stop?', 'I want to stop working nights and study', 'Can I cancel later?', 'Hi', '', 'Please remove the fee', 'how do I opt out of the payment plan']) assert.equal(optOutWords(s), null, s);
+
+  add('s@x', '+27820000021', { manychat_id: '1021' });
+  setMode({ requireApproval: true });
+  say('1021', 'What does it cost?');
+  await m.wr.pumpWaReplies('default', later());
+  const run = () => m.runs.listAgentRuns({ limit: 100 }).find((r) => r.record.key === 's@x')!;
+  await until(() => run()?.status === 'awaiting_approval');
+  const before = texts.length; const score = m.rec.getRecord(L(), 's@x')!.fields.engagement_score;
+  say('1021', 'Opt out please');
+  assert.equal(await m.wr.pumpWaReplies('default', later()), 0);
+  assert.equal(run().status, 'stopped');
+  assert.deepEqual(texts.slice(before).map((x) => x.id), [1021]);
+  assert.match(texts.at(-1)!.text, /will not get WhatsApp follow-ups/);
+  assert.deepEqual(tags.at(-1), { id: 1021, tag: 'thuso_whatsapp_stop' });
+  const f = m.rec.getRecord(L(), 's@x')!.fields;
+  assert.equal(f.whatsapp_stopped, 'yes');
+  assert.notEqual(f.opted_out, 'yes');
+  assert.equal(f.engagement_score, score, 'asking us to stop is not interest');
+  setMode({ requireApproval: false });
+
+  add('r@x', '+27820000022', { manychat_id: '1022' });
+  say('1022', 'Remove me from your list');
+  await m.wr.pumpWaReplies('default', later());
+  assert.equal(m.rec.getRecord(L(), 'r@x')!.fields.opted_out, 'yes');
 }));
 
 test('the answer goes only within WhatsApp\'s 24 hours, and not at all while sending is paused', () => T(async () => {

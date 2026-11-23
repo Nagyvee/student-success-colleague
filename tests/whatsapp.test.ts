@@ -103,7 +103,7 @@ beforeEach(() => T(() => {
   for (const r of m.rec.listRecords(L())) m.rec.removeRecords((x) => x.key === r.key);
   contacts = []; set.length = 0; sent.length = 0; created.length = 0; tagged.length = 0; tagOk = true; failField = null; flowAnswer = 'ok';
   flows = [{ ns: NUDGE, name: 'Thuso - Quiz nudge' }, { ns: VIDEO, name: 'Thuso - Programme video' }];
-  m.acc.updateTenantIntegrations('default', { liveOutreachEnabled: true, manychatApiKey: 'mc_key', whatsappFollowups: { on: true, nudgeFlow: NUDGE, videoFlow: VIDEO, perDay: 20, addContacts: false } });
+  m.acc.updateTenantIntegrations('default', { liveOutreachEnabled: true, manychatApiKey: 'mc_key', whatsappFollowups: { on: true, nudgeFlow: NUDGE, videoFlow: VIDEO, perDay: 20, addContacts: false, leaveOutTags: 'meta-ads-2026, ai-human-handoff' } });
 }));
 /** A fresh start for the pump's own memory (day count, pause). */
 const unpause = async () => { await m.wa.checkWhatsApp('default'); };
@@ -190,6 +190,30 @@ test('STOP, not opted in, or already chatting: left alone; someone not in ManyCh
   m.rec.setRecordField(L(), nobody.key, 'whatsapp_retry_at', '');
   assert.equal(await m.wa.pumpWhatsApp('default', NOW), 1);
   assert.deepEqual(created, [{ first_name: 'Thandi', last_name: 'Mokoena', whatsapp_phone: nobody.phone, phone: nobody.phone, has_opt_in_sms: false, has_opt_in_email: false }]);
+}));
+
+test('another bot has them, a person has them, or they opted out with any bot: left alone; the list can be changed', () => T(async () => {
+  await unpause();
+  const abigail = lead(); const person = lead(); const opted = lead(); const open = lead();
+  contacts = [
+    { id: 1, first_name: 'A', phone: abigail.phone, tags: [{ name: 'Meta-Ads-2026' }] },
+    { id: 2, first_name: 'B', phone: person.phone, tags: [{ name: 'thuso_lead' }, { name: 'ai-human-handoff' }] },
+    { id: 3, first_name: 'C', phone: opted.phone, tags: [{ name: 'opted_out' }] },
+    { id: 4, first_name: 'D', phone: open.phone, tags: [{ name: 'wa_open' }] },
+  ];
+  assert.equal(await m.wa.pumpWhatsApp('default', NOW), 0);
+  assert.equal(tagged.length, 0);
+  assert.equal(f(opted.key).whatsapp_stopped, 'yes');
+  assert.ok(!f(abigail.key).whatsapp_nudge_at && !f(abigail.key).whatsapp_stopped);
+  // Once the other bot passes Thuso's leads back, its tag is taken off the list; opting out never is.
+  m.acc.updateTenantIntegrations('default', { whatsappFollowups: { leaveOutTags: 'ai-human-handoff' } });
+  for (const x of [abigail, person, opted]) { m.rec.setRecordField(L(), x.key, 'whatsapp_retry_at', ''); m.rec.setRecordField(L(), x.key, 'whatsapp_stopped', ''); }
+  assert.equal(await m.wa.pumpWhatsApp('default', NOW), 1);
+  assert.deepEqual(sent.map((x) => x.id), [1]);
+  m.acc.updateTenantIntegrations('default', { whatsappFollowups: { leaveOutTags: 'meta-ads-2026' } });
+  m.rec.upsertRecord(L(), { key: 'preview:u2', name: 'Nigel', email: '', phone: '', fields: { preview: 'yes', interest: PROGRAMME } });
+  contacts = [{ id: 72, first_name: 'Nigel', phone: '+27820000072', tags: [{ name: 'meta-ads-2026' }] }];
+  assert.match((await m.wa.testWhatsApp('nudge', '+27820000072', { sourceId: L(), key: 'preview:u2' }, 'default')).detail, /tagged meta-ads-2026, so another bot may answer/);
 }));
 
 test('a contact ManyChat made from a WhatsApp chat is found by "SA Phone"; a different number is never used', () => T(async () => {

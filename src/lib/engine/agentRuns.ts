@@ -650,6 +650,10 @@ async function deliver(run: AgentRun, step: AgentStep | null, draft: DraftMessag
   const threadSubject = replyTo && run.vars._reply_subject ? (/^re:/i.test(run.vars._reply_subject) ? run.vars._reply_subject : `Re: ${run.vars._reply_subject}`) : '';
   // The answer to a WhatsApp goes back on WhatsApp while its 24 hours last; after that, by email.
   let waAnswered = false;
+  if (run.vars._wa_id && Number(leadRec?.fields.whatsapp_stopped_at || 0) >= Number(run.vars._wa_at || 0) && leadRec?.fields.whatsapp_stopped_at) {
+    addLog(run, step, 'skip', `${first} asked us to stop after that message, so nothing was sent.`);
+    return;
+  }
   if (run.vars._wa_id && channel === 'whatsapp') {
     const { answerWhatsApp } = await import('@/lib/nurture/waReplies');
     const r = await answerWhatsApp(run.vars._wa_id, Number(run.vars._wa_at || 0), `${draft.body}${draft.ask ? `\n\n${draft.ask}` : ''}`);
@@ -983,6 +987,18 @@ export function stopRunsFor(email: string, key: string, why: string, exceptRunId
   for (const r of doc.get()) {
     if (!ACTIVE.includes(r.status) || r.id === exceptRunId) continue;
     if (!((e && r.record.email.toLowerCase() === e) || r.record.key === key)) continue;
+    addLog(r, null, 'info', why);
+    finish(r, 'stopped', 'Stopped.');
+    n++;
+  }
+  return n;
+}
+
+/** They asked WhatsApp to stop: an answer still being written or waiting for approval does not go out. */
+export function stopWhatsAppAnswers(key: string, why: string): number {
+  let n = 0;
+  for (const r of doc.get()) {
+    if (!ACTIVE.includes(r.status) || r.record.key !== key || !r.vars._wa_id) continue;
     addLog(r, null, 'info', why);
     finish(r, 'stopped', 'Stopped.');
     n++;

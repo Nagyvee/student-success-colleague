@@ -432,7 +432,7 @@ export interface TenantIntegrations {
   manychatTag?: string;
   manychatChannel?: 'whatsapp' | 'instagram' | 'messenger' | 'sms';
   /** WhatsApp follow-ups for leads: the ManyChat automations (approved templates), and the switch. */
-  whatsappFollowups?: { on?: boolean; nudgeFlow?: string; videoFlow?: string; perDay?: number; addContacts?: boolean };
+  whatsappFollowups?: { on?: boolean; nudgeFlow?: string; videoFlow?: string; perDay?: number; addContacts?: boolean; leaveOutTags?: string };
   defaultChannel?: OutreachChannel;
   tutorLanguage?: TutorLanguage;
   academyFocus?: string;

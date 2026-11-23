@@ -374,6 +374,7 @@ function mergeWhatsapp(next: TenantIntegrations['whatsappFollowups'], prev: Tena
     videoFlow: flow(next.videoFlow, p.videoFlow),
     perDay: Number.isFinite(Number(next.perDay)) && Number(next.perDay) > 0 ? Math.min(200, Math.round(Number(next.perDay))) : p.perDay,
     addContacts: typeof next.addContacts === 'boolean' ? next.addContacts : p.addContacts,
+    leaveOutTags: typeof next.leaveOutTags === 'string' ? next.leaveOutTags.trim().slice(0, 500) : p.leaveOutTags,
   };
 }
 

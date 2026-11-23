@@ -1,6 +1,6 @@
 import type { DataRecord } from '@/lib/types';
 import { tenantDoc } from '@/lib/engine/tenantDoc';
-import { listRecords, setRecordField } from '@/lib/data/records';
+import { appendConversation, listRecords, setRecordField } from '@/lib/data/records';
 import { LEADS_SOURCE_ID } from '@/lib/data/sources';
 import { getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
@@ -8,6 +8,7 @@ import { liveAllowed, sendingPaused } from '@/lib/email/pause';
 import { log as storeLog } from '@/lib/engine/store';
 import { manychat, samePhoneKey } from '@/lib/messaging/manychat';
 import { discordWebhook, postDiscordNote } from './qualify';
+import { STOP_TAG, optOutWords } from './waTags';
 
 /* What Thuso's leads type on WhatsApp.
  *
@@ -107,6 +108,9 @@ export async function pumpWaReplies(tenantId = currentTenantId(), now = Date.now
         continue;
       }
       if (rec.fields.manychat_id !== c.id) setRecordField(rec.sourceId, rec.key, 'manychat_id', c.id);
+      // "Stop" is done at once, whatever else is going on, and is never argued with.
+      const out = texts.map(optOutWords).reduce((a, b) => (a === 'all' || b === 'all' ? 'all' : a || b), null);
+      if (out) { done(); await optOut(rec, c, said, out, tenantId); continue; }
       // After a voice note ManyChat still shows their last typed message: not answered a second time.
       const stale = texts.length === 1 && said.length > 12 && said === rec.fields.whatsapp_last_text;
       const { dispatchWhatsAppReply } = await import('@/lib/engine/agentTriggers');
@@ -132,6 +136,27 @@ export async function pumpWaReplies(tenantId = currentTenantId(), now = Date.now
     busy.delete(tenantId);
   }
   return answered;
+}
+
+/** They asked us to stop: no more WhatsApps (or nothing at all), said once. */
+async function optOut(rec: DataRecord, c: Chat, said: string, what: 'whatsapp' | 'all', tenantId: string): Promise<void> {
+  const why = what === 'all' ? 'asked on WhatsApp not to be contacted' : 'asked WhatsApp to stop';
+  appendConversation(rec.sourceId, rec.key, 'them', said);
+  setRecordField(rec.sourceId, rec.key, 'whatsapp_stopped', 'yes');
+  setRecordField(rec.sourceId, rec.key, 'whatsapp_stopped_at', String(c.lastAt));
+  const { stopWhatsAppAnswers } = await import('@/lib/engine/agentRuns');
+  stopWhatsAppAnswers(rec.key, `They ${why}.`);
+  if (what === 'all' && rec.fields.preview !== 'yes') {
+    const { noteEngagement } = await import('./track');
+    await noteEngagement({ t: tenantId, s: rec.sourceId, k: rec.key, m: 'wa_stop', x: 'unsub' }, 'unsub').catch(() => null);
+  }
+  log('system', 'info', `${rec.name} ${why}. No more WhatsApps go to them.`);
+  const key = (getTenantIntegrations(tenantId).manychatApiKey || '').trim();
+  if (key) {
+    const r = await manychat(key).tag(c.id, STOP_TAG);
+    if (!r.ok) log('system', 'error', `${rec.name} is stopped here, but ManyChat's tag ${STOP_TAG} could not be set: ${r.error}`);
+  }
+  await answerWhatsApp(c.id, c.lastAt, what === 'all' ? 'Done. We will not contact you again. All the best.' : 'Done. You will not get WhatsApp follow-ups from us again.', tenantId);
 }
 
 /** Sends the answer in the same chat, while WhatsApp still allows it. */

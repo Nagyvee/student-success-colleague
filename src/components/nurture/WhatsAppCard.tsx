@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { TenantIntegrations } from '@/lib/types';
 import Icon from '@/components/Icon';
+import { LEAVE_OUT_DEFAULT } from '@/lib/nurture/waTags';
 import { nurturePost } from './api';
 
 /* WhatsApp follow-ups (Channels & API): the two ManyChat automations, a check
@@ -55,6 +56,11 @@ export default function WhatsAppCard({ value, onChange, onSave, saving, replyUrl
         <label className="field">
           <span>Most WhatsApps a day</span>
           <input type="number" min={1} max={200} value={value.perDay ?? 20} onChange={(e) => onChange({ ...value, perDay: Number(e.target.value) })} />
+        </label>
+        <label className="field" style={{ gridColumn: '1 / -1' }}>
+          <span>Leave out people with these ManyChat tags</span>
+          <input type="text" value={value.leaveOutTags ?? LEAVE_OUT_DEFAULT} onChange={(e) => onChange({ ...value, leaveOutTags: e.target.value })} placeholder="tag-one, tag-two" spellCheck={false} />
+          <small className="pg-hint">People another bot (Abigail) is talking to, or a person has taken over. If Thuso messaged them, that bot could catch their reply.</small>
         </label>
         <label className="switch" style={{ gridColumn: '1 / -1', alignItems: 'flex-start', lineHeight: 1.45 }}>
           <input type="checkbox" checked={Boolean(value.addContacts)} onChange={(e) => onChange({ ...value, addContacts: e.target.checked })} />
