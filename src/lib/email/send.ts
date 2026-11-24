@@ -297,6 +297,9 @@ export async function sendManyChat(input: {
   }
 }
 
+/** An Admissions email, not a test or a sample someone sent themselves. */
+export const isNurtureEmail = (m: Pick<MailInput, 'dept' | 'subject'>): boolean => /admissions/i.test(m.dept || '') && !/^\[(test|sample)[^a-z]/i.test(m.subject);
+
 export async function sendMail(input: MailInput): Promise<InboxMail> {
   const tid = currentTenantId();
   const ti = getTenantIntegrations(tid);
@@ -338,12 +341,13 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
       ? `[Paused] Email for ${input.toName} (${input.to}) kept in the Inbox: sending is paused on this server.`
       : `[Safe Test Mode] Email for ${input.toName} (${input.to}) saved to Inbox preview only — Live Outreach is OFF.`);
   }
-  // Admissions emails that really went: counted for the daily report, and the lead remembers when.
-  if (delivery === 'smtp' && /admissions/i.test(input.dept || '')) {
+  // Admissions emails that really went: the lead remembers when, and the daily report counts it.
+  if (delivery === 'smtp' && isNurtureEmail(input)) {
     try {
       const [{ bumpStat }, { findRecordsByEmail, setRecordField }] = await Promise.all([import('@/lib/nurture/store'), import('@/lib/data/records')]);
-      bumpStat('delivered');
-      for (const r of findRecordsByEmail(to)) setRecordField(r.sourceId, r.key, 'nurture_delivered_at', new Date().toISOString());
+      const people = findRecordsByEmail(to);
+      if (people.some((r) => r.fields.preview !== 'yes')) bumpStat('delivered'); // to a lead, never to the team
+      for (const r of people) setRecordField(r.sourceId, r.key, 'nurture_delivered_at', new Date().toISOString());
     } catch { /* the email went; only the count is missed */ }
   }
   const mail: InboxMail = {

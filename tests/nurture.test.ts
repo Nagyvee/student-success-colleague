@@ -299,7 +299,33 @@ test('a qualified lead is labelled by where they came from, and the brief tells 
   assert.equal(leadChannel({ platform: 'ig' }), 'Instagram ads');
   assert.equal(leadChannel({ platform: 'TikTok' }), 'TikTok');
   assert.equal(leadChannel({ agent_sheet_tab: 'WhatsApp Leads' }), 'WhatsApp');
-  assert.equal(leadChannel({}), 'Website form');
+  assert.equal(leadChannel({}), 'Not recorded', 'never a guess');
+  assert.equal(leadChannel({ received_at: '2026-11-24T09:00:00Z' }), 'Website form', 'sent by a form to Thuso itself');
+  assert.equal(leadChannel({ platform: 'an' }), 'Meta ads');
+  assert.equal(leadChannel({ source: 'Melsoft B2C - Intake Campaign', campaign_name: 'Melsoft B2C - Intake Campaign' }), 'Meta ads', 'an ad, and no platform: Meta, not which of the two');
+  assert.equal(leadChannel({ platform: 'ig', agent_sheet_tab: 'WhatsApp Leads' }), 'Instagram ads', 'the ad comes before the tab');
+  assert.equal(leadChannel({ agent_sheet_tab: 'openclaw-social-leads', source: 'TikTok' }), 'TikTok', 'the one it names, before "Social media"');
+  assert.equal(leadChannel({ agent_sheet_tab: 'openclaw-social-leads' }), 'Social media');
+  assert.equal(leadChannel({ agent_sheet_tab: 'Applications', dialer_source: 'Melsoft leads' }), 'Website form');
+  // Moved to nurturing by the team: what the dialer recorded, never the stage they are in.
+  const moved = (source: string, detail = '', more: Record<string, string> = {}) => leadChannel({ agent_dialer_kind: 'lead', agent_sheet_tab: 'Nurturing (Thuso) DNC', agent_dialer_source: source, ...(detail ? { agent_dialer_source_detail: detail } : {}), ...more });
+  // As the dialer really keeps them.
+  assert.equal(moved('ig', 'B2C Meta Ads v4'), 'Instagram ads');
+  assert.equal(moved('fb', 'B2C Meta Ads v4'), 'Facebook ads');
+  assert.equal(moved('TikTok', 'openclaw-social-leads'), 'TikTok');
+  assert.equal(moved('WhatsApp Leads', 'WhatsApp Leads'), 'WhatsApp');
+  assert.equal(moved('direct', 'Applications'), 'Website form');
+  assert.equal(moved('direct'), 'Website form');
+  assert.equal(moved('google', 'Applications'), 'Google');
+  assert.equal(moved('Meta ads', 'B2C Meta Ads'), 'Meta ads');
+  assert.equal(moved('Melsoft leads', 'WhatsApp Leads'), 'WhatsApp');
+  assert.equal(moved('website'), 'Website form');
+  assert.equal(moved('manual'), 'Added by hand');
+  assert.equal(moved('import', 'april.csv'), 'Imported from a file');
+  assert.equal(moved('Career expo'), 'Career expo', 'a name of your own is kept as it is');
+  assert.equal(moved('Pipeline'), 'Not recorded');
+  assert.equal(moved('Website form', 'Thuso qualified: asked us to call them'), 'Not recorded', 'a guess Thuso wrote there before');
+  assert.equal(leadChannel({ agent_dialer_kind: 'lead', agent_sheet_tab: 'WhatsApp nurture', agent_dialer_source: 'Meta ads' }), 'Meta ads');
   const brief = leadBrief({ name: 'Thandi Mokoena', email: 't@example.com', phone: '0710000000', fields: { first_name: 'Thandi', platform: 'ig', programme: 'Data Science', engagement_score: '11', fit_track: 'The Detective', how_will_you_finance_the_program: 'My parents will pay' } }, { reason: 'call', bestTime: 'This afternoon', note: 'Can I pay monthly?' });
   assert.match(brief, /Thandi Mokoena asked us to call them\. Call immediately\./);
   assert.match(brief, /Source: Instagram ads/);

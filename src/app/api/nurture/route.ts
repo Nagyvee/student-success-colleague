@@ -178,7 +178,7 @@ export async function GET(req: Request) {
       const all = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes').map(leadRow);
       const counts = stageCounts(all);
       const rows = all
-        .filter((r) => !q || `${r.name} ${r.email} ${r.phone} ${r.programme} ${r.source}`.toLowerCase().includes(q))
+        .filter((r) => !q || `${r.name} ${r.email} ${r.phone} ${r.programme} ${r.source} ${r.channel}`.toLowerCase().includes(q))
         .filter((r) => !want || stageOf(r) === want)
         .sort((a, b) => b.score - a.score || b.firstSeenAt - a.firstSeenAt)
         .slice(0, 300);

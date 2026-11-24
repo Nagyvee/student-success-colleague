@@ -73,7 +73,7 @@ export function LeadsTab({ data, notify, refresh, initialQ = '' }: { data: Overv
                   <tr key={r.key} onClick={() => setOpen(r.key)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') setOpen(r.key); }}>
                     <td><b>{r.name}</b><small>{r.email || r.phone}</small></td>
                     <td>{r.programme || <em>—</em>}</td>
-                    <td>{r.source || <em>—</em>}</td>
+                    <td>{r.channel || r.source || <em>—</em>}{r.channel && r.source && r.source.toLowerCase() !== r.channel.toLowerCase() && !/^(fb|ig)$/i.test(r.source) ? <small>{r.source}</small> : null}</td>
                     <td>{(() => { const st = stageOf(r); return <Chip tone={st === 'opted_out' ? 'muted' : st === 'qualified' || st === 'applied' ? 'good' : heat(r.engagement)}>{STAGE_LABEL[st]} · {r.score}</Chip>; })()}</td>
                     <td>{r.opens} · {r.clicks}</td>
                     <td>{r.sent}</td>

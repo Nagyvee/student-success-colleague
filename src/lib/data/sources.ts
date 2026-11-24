@@ -414,7 +414,7 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
   }
 }
 
-interface Waiting { id: string; kind?: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown>; first_seen_at?: string | null }
+interface Waiting { id: string; kind?: string; source: string; source_detail?: string | null; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown>; first_seen_at?: string | null }
 
 /** The dialer's people waiting for Thuso (GET /api/v1/nurture), every page. `steady` is false when the list
  *  changed while it was being read: someone may be missing from it who is still waiting. */
@@ -464,7 +464,7 @@ async function readOtherTabs(source: DataSource, tenantId: string, seen: Set<str
 }
 
 /** When a sheet row says it came in, where it says so beyond doubt (2026-11-24T09:15, never 11/12/2026); else 0. */
-function rowTime(f: Record<string, string>): number {
+export function rowTime(f: Record<string, string>): number {
   const said = String(f.created_time || f.created_at || f.timestamp || f.submitted_at || '').trim();
   const t = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(said) ? Date.parse(said) : NaN;
   return Number.isFinite(t) && t <= Date.now() + 86_400_000 ? t : 0;
@@ -500,6 +500,10 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
       rec.fields.agent_dialer_row_id = row.id;
       rec.fields.agent_sheet_tab = row.tab || row.source || '';
       rec.fields.agent_dialer_source = row.source || '';
+      // Agent fields: they say where and when the person came in, and never count as a change.
+      rec.fields.agent_dialer_kind = row.kind || '';
+      if (row.source_detail) rec.fields.agent_dialer_source_detail = row.source_detail;
+      if (row.first_seen_at) rec.fields.agent_dialer_first_seen = row.first_seen_at;
       if (seen.has(rec.key)) continue;
       seen.add(rec.key);
       // Moved to nurturing by the team: their choice stands, even for someone cleared from the list.

@@ -153,7 +153,8 @@ export async function noteEngagement(p: TrackPayload, kind: EngagementKind, deta
     const res = bankDoc.get().find((r) => r.id === p.r);
     if (res) { res.stats.clicks++; bankDoc.save(); }
   }
-  if (counted) bumpStat(kind === 'open' ? 'opens' : kind === 'click' ? 'clicks' : kind === 'quiz' ? 'quizzes' : kind === 'video' ? 'videoViews' : 'clicks');
+  // (A reply is counted from the lead's own record, never as a click.)
+  if (counted && kind !== 'reply') bumpStat(kind === 'open' ? 'opens' : kind === 'click' ? 'clicks' : kind === 'quiz' ? 'quizzes' : 'videoViews');
 
   const after = updates.engagement || before;
   if (kind !== 'open') {

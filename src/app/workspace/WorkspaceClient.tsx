@@ -83,14 +83,15 @@ export default function WorkspaceClient() {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [tests, setTests] = useState<Record<string, TestOutcome>>({});
   // The daily report, as it stands now (looked at here before anything goes to the team).
-  const [report, setReport] = useState<{ title: string; description: string; fields: { name: string; value: string }[] } | null>(null);
+  type ReportView = { title: string; description: string; fields: { name: string; value: string }[] };
+  const [report, setReport] = useState<(ReportView & { last?: ReportView | null }) | null>(null);
   async function reportAction(kind: 'report' | 'report-post') {
     setBusy(kind);
     setNotice(null);
     try {
       const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'testConnection', kind, draft: {} }) });
       const j = await res.json();
-      if (kind === 'report' && j.report) setReport(j.report);
+      if (kind === 'report' && j.report) setReport({ ...j.report, last: j.last });
       setNotice({ kind: j.ok ? 'ok' : 'err', text: j.detail || j.error || (j.ok ? 'Done.' : 'Something went wrong.') });
     } catch {
       setNotice({ kind: 'err', text: 'Network error.' });
@@ -1135,14 +1136,19 @@ export default function WorkspaceClient() {
                 <p className="pg-sub">{report.description} This preview was not posted anywhere.</p>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-              {report.fields.map((f) => (
-                <div key={f.name} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--surface-sunken)' }}>
-                  <b style={{ fontSize: 12.5 }}>{f.name}</b>
-                  <div style={{ fontSize: 13, whiteSpace: 'pre-line', marginTop: 4 }}>{f.value.replace(/\*\*/g, '')}</div>
+            {[report, ...(report.last ? [report.last] : [])].map((part, i) => (
+              <div key={part.title}>
+                {i > 0 && <p className="pg-sub" style={{ margin: '16px 0 8px' }}><b style={{ color: 'var(--ink)' }}>{part.title}.</b> {part.description} Only here, never posted.</p>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                  {part.fields.map((f) => (
+                    <div key={f.name} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--surface-sunken)' }}>
+                      <b style={{ fontSize: 12.5 }}>{f.name}</b>
+                      <div style={{ fontSize: 13, whiteSpace: 'pre-line', marginTop: 4 }}>{f.value.replace(/\*\*/g, '')}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
             <div className="pg-actions">
               <button type="button" className="btn primary sm" disabled={busy === 'report-post'} onClick={() => { if (window.confirm('Post this report in the Discord channel now? Everyone in the channel sees it.')) void reportAction('report-post'); }}>
                 {busy === 'report-post' ? 'Posting…' : 'Post it in Discord now'}

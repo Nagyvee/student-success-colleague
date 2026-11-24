@@ -134,12 +134,24 @@ test('switching to the dialer emails nobody old: rows it held for days come in q
     { ...row('o1', { full_name: 'Old Row', email: 'oldrow@example.com', id: 'l:1' }), kind: 'sheet_row', first_seen_at: at(6) },
     { ...row('n1', { full_name: 'New Row', email: 'newrow@example.com', id: 'l:2' }), kind: 'sheet_row', first_seen_at: at(0.1) },
     { ...row('c1', { full_name: 'Cleared Row', email: 'cleared@example.com', id: 'l:555' }), kind: 'sheet_row', first_seen_at: at(6) },
-    { id: 'lead-9', kind: 'lead', source: 'Meta ads', tab: 'Nurturing (Thuso) DNC', name: 'Moved Person', phone: '+27835550000', email: 'moved@example.com', cells: null, values: { name: 'Moved Person' }, first_seen_at: at(40) },
+    { id: 'lead-9', kind: 'lead', source: 'direct', source_detail: 'Applications', tab: 'Nurturing (Thuso) DNC', name: 'Moved Person', phone: '+27835550000', email: 'moved@example.com', cells: null, values: { name: 'Moved Person' }, first_seen_at: at(40) },
   );
   const events = await m.src.readSource(m.src.getSource(L)!);
   assert.deepEqual(events.map((e) => e.record.email).sort(), ['moved@example.com', 'newrow@example.com']);
   assert.equal(m.rec.getRecord(L, 'oldrow@example.com')!.fields.imported_quietly, 'yes');
   assert.equal(m.rec.getRecord(L, 'cleared@example.com'), null, 'cleared from the sheet, the same row in the dialer stays out');
+  // Where they came from is what the dialer recorded; in the report, someone from weeks ago is not a new lead.
+  const { cameIn } = await import('../src/lib/nurture/report');
+  const moved = () => m.rec.getRecord(L, 'moved@example.com')!;
+  assert.equal(m.q.leadChannel(moved().fields), 'Website form');
+  const came = cameIn(m.rec.listRecords(L).filter((r) => /^(oldrow|newrow|moved)@/.test(r.key)), Date.now() - 3_600_000, Date.now() + 1000);
+  assert.deepEqual([came.fresh.map((r) => r.key), came.older.map((r) => r.key)], [['newrow@example.com'], ['moved@example.com']]);
+  // Leads already here from before Thuso kept this: filled in by the next read, and no agent starts because of it.
+  for (const k of ['dialer_kind', 'dialer_first_seen', 'dialer_source_detail']) { delete moved().fields[k]; delete moved().fields[`agent_${k}`]; }
+  assert.equal(m.q.leadChannel(moved().fields), 'Website form', 'known from the source alone too');
+  assert.deepEqual(await m.src.readSource(m.src.getSource(L)!), []);
+  assert.equal(moved().fields.dialer_source_detail, 'Applications');
+  assert.equal(cameIn([moved()], Date.now() - 3_600_000, Date.now() + 1000).older.length, 1);
   queue.splice(0, queue.length, ...before);
   m.rec.removeRecords((r) => /^(oldrow|newrow|moved)@/.test(r.key));
 }));

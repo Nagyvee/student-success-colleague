@@ -9,6 +9,7 @@ import { log as storeLog } from '@/lib/engine/store';
 const log: typeof storeLog = (actor, level, text, extra = {}) => storeLog(actor, level, text, { dept: 'admissions', ...extra });
 import { leadProgramme } from './programmes';
 import { leadProfile } from './profile';
+import { UNKNOWN_CHANNEL, leadChannel } from './channel';
 
 /* A qualified lead goes to the people who close.
  *
@@ -34,25 +35,7 @@ export const QUALIFY_REASON: Record<QualifyReason, { said: string; urgency: stri
   hot: { said: 'is hot: 8+ points from opening, clicking, the quiz and their video', urgency: 'Call today', now: false },
 };
 
-/** Where a lead came from, the way the sales team says it. */
-export function leadChannel(f: Record<string, string>): string {
-  const platform = (f.platform || '').trim().toLowerCase();
-  if (platform === 'fb' || platform === 'facebook') return 'Facebook ads';
-  if (platform === 'ig' || platform === 'instagram') return 'Instagram ads';
-  if (/tiktok/.test(platform)) return 'TikTok';
-  if (/whatsapp/.test(platform)) return 'WhatsApp';
-  const tab = (f.agent_sheet_tab || f.sheet_tab || '').toLowerCase();
-  if (/whatsapp/.test(tab)) return 'WhatsApp';
-  if (/tiktok/.test(tab)) return 'TikTok';
-  if (/openclaw|social/.test(tab)) return 'Social media';
-  const src = (f.source || f.lead_source || '').trim();
-  if (/whatsapp/i.test(src)) return 'WhatsApp';
-  if (/tiktok/i.test(src)) return 'TikTok';
-  if (/facebook|meta|\bfb\b/i.test(src)) return 'Facebook ads';
-  if (/instagram|\big\b/i.test(src)) return 'Instagram ads';
-  if (src && !/preview/i.test(src)) return src.slice(0, 40);
-  return 'Website form';
-}
+export { leadChannel } from './channel';
 
 export interface QualifyInput {
   reason: QualifyReason;
@@ -67,6 +50,9 @@ export interface QualifyInput {
   /** The agent run that qualified them keeps going (Thabo still finishes his reply). */
   keepRunId?: string;
 }
+
+/** The source a lead is added to the dialer with: never a guess. */
+const sourceFor = (f: Record<string, string>) => { const c = leadChannel(f); return c === UNKNOWN_CHANNEL ? 'Thuso' : c; };
 
 const clean = (v: string | undefined, max = 200) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -85,7 +71,7 @@ export function leadBrief(rec: Pick<DataRecord, 'name' | 'email' | 'phone' | 'fi
     `Thuso qualified: ${rec.name} ${QUALIFY_REASON[q.reason].said}${q.detail ? ` (${clean(q.detail, 80)})` : ''}. ${QUALIFY_REASON[q.reason].urgency}.`,
     `Programme: ${programme}${f.track ? ` (${clean(f.track, 20)})` : ''}`,
     `Paying: ${profile.funding_said || 'not said'}${profile.pay_preference ? ` · prefers ${profile.pay_preference}` : ''}${profile.monthly_budget ? ` · budget: ${profile.monthly_budget}` : ''}`,
-    `Source: ${leadChannel(f)}${f.campaign_name ? ` · ${clean(f.campaign_name, 60)}` : ''}${f.ad_name ? ` · ${clean(f.ad_name, 60)}` : ''}`,
+    `Source: ${leadChannel(f).replace(UNKNOWN_CHANNEL, 'not recorded')}${f.campaign_name ? ` · ${clean(f.campaign_name, 60)}` : ''}${f.ad_name ? ` · ${clean(f.ad_name, 60)}` : ''}`,
     `Engagement: ${f.engagement_score || '0'} points${did.length ? ` · ${did.join(', ')}` : ''}`,
     q.bestTime ? `Best time to call: ${clean(q.bestTime, 60)}` : '',
     q.phone && q.phone !== rec.phone ? `Call this number: ${clean(q.phone, 30)} (the sheet has ${rec.phone || 'none'})` : '',
@@ -170,7 +156,7 @@ async function handOverInDialer(s: ReturnType<typeof handoffSettings>, rec: Pick
       body: JSON.stringify({
         row_id: f.dialer_row_id || undefined, lead_id: f.dialer_lead_id || undefined,
         name: rec.name, phone: clean(q.phone || rec.phone, 30) || undefined, email: rec.email || undefined,
-        source: leadChannel(f), programme: leadProgramme(f) || undefined,
+        source: sourceFor(f), programme: leadProgramme(f) || undefined,
         notes: brief, source_detail: `Thuso qualified: ${QUALIFY_REASON[q.reason].said}`.slice(0, 200),
         qualified_at: qualifiedAt,
       }),
@@ -199,7 +185,8 @@ export function dialerWords(r: DialerReply): string {
   switch (r.outcome) {
     case 'released': return 'moved to New in the dialer';
     case 'created': return 'added to the dialer as a new lead';
-    case 'reset': return `moved back to New in the dialer${r.was ? ` (was in ${r.was})` : ''}`;
+    // Already in New, with someone from before they qualified: given out again.
+    case 'reset': return r.was && r.was === r.stage ? `already in ${r.was} in the dialer: given out again` : `moved back to New in the dialer${r.was ? ` (was in ${r.was})` : ''}`;
     case 'kept': return `already with the sales team in the dialer${r.stage ? ` (${r.stage})` : ''}: brief added`;
     case 'reassigned': return `moved to ${r.assigned?.name || 'a new owner'} in the dialer${r.stage ? ` (${r.stage})` : ''}`;
     case 'enrolled': return 'already enrolled in the dialer';
@@ -283,7 +270,7 @@ async function pushToDialer(s: ReturnType<typeof handoffSettings>, rec: Pick<Dat
       headers: { Authorization: `Bearer ${s.dialerKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: rec.name, phone, email: rec.email || undefined,
-        source: leadChannel(rec.fields),
+        source: sourceFor(rec.fields),
         source_detail: `Thuso qualified: ${QUALIFY_REASON[q.reason].said}`.slice(0, 200),
         programme: leadProgramme(rec.fields) || undefined,
         notes: brief,

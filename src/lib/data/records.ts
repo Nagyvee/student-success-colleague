@@ -67,6 +67,8 @@ function withAliases(fields: Record<string, string>): Record<string, string> {
 }
 
 export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId' | 'firstSeenAt' | 'updatedAt'>): UpsertResult {
+  // The plain copies of what the reader itself adds (sheet_tab for agent_sheet_tab): not columns, so never a change.
+  const copies = new Set(Object.keys(input.fields).filter((k) => k.startsWith(AGENT_FIELD_PREFIX)).map((k) => k.slice(AGENT_FIELD_PREFIX.length)).filter((k) => !(k in input.fields)));
   input = { ...input, fields: withAliases(input.fields) };
   const all = doc.get();
   const bucket = (all[sourceId] ||= {});
@@ -93,7 +95,7 @@ export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId
   const fields = { ...kept, ...input.fields };
   const changed: string[] = [];
   for (const k of new Set([...Object.keys(prev.fields), ...Object.keys(fields)])) {
-    if (k.startsWith(AGENT_FIELD_PREFIX)) continue;
+    if (k.startsWith(AGENT_FIELD_PREFIX) || copies.has(k)) continue;
     if ((prev.fields[k] ?? '') !== (fields[k] ?? '')) changed.push(k);
   }
   if (prev.name !== input.name) changed.push('name');
@@ -104,7 +106,7 @@ export function upsertRecord(sourceId: string, input: Omit<DataRecord, 'sourceId
     // (Also a copy the old code left behind: agent_<field> catches up with its plain copy.)
     const quiet = Object.entries(fields).filter(([k, v]) => k.startsWith(AGENT_FIELD_PREFIX) && prev.fields[k] !== v);
     if (quiet.length) {
-      for (const [k, v] of quiet) { prev.fields[k] = v; prev.fields[k.slice(AGENT_FIELD_PREFIX.length)] ??= v; }
+      for (const [k, v] of quiet) { const alias = k.slice(AGENT_FIELD_PREFIX.length); prev.fields[k] = v; prev.fields[alias] = copies.has(alias) ? v : prev.fields[alias] ?? v; }
       doc.save();
     }
     return { record: prev, created: false, changed };
