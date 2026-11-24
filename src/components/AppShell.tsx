@@ -33,6 +33,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
       { href: '/', label: 'Live Office', icon: 'building', badgeKey: 'pending' },
       { href: '/learners', label: 'Students', icon: 'users', badgeKey: 'learners' },
       { href: '/nurture', label: 'Lead Nurturing', icon: 'target' },
+      { href: '/outbound', label: 'B2B Outbound', icon: 'briefcase' },
     ],
   },
   {

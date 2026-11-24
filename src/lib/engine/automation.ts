@@ -46,7 +46,7 @@ const SWEEP_GOAL = 'Weekly sweep: check every cohort and get every learner who i
 const SWEEP_DAY = 1;      // Monday
 const SWEEP_HOUR = 7;     // 07:00, server time (SAST)
 
-type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number; lastWhatsApp?: number; lastWaWatch?: number; lastWaReplies?: number };
+type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number; lastWhatsApp?: number; lastWaWatch?: number; lastWaReplies?: number; lastOutbound?: number };
 const g = globalThis as unknown as { __ssAutoMap?: Map<string, Hub>; __ssTimer?: ReturnType<typeof setInterval> | null; __thusoBoot?: Promise<void> };
 
 function hub(tenantId = currentTenantId()): Hub {
@@ -322,6 +322,11 @@ function tick() {
     if (!h.lastWaWatch || Date.now() - h.lastWaWatch >= 30 * 60_000) {
       h.lastWaWatch = Date.now();
       void import('@/lib/nurture/whatsapp').then((w) => w.watchWhatsApp(tid)).catch(() => { /* next time */ });
+    }
+    // B2B outbound: looks for companies, writes to the ones people approved, reads its own mailbox.
+    if (!h.lastOutbound || Date.now() - h.lastOutbound >= 8000) {
+      h.lastOutbound = Date.now();
+      void import('@/lib/outbound/run').then((o) => o.pumpOutbound(tid)).catch(() => { /* next time */ });
     }
     if (!h.lastSourcePoll || Date.now() - h.lastSourcePoll >= 5000) {
       h.lastSourcePoll = Date.now();
