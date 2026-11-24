@@ -271,7 +271,7 @@ test('a few a day, spread out, in office hours, only when everything is switched
   m.st.saveSettings({ sendingOn: false });
   assert.equal(await m.out.pumpSend('default', NOW), 0, 'switched off');
   m.st.saveSettings({ sendingOn: true, smtpHost: '' });
-  assert.match(m.out.sendingBlocked(), /its own, not the Admissions one/);
+  assert.match(m.out.sendingBlocked(), /Still missing: the outreach mailbox/);
   m.st.saveSettings({ smtpHost: 'smtp.example.org' });
   assert.equal(await m.out.pumpSend('default', NOW), 1);
   assert.equal(await m.out.pumpSend('default', NOW + 5 * 60_000), 0, 'not straight after');

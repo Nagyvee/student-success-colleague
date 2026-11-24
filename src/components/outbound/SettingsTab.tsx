@@ -83,7 +83,7 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
         <div className="pg-actions"><button type="button" className="btn ghost sm" disabled={Boolean(busy) || dirty} onClick={() => void run('discord', { action: 'testDiscord' })}>{busy === 'discord' ? 'Posting…' : 'Send a test'}</button>{dirty && <span className="nu-hint">Save first.</span>}</div>
       </Card>
 
-      <Card icon="mail" title="The outreach mailbox" sub="Its own address, on its own domain if you can, so admissions emails are never affected. Warm a new one up for three to four weeks before sending.">
+      <Card icon="mail" title="The outreach mailbox" sub="The domain you use already is fine: give B2B its own address on it (like partnerships@), so its replies and limits stay apart from Admissions, and start with 5 a day. Only a brand-new domain needs three to four weeks of warming up.">
         <div className="nu-form">
           <label className="field"><span>Outgoing server</span><input {...text('smtpHost')} placeholder="smtp.gmail.com" /></label>
           <label className="field"><span>Port</span><input {...num('smtpPort')} /></label>

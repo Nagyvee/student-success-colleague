@@ -83,7 +83,7 @@ export function missingForResearch(s: OutboundSettings): string[] {
 /** What is still missing before Thuso may write to anyone. */
 export function missingForSending(s: OutboundSettings): string[] {
   return [
-    !s.smtpHost || !s.smtpUser || !s.smtpPass ? 'the outreach mailbox (its own, not the Admissions one)' : '',
+    !s.smtpHost || !s.smtpUser || !s.smtpPass ? 'the outreach mailbox' : '',
     !s.fromName.trim() ? 'who the emails are from' : '',
     !s.address.trim() ? 'our address (every email must say who sent it)' : '',
     !s.magnets.some((m) => m.on && m.when === 'open') ? 'something to offer in the first email' : '',
