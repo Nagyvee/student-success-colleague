@@ -31,6 +31,10 @@ const discordPosts: Record<string, unknown>[] = [];
 let handoffApi = false;
 const handoffs: Record<string, unknown>[] = [];
 const pipeline: Record<string, unknown>[] = [];
+// The list's other tabs (TikTok, WhatsApp...), read from their sheets.
+const sheetTabs: Record<string, string> = {};
+// Pages of the dialer's list, when a test wants more than one.
+let pages: { rows: Record<string, unknown>[]; total: number }[] | null = null;
 const realFetch = globalThis.fetch;
 
 const row = (id: string, cells: Record<string, string>, extra: Record<string, string> = {}) => ({
@@ -44,7 +48,16 @@ before(async () => {
       discordPosts.push(JSON.parse(String(init?.body || '{}')));
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (u.host === 'docs.google.com') {
+      const csv = sheetTabs[/gid=(\d+)/.exec(u.href)?.[1] || ''];
+      return csv === undefined ? new Response('gone', { status: 404 }) : new Response(csv, { status: 200, headers: { 'Content-Type': 'text/csv' } });
+    }
     if (u.host !== 'dialer.example.test') return realFetch(input, init);
+    if (u.pathname === '/api/v1/nurture' && pages) {
+      const n = Number(u.searchParams.get('page') || 1);
+      const p = pages[n - 1] || { rows: [], total: 0 };
+      return new Response(JSON.stringify({ ok: true, rows: p.rows, total: p.total, page: n, per: 500, more: n < pages.length }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (u.pathname === '/api/v1/nurture') {
       return new Response(JSON.stringify({ ok: true, rows: queue, total: queue.length, page: 1, per: 500 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -129,6 +142,59 @@ test('switching to the dialer emails nobody old: rows it held for days come in q
   assert.equal(m.rec.getRecord(L, 'cleared@example.com'), null, 'cleared from the sheet, the same row in the dialer stays out');
   queue.splice(0, queue.length, ...before);
   m.rec.removeRecords((r) => /^(oldrow|newrow|moved)@/.test(r.key));
+}));
+
+test('the list\'s other tabs are still read from their sheets; their old rows are never messaged, and the dialer\'s people are the dialer\'s', () => T(async () => {
+  const L = m.src.LEADS_SOURCE_ID;
+  const tiktok = 'https://docs.google.com/spreadsheets/d/abc123def456/edit#gid=77';
+  const source = () => m.src.getSource(L)!;
+  const since = source().since!;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const head = 'full_name,email,phone_number,created_time';
+  const old = `Old Tok,oldtok@example.com,0821110001,${iso(since - 5 * 86_400_000)}`;
+  const undated = 'Undated Tok,undated@example.com,0821110002,11/12/2026';
+  const fresh = `Fresh Tok,freshtok@example.com,0821110003,${iso(since + 1000)}`;
+  sheetTabs['77'] = [head, old, undated, fresh, `Thandi Again,thandi@example.com,0821234567,${iso(since + 1000)}`].join('\n');
+  // Already a baseline before the switch, as on the live server: that does not count.
+  m.src.saveSource({ ...source(), tabs: [{ url: tiktok, label: 'openclaw-social-leads' }], baselined: [tiktok] });
+  const thandi = JSON.stringify(m.rec.getRecord(L, 'thandi@example.com'));
+  const first = await m.src.readSource(source());
+  assert.deepEqual(first.map((e) => [e.kind, e.record.email]), [['added', 'freshtok@example.com']], 'only the row that says it came in after the switch starts');
+  for (const key of ['oldtok@example.com', 'undated@example.com']) assert.equal(m.rec.getRecord(L, key)!.fields.imported_quietly, 'yes');
+  assert.equal(m.rec.getRecord(L, 'freshtok@example.com')!.fields.sheet_tab, 'openclaw-social-leads');
+  assert.equal(JSON.stringify(m.rec.getRecord(L, 'thandi@example.com')), thandi, 'someone the dialer holds is left to the dialer');
+  // From now on, a new row is new.
+  sheetTabs['77'] += '\nNew Tok,newtok@example.com,0821110004,';
+  assert.deepEqual((await m.src.readSource(source())).map((e) => e.record.email), ['newtok@example.com']);
+  assert.equal(m.rec.getRecord(L, 'newtok@example.com')!.fields.dialer_left, undefined, 'never taken for someone the team took over');
+  // A tab that cannot be read says so, and the dialer's people still come in.
+  delete sheetTabs['77'];
+  queue.push(row('r9', { full_name: 'Still Comes', email: 'still@example.com' }));
+  assert.deepEqual((await m.src.readSource(source())).map((e) => e.record.email), ['still@example.com']);
+  assert.match(m.src.listSources().find((s) => s.id === L)!.lastError || '', /other tabs/);
+  queue.pop();
+  m.src.saveSource({ ...source(), tabs: [] });
+  m.rec.removeRecords((r) => /tok@|undated@|still@/.test(r.key));
+}));
+
+test('a list that changed while it was being read never makes someone look taken over', () => T(async () => {
+  const L = m.src.LEADS_SOURCE_ID;
+  const a = row('p1', { full_name: 'Page One', email: 'page1@example.com' });
+  const b = row('p2', { full_name: 'Page Two', email: 'page2@example.com' });
+  const rest = queue.slice();
+  pages = [{ rows: [...rest, a], total: rest.length + 2 }, { rows: [b], total: rest.length + 2 }];
+  await m.src.readSource(m.src.getSource(L)!);
+  assert.ok(m.rec.getRecord(L, 'page2@example.com'), 'both pages are read');
+  // Someone was released between the two pages, so the second starts one further on and Page Two is missed.
+  pages = [{ rows: [...rest, a], total: rest.length + 2 }, { rows: [], total: rest.length + 1 }];
+  await m.src.readSource(m.src.getSource(L)!);
+  assert.equal(m.rec.getRecord(L, 'page2@example.com')!.fields.dialer_left, undefined);
+  // A list that kept still says who really left.
+  pages = [{ rows: [...rest, a], total: rest.length + 1 }];
+  await m.src.readSource(m.src.getSource(L)!);
+  assert.equal(m.rec.getRecord(L, 'page2@example.com')!.fields.dialer_left, 'yes');
+  pages = null;
+  m.rec.removeRecords((r) => /^page[12]@/.test(r.key));
 }));
 
 test('qualifying a lead the dialer holds releases it there, with the brief; whoever has it is tagged in Discord', () => T(async () => {

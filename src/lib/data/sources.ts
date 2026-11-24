@@ -320,6 +320,45 @@ export interface RecordEvent { source: DataSource; record: DataRecord; kind: 'ad
 
 const POLL_MS = Math.max(15, Number(process.env.SHEET_POLL_SECONDS || 30)) * 1000;
 
+type SheetRecord = Omit<DataRecord, 'sourceId' | 'firstSeenAt' | 'updatedAt'>;
+
+/** Gathers the rows of a list's tabs into people: the same person on two tabs is one record. */
+function collector() {
+  const merged = new Map<string, SheetRecord>();
+  const take = (rec: SheetRecord, rowNo: number, tab: number) => {
+    // A totals or notes row (no name, email or phone) is not a person.
+    if (!rec.email && !rec.phone && /^Row \d+$/.test(rec.name)) return;
+    if (rec.key.startsWith('row:')) rec.key = tab ? `row:t${tab}:${rowNo}` : rec.key;
+    const prev = merged.get(rec.key);
+    if (!prev) { merged.set(rec.key, rec); return; }
+    if (!rec.email && !rec.key.includes('@')) { rec.key = `${rec.key}#${rowNo}`; merged.set(rec.key, rec); return; }
+    // Later tabs fill in or update what they have.
+    const fields = { ...prev.fields };
+    for (const [k, v] of Object.entries(rec.fields)) if (v !== '') fields[k] = v;
+    merged.set(rec.key, { ...prev, name: rec.name && !/^Row \d+$/.test(rec.name) ? rec.name : prev.name, phone: rec.phone || prev.phone, email: rec.email || prev.email, fields });
+  };
+  return { merged, take };
+}
+
+/** Reads a list's other tabs into the collector. True when a tab was mapped for the first time. */
+async function takeTabs(source: DataSource, tabs: NonNullable<DataSource['tabs']>, take: ReturnType<typeof collector>['take']): Promise<boolean> {
+  let changed = false;
+  for (let t = 0; t < tabs.length; t++) {
+    const tab = tabs[t];
+    const sheet = await fetchSheet(tab.url);
+    if (!tab.mapping || !Object.keys(tab.mapping).length) { tab.mapping = autoMap(sheet.headers); changed = true; }
+    const tabSource: DataSource = { ...source, mapping: tab.mapping };
+    // Which tab a person came from (WhatsApp, TikTok...): kept as an agent field, so it never counts as a change.
+    const label = (tab.label || '').trim();
+    sheet.rows.forEach((row, i) => {
+      const rec = rowToRecord(tabSource, sheet.headers, row, i);
+      if (label) rec.fields.agent_sheet_tab = label;
+      take(rec, i + 2, t + 1);
+    });
+  }
+  return changed;
+}
+
 /** Read one source now. Returns what changed since the last read (nothing on the first read). */
 export async function readSource(source: DataSource, tenantId = currentTenantId()): Promise<RecordEvent[]> {
   if (source.provider === 'dialer') return readDialerSource(source, tenantId);
@@ -338,35 +377,10 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
       saveSource({ ...source, columns: headers }, tenantId);
     }
     // The main tab, then any other tabs of the same list (each with its own columns).
-    const merged = new Map<string, Omit<DataRecord, 'sourceId' | 'firstSeenAt' | 'updatedAt'>>();
-    const take = (rec: Omit<DataRecord, 'sourceId' | 'firstSeenAt' | 'updatedAt'>, rowNo: number, tab: number) => {
-      // A totals or notes row (no name, email or phone) is not a person.
-      if (!rec.email && !rec.phone && /^Row \d+$/.test(rec.name)) return;
-      if (rec.key.startsWith('row:')) rec.key = tab ? `row:t${tab}:${rowNo}` : rec.key;
-      const prev = merged.get(rec.key);
-      if (!prev) { merged.set(rec.key, rec); return; }
-      if (!rec.email && !rec.key.includes('@')) { rec.key = `${rec.key}#${rowNo}`; merged.set(rec.key, rec); return; }
-      // The same person on two tabs: one record, later tabs fill in or update what they have.
-      const fields = { ...prev.fields };
-      for (const [k, v] of Object.entries(rec.fields)) if (v !== '') fields[k] = v;
-      merged.set(rec.key, { ...prev, name: rec.name && !/^Row \d+$/.test(rec.name) ? rec.name : prev.name, phone: rec.phone || prev.phone, email: rec.email || prev.email, fields });
-    };
+    const { merged, take } = collector();
     rows.forEach((row, i) => take(rowToRecord(source, headers, row, i), i + 2, 0));
     const tabs = source.tabs || [];
-    let tabsChanged = false;
-    for (let t = 0; t < tabs.length; t++) {
-      const tab = tabs[t];
-      const sheet = await fetchSheet(tab.url);
-      if (!tab.mapping || !Object.keys(tab.mapping).length) { tab.mapping = autoMap(sheet.headers); tabsChanged = true; }
-      const tabSource: DataSource = { ...source, mapping: tab.mapping };
-      // Which tab a person came from (WhatsApp, TikTok...): kept as an agent field, so it never counts as a change.
-      const label = (tab.label || '').trim();
-      sheet.rows.forEach((row, i) => {
-        const rec = rowToRecord(tabSource, sheet.headers, row, i);
-        if (label) rec.fields.agent_sheet_tab = label;
-        take(rec, i + 2, t + 1);
-      });
-    }
+    const tabsChanged = await takeTabs(source, tabs, take);
     const urls = [source.url, ...tabs.map((x) => x.url)];
     const known = new Set(source.baselined || []);
     // A tab read for the first time (or the list's very first read) is a baseline: its people are imported, nobody is messaged.
@@ -400,34 +414,74 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
   }
 }
 
-/** The dialer's people waiting for Thuso (GET /api/v1/nurture), every page. */
-async function fetchNurturing(tenantId: string): Promise<{ id: string; kind?: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown>; first_seen_at?: string | null }[]> {
+interface Waiting { id: string; kind?: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown>; first_seen_at?: string | null }
+
+/** The dialer's people waiting for Thuso (GET /api/v1/nurture), every page. `steady` is false when the list
+ *  changed while it was being read: someone may be missing from it who is still waiting. */
+async function fetchNurturing(tenantId: string): Promise<{ rows: Waiting[]; steady: boolean }> {
   const { dialerConnection } = await import('@/lib/nurture/qualify');
   const { url, key } = dialerConnection(tenantId);
   if (!url || !key) throw new Error('The dialer is not connected: add its address and API key in Channels & API → Qualified leads (or DIALER_URL and DIALER_API_KEY on the server).');
-  const rows: Awaited<ReturnType<typeof fetchNurturing>> = [];
+  const rows: Waiting[] = [];
+  const totals = new Set<number>();
   for (let page = 1; page <= 60; page++) {
     const res = await fetch(`${url}/api/v1/nurture?page=${page}&per=500`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000), cache: 'no-store' });
     const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; rows?: typeof rows; total?: number; per?: number; more?: boolean };
     if (!res.ok || !j.ok) throw new Error(res.status === 404 ? 'The dialer does not have the Thuso update yet (deploy it, and run its 2026-11-19 migration).' : j.error || `The dialer answered HTTP ${res.status}.`);
     rows.push(...(j.rows || []));
+    if (typeof j.total === 'number') totals.add(j.total);
     if (typeof j.more === 'boolean' ? !j.more : (!j.rows?.length || j.rows.length < (j.per || 500) || rows.length >= (j.total || 0))) break;
   }
-  return rows;
+  return { rows, steady: totals.size <= 1 };
+}
+
+/** The list's other tabs (TikTok, WhatsApp...) while the list itself is read from the dialer: they are still
+ *  read from their sheets, and anyone the dialer holds (`seen`) is left to the dialer. */
+async function readOtherTabs(source: DataSource, tenantId: string, seen: Set<string>): Promise<RecordEvent[]> {
+  const tabs = source.tabs || [];
+  if (!tabs.length) return [];
+  const { merged, take } = collector();
+  const tabsChanged = await takeTabs(source, tabs, take);
+  const known = new Set(source.baselined || []);
+  // The first read since the list was switched to the dialer is a baseline: the switch dropped everyone Thuso had
+  // never messaged, so their rows look new again and are not. They are imported and nobody is messaged, unless the
+  // row itself says it came in after the switch.
+  const mark = (url: string) => `dialer:${source.since || 0}:${url}`;
+  const baseline = tabs.some((t) => !known.has(mark(t.url)));
+  if (baseline || tabsChanged) saveSource({ ...source, tabs, baselined: [...new Set([...known, ...tabs.map((t) => mark(t.url))])] }, tenantId);
+  const events: RecordEvent[] = [];
+  for (const rec of merged.values()) {
+    if (seen.has(rec.key) || isCleared(source.id, rec, tenantId)) continue;
+    const out = upsertRecord(source.id, rec);
+    if (baseline && !(out.created && source.since && rowTime(rec.fields) > source.since)) {
+      if (out.created) setRecordField(source.id, out.record.key, 'imported_quietly', 'yes');
+      continue;
+    }
+    if (out.created) events.push({ source, record: out.record, kind: 'added', changed: [] });
+    else if (out.changed.length) events.push({ source, record: out.record, kind: 'changed', changed: out.changed });
+  }
+  return events;
+}
+
+/** When a sheet row says it came in, where it says so beyond doubt (2026-11-24T09:15, never 11/12/2026); else 0. */
+function rowTime(f: Record<string, string>): number {
+  const said = String(f.created_time || f.created_at || f.timestamp || f.submitted_at || '').trim();
+  const t = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(said) ? Date.parse(said) : NaN;
+  return Number.isFinite(t) && t <= Date.now() + 86_400_000 ? t : 0;
 }
 
 /** A leads list read from the dialer: everyone it holds for Thuso, with every column of their sheet row.
  *  New people start; a sheet row the dialer already had two days before the list was switched to it is
  *  imported quietly (switching never emails hundreds of old rows). A lead the team moved to a nurturing
  *  stage always starts. Someone who leaves the queue without Thuso qualifying them was taken over in the
- *  dialer, so their nurturing stops. */
+ *  dialer, so their nurturing stops. The list's other tabs are still read from their sheets. */
 async function readDialerSource(source: DataSource, tenantId: string): Promise<RecordEvent[]> {
   const r = rt(tenantId, source.id);
   if (r.reading) return [];
   r.reading = true;
   try {
     const startedAt = Date.now();
-    const rows = await fetchNurturing(tenantId);
+    const { rows, steady } = await fetchNurturing(tenantId);
     const events: RecordEvent[] = [];
     const seen = new Set<string>();
     for (const row of rows) {
@@ -478,8 +532,9 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
       if (out.created) events.push({ source, record: out.record, kind: 'added', changed: [] });
       else if (out.changed.length) events.push({ source, record: out.record, kind: 'changed', changed: out.changed });
     }
-    // Taken over in the dialer (or their row removed): Thuso stops nurturing them.
-    const left = listRecords(source.id).filter((x) => !seen.has(x.key) && x.fields.dialer_row_id && x.fields.qualified !== 'yes' && x.fields.dialer_left !== 'yes');
+    // Taken over in the dialer (or their row removed): Thuso stops nurturing them. Not decided on a list that
+    // changed while it was being read; the next read, seconds later, says.
+    const left = !steady ? [] : listRecords(source.id).filter((x) => !seen.has(x.key) && x.fields.dialer_row_id && x.fields.qualified !== 'yes' && x.fields.dialer_left !== 'yes');
     if (left.length) {
       const { stopRunsFor } = await import('@/lib/engine/agentRuns');
       for (const x of left) {
@@ -488,7 +543,13 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
         stopRunsFor(x.email, x.key, `${x.name} is no longer waiting for Thuso in the dialer (the team took them over), so nurturing stops.`);
       }
     }
-    r.lastReadAt = Date.now(); r.lastError = null; r.rows = seen.size; r.columns = ['dialer'];
+    r.lastReadAt = Date.now(); r.lastError = null; r.rows = seen.size; r.columns = [];
+    // A tab that cannot be read is reported, and never holds back the dialer's people.
+    try {
+      events.push(...(await readOtherTabs(source, tenantId, seen)));
+    } catch (e) {
+      r.lastError = `The dialer was read, but not the other tabs: ${(e as Error).message}`;
+    }
     return events;
   } catch (e) {
     r.lastError = (e as Error).message;

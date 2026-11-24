@@ -124,7 +124,7 @@ export default function DataSourcesSection({ origin, tenantSlug, isManager }: Pr
                   <div className="src-meta">
                     <span><Icon name="list" size={12} /> {s.rows ?? 0} {isLeads ? 'leads' : isMoodle ? 'students' : 'rows'}</span>
                     {(s.url || fromDialer) && <span><Icon name="refresh" size={12} /> read {agoLabel(s.lastReadAt)}</span>}
-                    {!!s.columns?.length && <span><Icon name="layers" size={12} /> {s.columns.length} columns</span>}
+                    {!fromDialer && !!s.columns?.length && <span><Icon name="layers" size={12} /> {s.columns.length} columns</span>}
                   </div>
                   {s.lastError && <p className="src-err">{s.lastError}</p>}
                   {!connected && !isMoodle && <p className="src-help">Paste the Google Sheet link for this list so the agents can use it.</p>}
@@ -133,7 +133,7 @@ export default function DataSourcesSection({ origin, tenantSlug, isManager }: Pr
                     : s.url ? 'Read from the leads sheet (and its tabs), and the leads webhook below.' : 'Filled by the leads webhook below (ads, forms, Zapier, Make).'}</p>}
                   {isMoodle && <p className="src-help">{connected ? 'Filled by the Moodle sync every 5 minutes: activity, overdue work, results and the next assessment for each student. Student Success and Learning & Assessment work from it.' : 'Fills in by itself once Moodle is connected (Channels & API) and the first sync has run.'}</p>}
                   {s.url && <span className="src-url" title={s.url}>{s.url}</span>}
-                  {!!s.tabs?.length && <p className="src-help">Also reads {s.tabs.length} more tab{s.tabs.length === 1 ? '' : 's'}: {s.tabs.map((t) => t.label || 'tab').join(', ')}.</p>}
+                  {!!s.tabs?.length && <p className="src-help">Also reads {s.tabs.length} more tab{s.tabs.length === 1 ? '' : 's'}{fromDialer ? ' from the sheet' : ''}: {s.tabs.map((t) => t.label || 'tab').join(', ')}.</p>}
                   <div className="src-actions">
                     {!isLeads && !isMoodle && isManager && (
                       <button type="button" className={`btn sm ${connected ? 'ghost' : 'primary'}`} onClick={() => { setEditing(s); setViewing(null); }}>
