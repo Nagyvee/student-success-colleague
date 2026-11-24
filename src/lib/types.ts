@@ -952,6 +952,8 @@ export interface DataSource {
   /** 'dialer': the leads the dialer holds for Thuso (tabs marked "Thuso nurtures these leads first"), read
    *  through its API instead of a sheet. Thuso nurtures them and releases each one it qualifies. */
   provider?: 'sheet' | 'dialer';
+  /** When the list was switched to the dialer (people it held before then are old, not new). */
+  since?: number;
   departmentId?: string;
   /** Our field → the sheet's column header. Filled automatically, editable. */
   mapping: Partial<Record<RecordField, string>>;

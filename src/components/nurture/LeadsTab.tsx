@@ -158,7 +158,7 @@ function LeadPanel({ leadKey, onClose, notify, onChanged, canManage }: { leadKey
   );
 }
 
-interface CleanupPlan { keep: number; clear: number; why: Record<string, number>; gmailChecked: boolean; sample: string[] }
+interface CleanupPlan { keep: number; clear: number; why: Record<string, number>; gmailChecked: boolean; sample: string[]; never: number; failed: number; old: number; days: [string, number][] }
 
 /** Start fresh: clear the old sheet rows Thuso never reached (checked first, then confirmed). */
 function Cleanup({ onClose, notify, onDone }: { onClose: () => void; notify: (k: 'ok' | 'bad', t: string) => void; onDone: () => Promise<void> }) {
@@ -187,9 +187,10 @@ function Cleanup({ onClose, notify, onDone }: { onClose: () => void; notify: (k:
         <div className="nu-cleanup">
           <p><b>{plan.keep}</b> stay:</p>
           <ul>{Object.entries(plan.why).sort((a, b) => b[1] - a[1]).map(([k, v]) => <li key={k}><b>{v}</b> {k}</li>)}</ul>
-          <p><b>{plan.clear}</b> are cleared: old rows from the sheet that never got an email from Thuso (never messaged, or every email failed){plan.sample.length ? `, e.g. ${plan.sample.slice(0, 4).join(', ')}` : ''}.</p>
+          <p><b>{plan.clear}</b> are cleared: old rows from the sheet that never got an email from Thuso ({plan.never} never messaged, {plan.failed} whose email failed){plan.sample.length ? `, e.g. ${plan.sample.slice(0, 4).join(', ')}` : ''}.</p>
           <p className="nu-hint">
             {plan.gmailChecked ? 'Checked against Gmail\'s Sent folder, so nobody who got an email is cleared. ' : 'Gmail\'s Sent folder could not be read, so anyone Thuso may have emailed stays. '}
+            {plan.old} of the leads are old rows, in the sheet before Thuso started. Leads came in: {plan.days.map(([d, c]) => `${d} ${c}`).join(', ')}.{' '}
             Cleared leads do not come back from the sheet unless they fill in a form again. The numbers on this page then count only real leads.
           </p>
         </div>

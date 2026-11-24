@@ -52,6 +52,38 @@ test('who stays and who is cleared', () => {
   assert.match(keepReason(old({ nurture_count: '1', nurture_last_sent_at: '2026-11-19T09:00:00Z' }), null), /may have got an email/);
 });
 
+test('old rows that came in before they were marked are recognised: many in the same minute, before 20 Nov', () => T(async () => {
+  const { importedTogether, markOldImports } = await import('../src/lib/nurture/repair');
+  const t0 = Date.parse('2026-11-18T14:00:00Z');
+  const lead = (key: string, firstSeenAt: number, fields: Record<string, string> = {}) => ({ key, firstSeenAt, fields });
+  const bulk = Array.from({ length: 300 }, (_, i) => lead(`b${i}`, t0 + i * 10));
+  const singles = Array.from({ length: 15 }, (_, i) => lead(`s${i}`, t0 + 3_600_000 + i * 600_000));
+  const later = Array.from({ length: 60 }, (_, i) => lead(`l${i}`, Date.parse('2026-11-23T04:00:00Z') + i * 10));
+  const old = importedTogether([...later, ...singles, ...bulk, lead('test', t0, { preview: 'yes' })]);
+  assert.equal(old.size, 300);
+  assert.ok([...old].every((k) => k.startsWith('b')), 'new leads one by one, and a burst after the mark existed, are new');
+
+  const L = m.src.LEADS_SOURCE_ID;
+  for (let i = 0; i < 30; i++) {
+    m.rec.upsertRecord(L, { key: `old${i}@x.com`, name: 'Old', email: `old${i}@x.com`, phone: '', fields: {} });
+    m.rec.getRecord(L, `old${i}@x.com`)!.firstSeenAt = t0 + i;
+  }
+  // One of them was reached, one was tried and refused: told apart by the clean-up.
+  m.rec.setRecordField(L, 'old0@x.com', 'nurture_delivered_at', '2026-11-20T07:00:00Z');
+  m.rec.setRecordField(L, 'old1@x.com', 'nurture_count', '1');
+  m.rec.upsertRecord(L, { key: 'fresh@x.com', name: 'Fresh', email: 'fresh@x.com', phone: '', fields: {} });
+  assert.equal((await m.clean.previewCleanup()).clear, 0, 'before: every lead looked new');
+  assert.equal(markOldImports(), 30);
+  assert.equal(markOldImports(), 0, 'once');
+  const p = await m.clean.previewCleanup();
+  assert.deepEqual([p.clear, p.never, p.failed, p.keep, p.old], [29, 28, 1, 2, 30]);
+  assert.deepEqual(p.why, { 'got an email': 1, 'new since the sheet was connected': 1 });
+  // Never a WhatsApp follow-up to an old row.
+  const { whatsappDue } = await import('../src/lib/nurture/whatsapp');
+  assert.equal(whatsappDue({ ...m.rec.getRecord(L, 'old0@x.com')!, phone: '+27821234567' }, Date.parse('2026-11-24T09:00:00Z'), true).why, 'an old sheet row');
+  m.rec.removeRecords((r) => r.sourceId === L);
+}));
+
 test('clearing: the old rows go, the counts are corrected, and they only come back by enquiring again', () => T(async () => {
   const L = m.src.LEADS_SOURCE_ID;
   const add = (key: string, fields: Record<string, string>) => m.rec.upsertRecord(L, { key, name: key.split('@')[0], email: key, phone: '', fields: { id: `l:${key}`, ...fields } });

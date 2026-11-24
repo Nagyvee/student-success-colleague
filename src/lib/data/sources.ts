@@ -179,6 +179,7 @@ export function saveSource(input: Partial<DataSource> & { name: string; kind: Da
     kind: input.kind || prev?.kind || 'custom',
     url: input.provider === 'dialer' ? '' : input.url !== undefined ? url : prev?.url || '',
     provider: input.provider ?? prev?.provider,
+    since: input.provider === 'dialer' && prev?.provider !== 'dialer' ? Date.now() : prev?.since,
     departmentId: input.departmentId ?? prev?.departmentId,
     mapping: input.mapping || prev?.mapping || {},
     tabs: input.tabs !== undefined ? cleanTabs(input.tabs) : prev?.tabs,
@@ -400,7 +401,7 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
 }
 
 /** The dialer's people waiting for Thuso (GET /api/v1/nurture), every page. */
-async function fetchNurturing(tenantId: string): Promise<{ id: string; kind?: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown> }[]> {
+async function fetchNurturing(tenantId: string): Promise<{ id: string; kind?: string; source: string; tab: string | null; name: string; phone: string; email: string; cells: Record<string, unknown> | null; values?: Record<string, unknown>; first_seen_at?: string | null }[]> {
   const { dialerConnection } = await import('@/lib/nurture/qualify');
   const { url, key } = dialerConnection(tenantId);
   if (!url || !key) throw new Error('The dialer is not connected: add its address and API key in Channels & API → Qualified leads (or DIALER_URL and DIALER_API_KEY on the server).');
@@ -416,8 +417,10 @@ async function fetchNurturing(tenantId: string): Promise<{ id: string; kind?: st
 }
 
 /** A leads list read from the dialer: everyone it holds for Thuso, with every column of their sheet row.
- *  Nobody here is a baseline: the dialer only holds people for Thuso to nurture. Someone who leaves the
- *  queue without Thuso qualifying them was taken over in the dialer, so their nurturing stops. */
+ *  New people start; a sheet row the dialer already had two days before the list was switched to it is
+ *  imported quietly (switching never emails hundreds of old rows). A lead the team moved to a nurturing
+ *  stage always starts. Someone who leaves the queue without Thuso qualifying them was taken over in the
+ *  dialer, so their nurturing stops. */
 async function readDialerSource(source: DataSource, tenantId: string): Promise<RecordEvent[]> {
   const r = rt(tenantId, source.id);
   if (r.reading) return [];
@@ -445,14 +448,15 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
       rec.fields.agent_dialer_source = row.source || '';
       if (seen.has(rec.key)) continue;
       seen.add(rec.key);
-      if (isCleared(source.id, rec, tenantId)) continue;
+      // Moved to nurturing by the team: their choice stands, even for someone cleared from the list.
+      if (row.kind !== 'lead' && isCleared(source.id, rec, tenantId)) continue;
       // Back for nurturing: the team took them over (or Thuso handed them to sales) and later moved
       // them to a nurturing stage in the dialer. They start again: not qualified, no points, the
       // messages they already got are not sent twice.
       const before = getRecord(source.id, rec.key);
       const back = Boolean(before && (before.fields.dialer_left === 'yes'
         // (handed over before this read began: a read already under way can still list someone just released)
-        || (before.fields.qualified === 'yes' && (before.fields.dialer_in === 'yes' || /^(moved|already|added)/.test(before.fields.dialer_status || '')) && Date.parse(before.fields.qualified_at || '') < startedAt - 60_000)));
+        || (row.kind !== 'sheet_row' && before.fields.qualified === 'yes' && (before.fields.dialer_in === 'yes' || /^(moved|already|added)/.test(before.fields.dialer_status || '')) && Date.parse(before.fields.qualified_at || '') < startedAt - 60_000)));
       const out = upsertRecord(source.id, rec);
       if (back && before) {
         const fresh: Record<string, string> = {
@@ -465,6 +469,10 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
         const { log } = await import('@/lib/engine/store');
         log('system', 'info', `${rec.name} is back for nurturing (moved to a nurturing stage in the dialer): Thuso starts again with them.`, { dept: 'admissions' });
         events.push({ source, record: getRecord(source.id, rec.key) || out.record, kind: 'added', changed: [] });
+        continue;
+      }
+      if (out.created && row.kind !== 'lead' && source.since && Date.parse(row.first_seen_at || '') < source.since - 2 * 86_400_000) {
+        setRecordField(source.id, out.record.key, 'imported_quietly', 'yes');
         continue;
       }
       if (out.created) events.push({ source, record: out.record, kind: 'added', changed: [] });

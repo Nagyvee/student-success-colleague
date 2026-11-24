@@ -15,7 +15,7 @@ import { campaignDoc, libraryDoc, meta, metaDoc } from './store';
  * (and back then a refused email still counted as received). Clearing takes
  * out the old rows Thuso never reached, so every number is about real people:
  *
- *   kept    anyone new since the sheet was connected; anyone who got an email
+ *   kept    anyone new since the sheet was connected (repair.ts marks the rows that were there before); anyone who got an email
  *           (Gmail's Sent folder, or Thuso's own delivery stamp), opened,
  *           clicked, took the quiz, replied, qualified or unsubscribed
  *   cleared the old rows with none of that
@@ -85,7 +85,29 @@ export interface CleanupPlan {
   why: Record<string, number>;
   gmailChecked: boolean;
   sample: string[];
+  /** Of the cleared: never messaged at all, and tried but never reached. */
+  never: number;
+  failed: number;
+  /** How many leads are old rows (in the sheet before Thuso started), and the days leads came in. */
+  old: number;
+  days: [string, number][];
 }
+
+/** The days leads came in (South African dates), busiest first. */
+function arrivals(): Pick<CleanupPlan, 'old' | 'days'> {
+  const recs = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes');
+  const by = new Map<string, number>();
+  for (const r of recs) {
+    const day = new Date(r.firstSeenAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', timeZone: 'Africa/Johannesburg' });
+    by.set(day, (by.get(day) || 0) + 1);
+  }
+  return { old: recs.filter((r) => r.fields.imported_quietly === 'yes').length, days: [...by].sort((a, b) => b[1] - a[1]).slice(0, 6) };
+}
+
+const split = (clear: DataRecord[]) => {
+  const failed = clear.filter((r) => n(r.fields.nurture_count) > 0).length;
+  return { never: clear.length - failed, failed };
+};
 
 function plan(sent: Set<string> | null): { keep: DataRecord[]; clear: DataRecord[]; why: Record<string, number> } {
   const keep: DataRecord[] = [];
@@ -106,14 +128,14 @@ const SINCE = new Date('2026-11-17T22:00:00Z');
 export async function previewCleanup(tenantId = currentTenantId()): Promise<CleanupPlan> {
   const sent = await sentRecipients(SINCE, tenantId);
   const p = plan(sent);
-  return { keep: p.keep.length, clear: p.clear.length, why: p.why, gmailChecked: Boolean(sent), sample: p.clear.slice(0, 8).map((r) => r.name) };
+  return { keep: p.keep.length, clear: p.clear.length, why: p.why, gmailChecked: Boolean(sent), sample: p.clear.slice(0, 8).map((r) => r.name), ...split(p.clear), ...arrivals() };
 }
 
 /** Clears the old rows Thuso never reached. Returns how many went and how many stayed. */
 export async function runCleanup(tenantId = currentTenantId()): Promise<CleanupPlan> {
   const sent = await sentRecipients(SINCE, tenantId);
   const p = plan(sent);
-  if (!p.clear.length) return { keep: p.keep.length, clear: 0, why: p.why, gmailChecked: Boolean(sent), sample: [] };
+  if (!p.clear.length) return { keep: p.keep.length, clear: 0, why: p.why, gmailChecked: Boolean(sent), sample: [], never: 0, failed: 0, ...arrivals() };
 
   // Counts that included sends which never arrived: saved messages sent, and each message's "sent".
   let sends = 0;
@@ -142,5 +164,5 @@ export async function runCleanup(tenantId = currentTenantId()): Promise<CleanupP
   campaignDoc.save(tenantId);
 
   log('system', 'system', `Leads cleaned up: ${p.clear.length} old sheet rows Thuso never reached were cleared; ${p.keep.length} leads stay (${Object.entries(p.why).map(([k, v]) => `${v} ${k}`).join(', ')}).`);
-  return { keep: p.keep.length, clear: p.clear.length, why: p.why, gmailChecked: Boolean(sent), sample: p.clear.slice(0, 8).map((r) => r.name) };
+  return { keep: p.keep.length, clear: p.clear.length, why: p.why, gmailChecked: Boolean(sent), sample: p.clear.slice(0, 8).map((r) => r.name), ...split(p.clear), ...arrivals() };
 }

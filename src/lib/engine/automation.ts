@@ -102,6 +102,11 @@ async function bootTenant(tid: string) {
       hydrateRecords(), hydrateAgentRuns(), hydrateAgentSchedule(), hydrateNurture(), hydrateMailWatch(), hydrateLmsSaved(),
     ]).catch(() => {});
     try { ensureDepartmentModel(); } catch (e) { console.warn('[thuso] department setup failed:', (e as Error).message); }
+    // Before anything is sent: the old sheet rows that came in before they were marked are marked.
+    try {
+      const n = (await import('@/lib/nurture/repair')).markOldImports();
+      if (n) log('system', 'info', `${n} old sheet rows, in the list before Thuso started, are marked as old: not counted as new, and never sent a WhatsApp follow-up.`, { dept: 'admissions' });
+    } catch (e) { console.warn('[thuso] old rows could not be marked:', (e as Error).message); }
   });
   // Photos for the videos, resized once the server is up (the first viewer never waits for a 10 MB original).
   setTimeout(() => { void withTenant(tid, () => import('@/lib/nurture/media').then((m) => m.warmPhotos(tid))).catch(() => {}); }, 20_000);

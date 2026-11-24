@@ -9,9 +9,10 @@ import { currentTenantId } from '@/lib/auth/tenantContext';
 /** sourceId → record key → what their row looked like when cleared. */
 const clearedDoc = tenantDoc<Record<string, Record<string, string>>>('cleared-leads', () => ({}));
 
-/** What tells a new enquiry from the same old row: the form's lead id or time, the dialer's row. */
+/** What tells a new enquiry from the same old row: the form's lead id or time (the same whether the row
+ *  is read from the sheet or through the dialer), else the dialer's row. */
 export function enquirySignature(fields: Record<string, string>): string {
-  return String(fields.agent_dialer_row_id || fields.dialer_row_id || fields.id || fields.lead_id || fields.created_time || fields.created_at || fields.timestamp || fields.submitted_at || '').trim();
+  return String(fields.id || fields.lead_id || fields.created_time || fields.created_at || fields.timestamp || fields.submitted_at || fields.agent_dialer_row_id || fields.dialer_row_id || '').trim();
 }
 
 /** A row that was cleared and has not changed since: the readers skip it. */
