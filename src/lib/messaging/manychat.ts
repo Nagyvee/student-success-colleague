@@ -23,6 +23,13 @@ export interface McContact {
 
 interface McField { id: number; name: string; type?: string }
 
+/** What ManyChat says when it is the account (an unpaid plan, a switched-off or pending channel, no funds, a template
+ *  Meta paused), not the one lead. An error about the contact is theirs, whatever else it mentions. */
+export function accountTrouble(error: string): boolean {
+  if (/subscriber|contact|recipient|opt(ed)?[- ]?(in|out)|24.?hour/i.test(error)) return false;
+  return /channel|disabled|turned off|subscription|billing|payment|past due|expired|\bpro\b|\bplan\b|upgrade|balance|wallet|credit|funds|suspend|restrict|pending|template|permission|access token|api key|\bapi\b.*(off|disabled|not)/i.test(error);
+}
+
 /** The last nine digits: the same number written +27…, 27… or 0…. */
 export const samePhoneKey = (v: string | null | undefined) => String(v || '').replace(/\D/g, '').slice(-9);
 
@@ -82,7 +89,7 @@ export function manychat(apiKey: string, timeoutMs = 10_000) {
         const has = [c.whatsapp_phone, c.phone].map(samePhoneKey).filter(Boolean);
         return has.length ? has.includes(want) : trusted;
       };
-      const bad = (r: McReply) => r.status === 0 || r.status === 401 || r.status === 403 || r.status === 429 || r.status >= 500;
+      const bad = (r: McReply) => r.status === 0 || r.status === 401 || r.status === 403 || r.status === 429 || r.status >= 500 || accountTrouble(r.error);
       const byPhone = await call('GET', '/fb/subscriber/findBySystemField', { query: { phone } });
       if (bad(byPhone)) return { contact: null, error: byPhone.error, status: byPhone.status };
       let hit = one(byPhone.data).find((c) => fits(c, true));

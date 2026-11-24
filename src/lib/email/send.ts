@@ -1,3 +1,4 @@
+import { noteFine, noteProblem } from '@/lib/engine/problems';
 import nodemailer from 'nodemailer';
 import { liveAllowed, sendingPaused } from './pause';
 import type { CheckInMessage, InboxMail, QuizQuestion, QuizResult, RemedialQuiz } from '@/lib/types';
@@ -297,6 +298,10 @@ export async function sendManyChat(input: {
   }
 }
 
+/** Our mailbox itself refuses to send (its sign-in, its daily limit, a block), not one address or their full inbox. */
+export const mailboxRefuses = (error: string): boolean => !/\b5\.[12]\.\d/.test(error)
+  && /EAUTH|\b53[045]\b|5\.7\.8|5\.4\.5|invalid login|username and password|limit exceeded|sending quota|too many (messages|emails|login)|suspended/i.test(error);
+
 /** An Admissions email, not a test or a sample someone sent themselves. */
 export const isNurtureEmail = (m: Pick<MailInput, 'dept' | 'subject'>): boolean => /admissions/i.test(m.dept || '') && !/^\[(test|sample)[^a-z]/i.test(m.subject);
 
@@ -328,12 +333,16 @@ export async function sendMail(input: MailInput): Promise<InboxMail> {
           ...(input.headers ? { headers: input.headers } : {}),
         });
         delivery = 'smtp'; providerId = info.messageId || null;
+        noteFine('email', tid);
       } catch (e) {
         const err = e as Error & { code?: string; responseCode?: number };
         error = `${err.code ? `${err.code}: ` : ''}${err.message}`;
         const blocked = /ETIMEDOUT|ECONNREFUSED|ESOCKET|EHOSTUNREACH|ENETUNREACH|Greeting never received|Connection timeout/i.test(error);
         log('system', 'error', `Email to ${to} was not sent: ${error}${blocked ? ` · the server cannot reach ${cfg.host}:${cfg.port}. Some hosts block outbound SMTP ports; check firewall or use port 2525/587.` : ''}`);
         console.warn('[thuso] SMTP send failed:', error);
+        // One bad address is that address; the mailbox refusing, or not answering, is everyone.
+        const refused = mailboxRefuses(error);
+        if (refused || blocked) noteProblem('email', { why: error, sure: refused }, tid);
       }
     }
   } else {

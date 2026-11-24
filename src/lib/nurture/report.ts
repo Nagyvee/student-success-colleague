@@ -8,6 +8,8 @@ import { currentTenantId } from '@/lib/auth/tenantContext';
 import { meta } from './store';
 import { QUALIFY_REASON, discordWebhook, isDiscordHook, type QualifyReason } from './qualify';
 import { UNKNOWN_CHANNEL, leadChannel } from './channel';
+import { KINDS, fixedProblems, openProblems, safeReason, type Problem } from '@/lib/engine/problems';
+import { silentWhatsApps, whatsappDay } from './whatsapp';
 import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
 
 /* The Admissions daily report, in the team's Discord channel.
@@ -17,7 +19,8 @@ import { getAcademyContext, getTenantIntegrations } from '@/lib/auth/accounts';
  * someone who enquired earlier and was only now given to Thuso is counted on
  * their own, not as new), emails sent, opens and clicks, quizzes and videos, replies, who qualified
  * (and what the dialer did with them), who unsubscribed, and where things
- * stand now. No report on Saturday or Sunday, so Monday's covers Friday 17:00
+ * stand now. Whatever is broken comes first, in red: who it stops, since when
+ * and what to do. No report on Saturday or Sunday, so Monday's covers Friday 17:00
  * to Monday 17:00. If the server is down at 17:00, the report goes when it is
  * back. Counters (emails, opens, clicks...) are compared with a snapshot taken
  * at the previous report; everything else is read from the leads' own dates. */
@@ -46,7 +49,12 @@ const day = (t: number) => new Date(t).toLocaleDateString('en-ZA', { timeZone: '
 const stamp = (v: string | undefined) => { if (!v) return NaN; const n = Number(v); return Number.isFinite(n) && n > 1e11 ? n : Date.parse(v); };
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export interface NurtureReport { title: string; description: string; fields: { name: string; value: string; inline?: boolean }[] }
+export interface NurtureReport {
+  title: string; description: string;
+  fields: { name: string; value: string; inline?: boolean; tone?: 'bad' | 'warn' }[];
+  /** What is broken now, in a line each (the report is red, and says it in the notification). */
+  critical?: string[];
+}
 
 const DAY_MS = 86_400_000;
 
@@ -102,6 +110,49 @@ export function fitLines(lines: string[], max = 1024): string {
   return out.join('\n');
 }
 
+const names = (list: string[], max = 8) => `${list.slice(0, max).join(', ')}${list.length > max ? ` and ${list.length - max} more` : ''}`;
+const sentence = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+
+/** What is broken now (one red box each), and what is worth a look. */
+function problemFields(recs: DataRecord[], from: number, to: number, wa: ReturnType<typeof whatsappDay>): { fields: NurtureReport['fields']; critical: string[] } {
+  const inWindow = (t: number) => Number.isFinite(t) && t > from && t <= to;
+  const open = openProblems(undefined, to);
+  const fields: NurtureReport['fields'] = [];
+  const critical: string[] = [];
+  const box = (what: string, lines: string[]) => { critical.push(what); fields.push({ name: `🚨 CRITICAL: ${what}`, value: lines.filter(Boolean).join('\n').slice(0, 1024), tone: 'bad' }); };
+
+  for (const p of open.filter((x) => x.critical)) {
+    const failed = p.key === 'whatsapp' ? wa.failed.map((x) => x.name) : p.people;
+    box(KINDS[p.key].what, [
+      `Since **${when(p.firstAt)}**${p.times > 1 ? ` (failed ${p.times} times, last ${when(p.lastAt)})` : ''}.`,
+      `Why: ${sentence(p.why)}`,
+      failed.length ? `Could not be sent to: ${names(failed)}.` : '',
+      p.key === 'whatsapp' && wa.waiting ? `${plural(wa.waiting, 'lead is', 'leads are')} waiting for one.` : '',
+      `What to do: ${KINDS[p.key].fix}`,
+    ]);
+  }
+  // Someone said yes, and the sales team does not have them.
+  const lost = recs.filter((r) => r.fields.qualified === 'yes' && r.fields.opted_out !== 'yes' && r.fields.dialer_in !== 'yes' && /^failed/.test(r.fields.dialer_status || '') && stamp(r.fields.qualified_at) > to - 14 * DAY_MS);
+  if (lost.length) box(`${plural(lost.length, 'qualified lead')} not in the dialer`, [
+    names(lost.map((r) => `${r.name.slice(0, 60)}${r.phone ? ` (${r.phone})` : ''}`)) + '.',
+    `Why: ${sentence(safeReason((lost[0].fields.dialer_status || '').replace(/^failed: ?/, '')))}`,
+    'What to do: call them now. Thuso tries the dialer again every 30 minutes.',
+  ]);
+
+  const look: string[] = [];
+  const line = (p: Problem) => `• ${KINDS[p.key].what}, since ${when(p.firstAt)}: ${sentence(p.why)}${p.people.length ? ` (${names(p.people, 5)})` : ''} ${KINDS[p.key].fix}`;
+  for (const p of open.filter((x) => !x.critical)) look.push(line(p));
+  if (wa.failed.length && !open.some((p) => p.key === 'whatsapp')) look.push(`• WhatsApp could not be sent to ${names(wa.failed.map((x) => x.name))}: ${sentence(wa.failed[0].why)}`);
+  if (wa.unsure && !open.some((p) => p.key === 'whatsapp')) look.push(`• ${plural(wa.unsure, 'WhatsApp')} ManyChat did not confirm: they may not have arrived.`);
+  const silent = silentWhatsApps(to);
+  if (silent) look.push(`• Nobody tapped or answered any of the last ${silent} WhatsApps. ManyChat takes a message even when WhatsApp does not deliver it: open one in ManyChat → Live Chat and see if it arrived.`);
+  const mails = getState().inbox.filter((m) => m.error && inWindow(m.ts) && /admissions/i.test(m.dept || ''));
+  if (mails.length) look.push(`• ${plural(mails.length, 'email')} could not be sent: ${names([...new Set(mails.map((m) => m.toName || 'someone'))], 6)}. Why: ${sentence(safeReason(mails[0].error || ''))}`);
+  for (const p of fixedProblems(from, to)) look.push(`• ${KINDS[p.key].was} from ${when(p.firstAt)} to ${when(p.fixedAt || p.lastAt)}. Working again. (${p.why})`);
+  if (look.length) fields.push({ name: '⚠️ Worth a look', value: fitLines(look.map((l) => l.slice(0, 480))), tone: 'warn' });
+  return { fields, critical };
+}
+
 /** One qualified lead on one line: why, what the dialer did with them, who has them. */
 function qualifiedLine(r: DataRecord): string {
   const f = r.fields;
@@ -119,7 +170,8 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
   const inWindow = (t: number) => Number.isFinite(t) && t > from && t <= to;
 
   const emailed = recs.filter((r) => inWindow(stamp(r.fields.nurture_delivered_at))).length;
-  const whatsapps = recs.reduce((n, r) => n + [r.fields.whatsapp_nudge_at, r.fields.whatsapp_video_at].filter((v) => inWindow(stamp(v))).length, 0);
+  const wa = whatsappDay(from, to, undefined, to);
+  const problems = problemFields(recs, from, to, wa);
   const replied = recs.filter((r) => inWindow(stamp(r.fields.replied_at_ms)));
   const quizzes = recs.filter((r) => inWindow(stamp(r.fields.fit_at))).length;
   const qualified = recs.filter((r) => inWindow(stamp(r.fields.qualified_at)));
@@ -140,12 +192,17 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
   const warm = nurturing.filter((r) => r.fields.engagement === 'warm').length;
   const st = getState();
   const waiting = (st.pendingOutreach || []).filter((p) => p.status === 'pending' && /^admissions\b/i.test(p.workflowName || '')).length;
-  const failed = st.inbox.filter((m) => m.error && inWindow(m.ts) && /admissions/i.test(m.dept || '')).length;
 
   const fields: NurtureReport['fields'] = [
+    ...problems.fields,
     ...leadFields(recs, from, to),
     { name: '✉️ Emails sent', value: `**${sent}**${emailed ? `\nto ${plural(emailed, 'lead')}` : ''}`, inline: true },
-    ...(whatsapps ? [{ name: '📱 WhatsApp follow-ups', value: `**${whatsapps}**`, inline: true }] : []),
+    // Always there while they are on: 0 is news too. ManyChat only says it took a message, not that it arrived.
+    ...(wa.on || wa.accepted || wa.unsure || wa.failed.length ? [{
+      name: '📱 WhatsApp follow-ups', inline: true,
+      value: [`**${wa.accepted}** taken by ManyChat`, wa.unsure ? `**${wa.unsure}** not confirmed` : '', wa.failed.length ? `**${wa.failed.length}** failed` : '', wa.pausedUntil ? `Paused until ${when(wa.pausedUntil)}` : ''].filter(Boolean).join('\n'),
+      ...(wa.failed.length ? { tone: 'bad' as const } : {}),
+    }] : []),
     { name: '👀 Emails opened · links clicked', value: `**${diff('opens')}** · **${diff('clicks')}**`, inline: true },
     { name: '🧭 Quizzes · 🎬 videos', value: `**${Math.max(quizzes, diff('quizzes'))}** · **${diff('videoViews')}**`, inline: true },
     { name: '💬 Leads who replied', value: replied.length ? `**${replied.length}**\n${replied.slice(0, 6).map((r) => r.name.slice(0, 60)).join(', ')}${replied.length > 6 ? ` and ${replied.length - 6} more` : ''}` : '0', inline: true },
@@ -153,13 +210,29 @@ export function buildNurtureReport(from: number, to: number, base: NurtureStats 
     { name: `🔥 Qualified (${qualified.length})`, value: qualified.length ? fitLines(qualified.map(qualifiedLine)) : 'Nobody yet.' },
     { name: '📍 Right now (all leads, not only this time)', value: `**${nurturing.length}** being nurtured · **${warm}** warming up (3 to 7 points)${waitingOld ? ` · ${plural(waitingOld, 'old row')} in the dialer, not messaged` : ''}${waiting ? ` · **${waiting}** waiting for your approval` : ''}` },
   ];
-  if (failed) fields.push({ name: '⚠️ Emails that could not be sent', value: `${failed}: see Live Office → Admissions → Inbox for why.` });
 
   return {
-    title: `📊 Admissions report · ${day(to)}`,
+    title: `${problems.critical.length ? '🚨' : '📊'} Admissions report · ${day(to)}`,
     description: `${getAcademyContext().academyName} · from ${when(from)} to ${when(to)} (South African time). Everything here happened in that time, except Right now.`,
     fields,
+    ...(problems.critical.length ? { critical: problems.critical } : {}),
   };
+}
+
+/** Discord takes 6000 characters in one card and refuses the whole of it above that: the long lists give way, the
+ *  critical boxes never do. */
+export function fitCard(report: NurtureReport, max = 5800): { name: string; value: string; inline?: boolean }[] {
+  const fields = report.fields.map((f) => ({ ...f, name: f.name.slice(0, 256), value: f.value.slice(0, 1024) }));
+  const size = () => report.title.length + report.description.length + fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
+  for (let over = size() - max; over > 0; over = size() - max) {
+    const longest = fields.filter((f) => f.tone !== 'bad').sort((a, b) => b.value.length - a.value.length)[0];
+    if (!longest || longest.value.length < 80) break;
+    const lines = longest.value.split('\n');
+    const shorter = lines.length > 1 ? fitLines(lines, Math.max(60, longest.value.length - over)) : longest.value.slice(0, Math.max(60, longest.value.length - over - 1));
+    if (shorter.length >= longest.value.length) break;
+    longest.value = shorter;
+  }
+  return fields.slice(0, 25).map(({ name, value, inline }) => ({ name, value, ...(inline ? { inline } : {}) }));
 }
 
 async function post(webhook: string, report: NurtureReport, preview: boolean): Promise<{ ok: boolean; error?: string }> {
@@ -170,9 +243,9 @@ async function post(webhook: string, report: NurtureReport, preview: boolean): P
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: 'Thuso',
-        content: preview ? '🧪 A preview of the daily report (the real one posts every weekday at 17:00).' : undefined,
+        content: preview ? '🧪 A preview of the daily report (the real one posts every weekday at 17:00).' : report.critical?.length ? `🚨 **Critical:** ${report.critical.join('; ')}.`.slice(0, 1900) : undefined,
         allowed_mentions: { parse: [] },
-        embeds: [{ title: report.title, description: report.description, color: 0x0a1733, fields: report.fields.map((f) => ({ ...f, value: f.value.slice(0, 1024) })), timestamp: new Date().toISOString() }],
+        embeds: [{ title: report.title, description: report.description, color: report.critical?.length ? 0xd92d20 : 0x0a1733, fields: fitCard(report), timestamp: new Date().toISOString() }],
       }),
       signal: AbortSignal.timeout(10000),
     });

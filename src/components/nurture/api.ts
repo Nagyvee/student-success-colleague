@@ -24,6 +24,8 @@ export interface NurtureAgent {
 export interface Overview {
   role: string;
   canManage: boolean;
+  /** What is broken now, the most important first. */
+  problems?: { what: string; why: string; fix: string; critical: boolean; since: number }[];
   stats: NurtureStats;
   funnel: { total: number; contacted: number; cold: number; warm: number; hot: number; qualified: number; applied: number; enrolled: number; optedOut: number; quiz: number };
   /** People who did each thing (from the leads' own records). */

@@ -42,7 +42,7 @@ ${ac.knowledge ? `What you know about ${ac.academyName} (use it, never invent be
 /** The record as the model sees it: useful fields only, no internal keys. */
 function recordView(fields: Record<string, string>) {
   // Internal bookkeeping (link tracking, what was sent, the raw conversation, where the sales team keeps them) is not something to talk about.
-  const skip = /^(id|key|row|agent_.*|replied_at_ms|conversation|nurture_seen|nurture_sent|nurture_res|nurture_last_sent_at|preview|opted_out_at|dialer_.*|sheet_tab|imported_quietly)$/;
+  const skip = /^(id|key|row|agent_.*|replied_at_ms|conversation|nurture_seen|nurture_sent|nurture_res|nurture_last_sent_at|preview|opted_out_at|dialer_.*|sheet_tab|imported_quietly|whatsapp_(result|retry_at|last_at|nudge_at|video_at|test_at))$/;
   const lines = Object.entries(fields)
     .filter(([k, v]) => v && String(v).trim() && !skip.test(k) && String(v).length < 600)
     .slice(0, 40)

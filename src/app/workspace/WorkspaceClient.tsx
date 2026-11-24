@@ -83,7 +83,7 @@ export default function WorkspaceClient() {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [tests, setTests] = useState<Record<string, TestOutcome>>({});
   // The daily report, as it stands now (looked at here before anything goes to the team).
-  type ReportView = { title: string; description: string; fields: { name: string; value: string }[] };
+  type ReportView = { title: string; description: string; fields: { name: string; value: string; tone?: 'bad' | 'warn' }[] };
   const [report, setReport] = useState<(ReportView & { last?: ReportView | null }) | null>(null);
   async function reportAction(kind: 'report' | 'report-post') {
     setBusy(kind);
@@ -1103,7 +1103,19 @@ export default function WorkspaceClient() {
               <i />
               <span style={{ display: 'block' }}>
                 <b style={{ color: 'var(--ink)' }}>Post the daily report in Discord</b><br />
-                Every weekday at 17:00 (not on weekends): what happened since the last report. On unless you switch it off here.
+                Every weekday at 17:00 (not on weekends): what happened since the last report, and anything that is broken, in red. On unless you switch it off here.
+              </span>
+            </label>
+            <label className="switch" style={{ gridColumn: '1 / -1', alignItems: 'flex-start', lineHeight: 1.45 }}>
+              <input
+                type="checkbox"
+                checked={form.handoff?.alertsOn === true}
+                onChange={(e) => updateField('handoff', { ...(form.handoff || {}), alertsOn: e.target.checked })}
+              />
+              <i />
+              <span style={{ display: 'block' }}>
+                <b style={{ color: 'var(--ink)' }}>Tell the team at once when something critical breaks</b><br />
+                WhatsApp, email, new leads, replies or the AI stops: one message in Discord when it breaks and one when it works again, without waiting for 17:00. Off until you switch it on.
               </span>
             </label>
           </div>
@@ -1141,7 +1153,7 @@ export default function WorkspaceClient() {
                 {i > 0 && <p className="pg-sub" style={{ margin: '16px 0 8px' }}><b style={{ color: 'var(--ink)' }}>{part.title}.</b> {part.description} Only here, never posted.</p>}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
                   {part.fields.map((f) => (
-                    <div key={f.name} style={{ padding: '10px 12px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--surface-sunken)' }}>
+                    <div key={f.name} style={{ padding: '10px 12px', borderRadius: 12, border: `1px solid ${f.tone ? `var(--${f.tone}-line)` : 'var(--line)'}`, background: f.tone ? `var(--${f.tone}-wash)` : 'var(--surface-sunken)', ...(f.tone && f.value.length > 120 ? { gridColumn: '1 / -1' } : {}) }}>
                       <b style={{ fontSize: 12.5 }}>{f.name}</b>
                       <div style={{ fontSize: 13, whiteSpace: 'pre-line', marginTop: 4 }}>{f.value.replace(/\*\*/g, '')}</div>
                     </div>

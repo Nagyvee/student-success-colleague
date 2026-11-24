@@ -6,7 +6,8 @@ import { getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { liveAllowed, sendingPaused } from '@/lib/email/pause';
 import { log as storeLog } from '@/lib/engine/store';
-import { manychat, samePhoneKey } from '@/lib/messaging/manychat';
+import { accountTrouble, manychat, samePhoneKey } from '@/lib/messaging/manychat';
+import { noteFine, noteProblem } from '@/lib/engine/problems';
 import { discordWebhook, postDiscordNote } from './qualify';
 import { STOP_TAG, optOutWords } from './waTags';
 
@@ -167,7 +168,10 @@ export async function answerWhatsApp(contactId: string, wroteAt: number, text: s
   if (!key) return { ok: false, detail: 'ManyChat is not connected' };
   if (!wroteAt || now - wroteAt > WINDOW_MS) return { ok: false, detail: 'too late: WhatsApp allows typed answers for 24 hours after they write' };
   const r = await manychat(key).sendText(contactId, text.trim().slice(0, 1500));
-  if (r.ok) return { ok: true, detail: 'answered in the chat' };
+  if (r.ok) { noteFine('whatsapp_answer', tenantId, now); return { ok: true, detail: 'answered in the chat' }; }
+  // Someone wrote and heard nothing on WhatsApp: the team sees who.
+  const account = r.status === 401 || r.status === 403 || accountTrouble(r.error);
+  noteProblem('whatsapp_answer', { why: r.error, sure: r.status > 0 && r.status < 500 && r.status !== 429, person: leadFor(contactId, '', now)?.name, critical: account || r.status === 0 || r.status >= 500 }, tenantId, now);
   // No answer: it may have gone, so it is not sent again by email.
   if (r.status === 0) return { ok: true, detail: 'sent, but ManyChat did not confirm it' };
   return { ok: false, detail: r.error };

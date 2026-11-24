@@ -88,6 +88,8 @@ export interface Handoff {
   dialerOn?: boolean;
   /** Post the Admissions daily report in Discord (weekdays 17:00). */
   reportOn?: boolean;
+  /** Tell the team in Discord the moment something critical breaks, and when it works again. */
+  alertsOn?: boolean;
 }
 
 function handoffSettings(tenantId = currentTenantId()): Required<Pick<Handoff, 'discordWebhook' | 'dialerUrl' | 'dialerKey'>> & { dialerOn: boolean } {

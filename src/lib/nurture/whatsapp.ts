@@ -6,7 +6,8 @@ import { getTenantIntegrations } from '@/lib/auth/accounts';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { liveAllowed, sendingPaused } from '@/lib/email/pause';
 import { log as storeLog } from '@/lib/engine/store';
-import { manychat, type McContact } from '@/lib/messaging/manychat';
+import { dropProblem, isFailing, noteFine, noteProblem, safeReason } from '@/lib/engine/problems';
+import { accountTrouble, manychat, type McContact } from '@/lib/messaging/manychat';
 import { leadProgramme } from './programmes';
 import { videoFor } from './video';
 import { signTrack } from './track';
@@ -88,7 +89,15 @@ function videoFits(programme: string): boolean {
   return v.programme.toLowerCase() === (programme || 'general').toLowerCase();
 }
 
-interface WaState { day: string; sent: number; pausedUntil: number; lastError: string; fails: number }
+interface WaState {
+  day: string; sent: number; pausedUntil: number; lastError: string; fails: number;
+  /** Who one could not be sent to, for the daily report. */
+  failed?: { at: number; name: string; why: string }[];
+  /** Handed over with no confirmation, in a row: ManyChat may be down. */
+  unsure?: number;
+  /** The lead the last account problem came up with: another one is tried next. */
+  stuckOn?: string;
+}
 const waDoc = tenantDoc<WaState>('nurture-whatsapp', () => ({ day: '', sent: 0, pausedUntil: 0, lastError: '', fails: 0 }));
 const today = (now: number) => new Date(now + SAST_MS).toISOString().slice(0, 10);
 
@@ -105,7 +114,9 @@ function settings(tenantId: string) {
 
 type Outcome = { result: 'sent' | 'unknown' | 'skipped' | 'failed' | 'account'; detail: string };
 const ACCOUNT_STATUS = new Set([0, 401, 403, 429]);
-const accountProblem = (status: number) => ACCOUNT_STATUS.has(status) || status >= 500;
+const accountProblem = (status: number, error = '') => ACCOUNT_STATUS.has(status) || status >= 500 || accountTrouble(error);
+/** A reason that will not pass by itself (an unpaid plan, a switched-off channel, a refused key). */
+const lasting = (why: string) => accountTrouble(why) || /HTTP 40[13]|token|unauthori[sz]ed|forbidden|field|flow|automation/i.test(why);
 
 /** Fills a contact's fields and starts the automation. `onStart` runs just before the message may leave. */
 async function deliver(mc: ReturnType<typeof manychat>, contact: McContact, who: { sourceId: string; key: string; programme: string }, kind: WaKind, flow: string, tenantId: string, onStart: () => void): Promise<Outcome> {
@@ -120,18 +131,18 @@ async function deliver(mc: ReturnType<typeof manychat>, contact: McContact, who:
   // Templates have no fallback for an empty field, so every field must be in before anything is sent.
   for (const name of WA_FIELDS) {
     const r = await mc.setField(contact.id, name, values[name]);
-    if (!r.ok) return { result: accountProblem(r.status) || /field/i.test(r.error) ? 'account' : 'failed', detail: `${name} could not be set: ${r.error}` };
+    if (!r.ok) return { result: accountProblem(r.status, r.error) || /field/i.test(r.error) ? 'account' : 'failed', detail: `${name} could not be set: ${r.error}` };
   }
   onStart();
   const r = await mc.sendFlow(contact.id, flow);
   if (r.ok) return { result: 'sent', detail: 'ManyChat started the message' };
   // No answer (or a server error): it may have gone, so it is never sent again.
   if (r.status === 0 || r.status >= 500) return { result: 'unknown', detail: r.error };
-  return { result: ACCOUNT_STATUS.has(r.status) || /flow/i.test(r.error) ? 'account' : 'failed', detail: r.error };
+  return { result: ACCOUNT_STATUS.has(r.status) || accountTrouble(r.error) || /flow/i.test(r.error) ? 'account' : 'failed', detail: r.error };
 }
 
-async function phoneFieldIds(mc: ReturnType<typeof manychat>): Promise<number[]> {
-  const r = await mc.fields();
+async function phoneFieldIds(mc: ReturnType<typeof manychat>, known?: Awaited<ReturnType<ReturnType<typeof manychat>['fields']>>): Promise<number[]> {
+  const r = known || await mc.fields();
   return (r.data || []).filter((x) => /phone|whatsapp.?(number|no)/i.test(x.name) && (!x.type || x.type === 'text')).map((x) => x.id);
 }
 
@@ -149,7 +160,7 @@ async function sendTo(mc: ReturnType<typeof manychat>, rec: DataRecord, kind: Wa
     const parts = rec.name.trim().split(/\s+/);
     const made = await mc.create(rec.phone, firstNameOf(rec), parts.slice(1).join(' '));
     if (!made.ok || !made.data?.id) {
-      if (accountProblem(made.status)) return { result: 'account', detail: made.error };
+      if (accountProblem(made.status, made.error)) return { result: 'account', detail: made.error };
       later(7);
       return { result: 'failed', detail: `could not be added to ManyChat: ${made.error}` };
     }
@@ -208,41 +219,72 @@ export function dueLeads(now = Date.now()): { rec: DataRecord; kind: WaKind; why
 const busy = new Set<string>();
 const PER_TICK = 5;
 
+const KEPT_FAILED = 60;
+
 /** A few due WhatsApp follow-ups. Called by the always-on pump while Admissions is on autopilot. */
 export async function pumpWhatsApp(tenantId = currentTenantId(), now = Date.now()): Promise<number> {
   const s = settings(tenantId);
-  if (!s.on || !s.live || !s.key || !whatsappHours(now) || busy.has(tenantId)) return 0;
+  // Switched off: not broken.
+  if (!s.on || !s.key) { dropProblem('whatsapp', tenantId); return 0; }
+  if (!s.live || !whatsappHours(now) || busy.has(tenantId)) return 0;
   const st = waDoc.get(tenantId);
-  if (st.pausedUntil > now) return 0;
+  if (st.pausedUntil > now) {
+    // Paused before problems were kept: it is still one.
+    if (st.lastError && !isFailing('whatsapp', tenantId)) noteProblem('whatsapp', { why: st.lastError, sure: true }, tenantId, now);
+    return 0;
+  }
   if (st.day !== today(now)) { st.day = today(now); st.sent = 0; st.fails = 0; }
   if (st.sent >= s.perDay) return 0;
   const due = dueLeads(now).filter((d) => s.flows[d.kind]);
   if (!due.length) return 0;
   busy.add(tenantId);
   let sent = 0;
+  /** Stop, and say so: everyone can see it (the daily report, the page, Discord when that is on). */
+  const stop = (why: string, hours: number, sure: boolean) => {
+    st.lastError = why;
+    st.pausedUntil = now + hours * 3_600_000;
+    st.fails = 0;
+    st.unsure = 0;
+    noteProblem('whatsapp', { why, sure }, tenantId, now);
+    log('system', 'error', `WhatsApp follow-ups paused for ${hours === 1 ? 'an hour' : 'a day'}: ${why}`);
+  };
+  const failedFor = (name: string, why: string) => { st.failed = [...(st.failed || []), { at: now, name: name.slice(0, 60), why: safeReason(why) }].slice(-KEPT_FAILED); };
   try {
     const mc = manychat(s.key);
-    const fields = await phoneFieldIds(mc);
+    // The account first: when ManyChat refuses us, every lead would look like "not in ManyChat" and be put off for a week.
+    const [page, known] = await Promise.all([mc.pageInfo(), mc.fields()]);
+    const broken = [page, known].find((r) => !r.ok);
+    if (broken) { stop(broken.error, 1, broken.status !== 0 && broken.status !== 429 && broken.status < 500); return 0; }
+    const fields = await phoneFieldIds(mc, known);
     // Each lead tried is checked again against its newest record; skips do not use up the day.
     for (const d of due.slice(0, PER_TICK * 4)) {
       if (sent >= PER_TICK || st.sent >= s.perDay) break;
       const rec = getRecord(d.rec.sourceId, d.rec.key);
       if (!rec || whatsappDue(rec, now, videoFits(leadProgramme(liveFields(rec)))).kind !== d.kind) continue;
       const out = await sendTo(mc, rec, d.kind, s, fields, tenantId);
-      if (out.result === 'sent' || out.result === 'unknown') {
-        sent++; st.sent++; st.fails = 0;
-        log('system', 'email', `WhatsApp (${WA_NAME[d.kind]}) → ${rec.name}: ${d.why}${out.result === 'unknown' ? '. ManyChat did not confirm it, so it is not sent again' : ''}.`);
+      if (out.result === 'sent') {
+        sent++; st.sent++; st.fails = 0; st.unsure = 0; st.stuckOn = ''; st.lastError = '';
+        noteFine('whatsapp', tenantId, now);
+        noteFine('whatsapp_connect', tenantId, now);
+        log('system', 'email', `WhatsApp (${WA_NAME[d.kind]}) → ${rec.name}: ${d.why}.`);
+      } else if (out.result === 'unknown') {
+        sent++; st.sent++;
+        st.unsure = (st.unsure || 0) + 1;
+        log('system', 'email', `WhatsApp (${WA_NAME[d.kind]}) → ${rec.name}: ${d.why}. ManyChat did not confirm it, so it is not sent again.`);
+        // One is bad luck. Three in a row is ManyChat failing, and each one uses up a lead's only message.
+        if (st.unsure >= 3) { stop(`ManyChat did not confirm the last ${st.unsure}: ${out.detail}`, 1, true); break; }
       } else if (out.result === 'skipped') {
         log('system', 'info', `WhatsApp to ${rec.name} left out: ${out.detail}.`);
       } else {
         st.lastError = out.detail;
         st.fails++;
-        // The account (key, field, automation, limit) or three leads in a row: stop and say so, do not try everyone.
+        failedFor(rec.name, out.detail);
+        // The account (key, plan, channel, field, automation, limit) or three leads in a row: stop and say so, do not try everyone.
         if (out.result === 'account' || st.fails >= 3) {
-          const hours = out.result === 'account' ? 1 : 24;
-          st.pausedUntil = now + hours * 3_600_000;
-          st.fails = 0;
-          log('system', 'error', `WhatsApp follow-ups paused for ${hours === 1 ? 'an hour' : 'a day'}: ${out.detail}`);
+          // The same lead twice: it may be them after all, so someone else is tried next.
+          if (out.result === 'account' && st.stuckOn === rec.key) setRecordField(rec.sourceId, rec.key, 'whatsapp_retry_at', new Date(now + DAY).toISOString());
+          st.stuckOn = rec.key;
+          stop(out.detail, out.result === 'account' ? 1 : 24, out.result !== 'account' || lasting(out.detail));
           break;
         }
         log('system', 'error', `WhatsApp to ${rec.name} was not sent: ${out.detail}`);
@@ -253,6 +295,46 @@ export async function pumpWhatsApp(tenantId = currentTenantId(), now = Date.now(
     busy.delete(tenantId);
   }
   return sent;
+}
+
+/** Can Thuso use the ManyChat account? Asked twice an hour while follow-ups are on, so an account that stopped is
+ *  noticed even when nobody is due. Reads only. */
+export async function watchWhatsApp(tenantId = currentTenantId(), now = Date.now()): Promise<void> {
+  const s = settings(tenantId);
+  if (!s.on || !s.key) { dropProblem('whatsapp_connect', tenantId); dropProblem('whatsapp', tenantId); return; }
+  const page = await manychat(s.key).pageInfo();
+  if (page.ok) noteFine('whatsapp_connect', tenantId, now);
+  else noteProblem('whatsapp_connect', { why: page.error, sure: page.status !== 0 && page.status !== 429 && page.status < 500 }, tenantId, now);
+}
+
+/** How the follow-ups went in a window, for the daily report. */
+export function whatsappDay(from: number, to: number, tenantId = currentTenantId(), now = Date.now()): { on: boolean; accepted: number; unsure: number; failed: { name: string; why: string }[]; waiting: number; pausedUntil: number } {
+  const s = settings(tenantId);
+  const st = waDoc.get(tenantId);
+  const inWindow = (t: number) => t > from && t <= to;
+  let accepted = 0, unsure = 0;
+  for (const r of listRecords(LEADS_SOURCE_ID)) {
+    if (r.fields.preview === 'yes') continue;
+    for (const [kind, v] of [['nudge', r.fields.whatsapp_nudge_at], ['video', r.fields.whatsapp_video_at]] as const) {
+      if (!inWindow(at(v))) continue;
+      if ((r.fields.whatsapp_result || '').startsWith(`${kind}: unknown`)) unsure++; else accepted++;
+    }
+  }
+  const failed = new Map<string, string>();
+  for (const x of st.failed || []) if (inWindow(x.at)) failed.set(x.name, x.why);
+  return {
+    on: s.on && Boolean(s.key), accepted, unsure, failed: [...failed].map(([name, why]) => ({ name, why })),
+    waiting: s.on && s.key ? dueLeads(now).filter((d) => s.flows[d.kind]).length : 0, pausedUntil: st.pausedUntil > now ? st.pausedUntil : 0,
+  };
+}
+
+/** The last follow-ups ManyChat took, when not one was tapped or answered: it takes a message even when WhatsApp does
+ *  not deliver it, and never says so. 0 when there are too few to tell, or somebody did something. */
+export function silentWhatsApps(now = Date.now(), atLeast = 20): number {
+  const got = listRecords(LEADS_SOURCE_ID).filter((r) => r.fields.preview !== 'yes'
+    && [r.fields.whatsapp_nudge_at, r.fields.whatsapp_video_at].some((v) => at(v) > now - 14 * DAY && at(v) < now - DAY));
+  const alive = got.some((r) => /(^|\|)(click|quiz|video):wa_/.test(r.fields.nurture_seen || '') || r.fields.whatsapp_last_text || r.fields.whatsapp_stopped === 'yes');
+  return got.length >= atLeast && !alive ? got.length : 0;
 }
 
 /** What would go out, and how things stand. Sends nothing. */
@@ -291,7 +373,8 @@ export async function checkWhatsApp(tenantId = currentTenantId()): Promise<{ ok:
   // Put right: carry on now, not when the pause ends.
   if (!unique.length) {
     const st = waDoc.get(tenantId);
-    st.pausedUntil = 0; st.fails = 0; st.lastError = '';
+    st.pausedUntil = 0; st.fails = 0; st.unsure = 0; st.lastError = '';
+    noteFine('whatsapp_connect', tenantId);
     waDoc.save(tenantId);
   }
   return unique.length
@@ -315,7 +398,7 @@ export async function testWhatsApp(kind: WaKind, phone: string, preview: { sourc
   if (!(found.contact.first_name || '').trim()) return { ok: false, detail: 'Your ManyChat contact has no first name. Add one, then try again.' };
   const out = await deliver(mc, found.contact, { ...preview, programme: leadProgramme(liveFields(rec)) }, kind, s.flows[kind], tenantId, () => undefined);
   // Typing a reply to a test gets a real answer, for the test lead.
-  if (out.result === 'sent') setRecordField(preview.sourceId, preview.key, 'whatsapp_test_at', new Date().toISOString());
+  if (out.result === 'sent') { setRecordField(preview.sourceId, preview.key, 'whatsapp_test_at', new Date().toISOString()); noteFine('whatsapp', tenantId); }
   const theirs = (found.contact.tags || []).map((t) => (t?.name || '').trim()).filter((t) => s.leaveOut.includes(t.toLowerCase()));
   return out.result === 'sent'
     ? { ok: true, detail: `ManyChat accepted ${WA_NAME[kind]}. Check that it arrives on ${phone}.${theirs.length ? ` Your contact is tagged ${theirs.join(', ')}, so another bot may answer what you type (a lead with that tag would be left out).` : ''}` }

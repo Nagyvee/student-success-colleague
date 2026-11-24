@@ -15,6 +15,7 @@ import { getWorkflow } from '@/lib/engine/workflows';
 import { getState } from '@/lib/engine/store';
 import { liveAllowed, sendingPaused } from '@/lib/email/pause';
 import { LEADS_SOURCE_ID, getSource, liveFields, readSource, saveSource } from '@/lib/data/sources';
+import { KINDS, openProblems } from '@/lib/engine/problems';
 import { getRecord, listRecords, upsertRecord } from '@/lib/data/records';
 import { meta, metaDoc } from '@/lib/nurture/store';
 import { addLink, addNote, deleteResource, getResource, importWhatsApp, importYouTube, listResources, updateResource } from '@/lib/nurture/bank';
@@ -119,6 +120,7 @@ function overview(manager: boolean, role: string) {
   const runs = listAgentRuns({ departmentId: 'dep_admissions', limit: 200 });
   return {
     role, canManage: manager,
+    problems: openProblems().map((p) => ({ what: KINDS[p.key].what, why: p.why, fix: KINDS[p.key].fix, critical: p.critical, since: p.firstAt })),
     stats: m.stats,
     funnel,
     did,

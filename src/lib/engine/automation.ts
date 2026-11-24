@@ -46,7 +46,7 @@ const SWEEP_GOAL = 'Weekly sweep: check every cohort and get every learner who i
 const SWEEP_DAY = 1;      // Monday
 const SWEEP_HOUR = 7;     // 07:00, server time (SAST)
 
-type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number; lastWhatsApp?: number; lastWaReplies?: number };
+type Hub = { queue: Job[]; nextSweep: number; lastSweep: number | null; reading: boolean; lastRead: number; nextReport: number; lastFollowUp?: number; lastMoodleSync?: number; syncingMoodle?: boolean; lastSourcePoll?: number; lastScheduleCheck?: number; lastCampaignPump?: number; lastMailCheck?: number; lastVideoCheck?: number; booted?: boolean; repairedScores?: boolean; lastDialerSync?: number; lastWhatsApp?: number; lastWaWatch?: number; lastWaReplies?: number };
 const g = globalThis as unknown as { __ssAutoMap?: Map<string, Hub>; __ssTimer?: ReturnType<typeof setInterval> | null; __thusoBoot?: Promise<void> };
 
 function hub(tenantId = currentTenantId()): Hub {
@@ -318,6 +318,11 @@ function tick() {
       h.lastWhatsApp = Date.now();
       void import('@/lib/nurture/whatsapp').then((w) => w.pumpWhatsApp(tid)).catch(() => { /* next time */ });
     }
+    // Can the ManyChat account still be used? (Noticed even when nobody is due a WhatsApp.)
+    if (!h.lastWaWatch || Date.now() - h.lastWaWatch >= 30 * 60_000) {
+      h.lastWaWatch = Date.now();
+      void import('@/lib/nurture/whatsapp').then((w) => w.watchWhatsApp(tid)).catch(() => { /* next time */ });
+    }
     if (!h.lastSourcePoll || Date.now() - h.lastSourcePoll >= 5000) {
       h.lastSourcePoll = Date.now();
       void pollSources().then((events) => dispatchRecordEvents(events)).catch(() => { /* status is on the source */ });
@@ -342,6 +347,8 @@ function tick() {
       void runScheduledAgents().catch(() => { /* next minute */ });
       // The Admissions daily report in Discord: weekdays at 17:00 (South African time).
       void import('@/lib/nurture/report').then((r) => r.maybeSendNurtureReport(tid)).catch(() => { /* next minute */ });
+      // Something critical broke, or works again: the team hears at once, when that is switched on.
+      void import('@/lib/nurture/alerts').then((a) => a.alertProblems(tid)).catch(() => { /* next minute */ });
     }
   }
   // The tutoring team (sweeps, follow-ups, learner-sheet and Moodle triggers) works for Student Success and Learning:

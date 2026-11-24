@@ -1,3 +1,4 @@
+import { dropProblem, noteFine, noteProblem } from '@/lib/engine/problems';
 import { ImapFlow } from 'imapflow';
 import { simpleParser, type ParsedMail } from 'mailparser';
 import { tenantDoc } from '@/lib/engine/tenantDoc';
@@ -86,7 +87,7 @@ export function setWatch(enabled: boolean, tenantId = currentTenantId()) {
   // Switching on always starts from now: mail that arrived while it was off is never answered.
   if (enabled && !st.enabled) st.lastUid = 0;
   st.enabled = enabled;
-  if (!enabled) st.lastError = null;
+  if (!enabled) { st.lastError = null; dropProblem('mailbox', tenantId); }
   doc.save(tenantId);
 }
 
@@ -212,11 +213,13 @@ export async function checkReplies(tenantId = currentTenantId(), opts: { force?:
     }
     await client.logout().catch(() => {});
     st.lastError = null;
+    noteFine('mailbox', tenantId);
   } catch (e) {
     const err = e as Error & { responseText?: string; authenticationFailed?: boolean };
     st.lastError = err.authenticationFailed
       ? `The mailbox refused the sign-in for ${cfg.user}. For Gmail, use an app password and make sure IMAP is on (Gmail → Settings → Forwarding and POP/IMAP).`
       : `${err.responseText || err.message}`.slice(0, 300);
+    if (st.enabled) noteProblem('mailbox', { why: st.lastError, sure: Boolean(err.authenticationFailed) }, tenantId);
     try { client.close(); } catch { /* already closed */ }
   } finally {
     // Old counters go.

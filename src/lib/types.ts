@@ -453,7 +453,7 @@ export interface TenantIntegrations {
   /** The departments autopilot runs (empty: all). Other departments' agents run only when someone presses Run. */
   autopilotDepartments?: string[];
   /** Qualified leads go to the sales team: a Discord channel and the dialer. */
-  handoff?: { discordWebhook?: string; dialerUrl?: string; dialerKey?: string; dialerOn?: boolean; reportOn?: boolean };
+  handoff?: { discordWebhook?: string; dialerUrl?: string; dialerKey?: string; dialerOn?: boolean; reportOn?: boolean; alertsOn?: boolean };
 }
 
 export interface TenantSummary {

@@ -8,6 +8,7 @@ import { generateJSON, obj } from '@/lib/ai/llm';
 import { countRecords, getRecord, listRecords, recordKey, removeSourceRecords, setRecordField, upsertRecord, wasNurtured } from './records';
 import { daysUntil, isoDate, parseDate, parseMoney } from './conditions';
 import { isCleared } from './cleared';
+import { noteFine, noteProblem } from '@/lib/engine/problems';
 import { leadProfile } from '@/lib/nurture/profile';
 
 /* Data sources: where the agents read their records.
@@ -404,9 +405,11 @@ export async function readSource(source: DataSource, tenantId = currentTenantId(
     }
     r.lastReadAt = Date.now(); r.lastError = null; r.rows = merged.size; r.columns = headers;
     if (source.kind === 'students' || source.kind === 'finance') void mirrorToLearners(source, events, tenantId);
+    if (source.id === LEADS_SOURCE_ID) noteFine('leads', tenantId);
     return events;
   } catch (e) {
     r.lastError = (e as Error).message;
+    if (source.id === LEADS_SOURCE_ID) noteProblem('leads', { why: r.lastError }, tenantId);
     return [];
   } finally {
     r.reading = false;
@@ -551,12 +554,16 @@ async function readDialerSource(source: DataSource, tenantId: string): Promise<R
     // A tab that cannot be read is reported, and never holds back the dialer's people.
     try {
       events.push(...(await readOtherTabs(source, tenantId, seen)));
+      noteFine('leads_tabs', tenantId);
     } catch (e) {
       r.lastError = `The dialer was read, but not the other tabs: ${(e as Error).message}`;
+      noteProblem('leads_tabs', { why: (e as Error).message }, tenantId);
     }
+    noteFine('leads', tenantId);
     return events;
   } catch (e) {
     r.lastError = (e as Error).message;
+    noteProblem('leads', { why: r.lastError }, tenantId);
     return [];
   } finally {
     r.reading = false;

@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { bump } from '@/lib/engine/store';
+import { noteFine, noteProblem } from '@/lib/engine/problems';
 
 /* The model behind the agents.
  *
@@ -55,10 +56,16 @@ export async function complete(o: CompleteOptions): Promise<string | null> {
   const timeoutMs = o.timeoutMs ?? 28_000;
   try {
     bump('aiCalls');
-    if (p === 'anthropic') return await completeAnthropic(o.system, o.prompt, maxTokens, timeoutMs, o.model, o.effort);
-    return await completeOpenAI(o.system, o.prompt, maxTokens, timeoutMs, o.json !== false);
+    const text = p === 'anthropic'
+      ? await completeAnthropic(o.system, o.prompt, maxTokens, timeoutMs, o.model, o.effort)
+      : await completeOpenAI(o.system, o.prompt, maxTokens, timeoutMs, o.json !== false);
+    noteFine('ai');
+    return text;
   } catch (e) {
     console.warn('[student-success] model call failed, using simulation:', (e as Error)?.message || e);
+    // Work goes on without it, so nobody would notice: the daily report says it.
+    const err = e as Error & { status?: number };
+    noteProblem('ai', { why: err?.message || 'no answer', sure: err?.status === 401 || err?.status === 402 || err?.status === 403 || /credit balance|billing|insufficient_quota|exceeded your current quota/i.test(err?.message || '') });
     return null;
   }
 }

@@ -1,3 +1,4 @@
+import { noteFine, noteProblem } from '@/lib/engine/problems';
 import fs from 'node:fs';
 import { forSpeech } from './speech';
 import path from 'node:path';
@@ -132,6 +133,7 @@ export async function slideAudio(tenantId: string, quizId: string, slide: number
           : await deepgram(text, ctrl.signal);
       if (audio.length < 512) throw new Error('empty audio');
       health.okAt = Date.now();
+      noteFine('voice', tenantId);
       try {
         await fs.promises.mkdir(path.dirname(file), { recursive: true });
         await fs.promises.writeFile(file, audio);
@@ -140,6 +142,7 @@ export async function slideAudio(tenantId: string, quizId: string, slide: number
     } catch (e) {
       health.failAt = Date.now();
       health.error = (e as Error).message.slice(0, 160);
+      noteProblem('voice', { why: health.error, sure: /\b40[123]\b/.test(health.error) }, tenantId);
       console.warn(`[thuso] lesson voice (${p}) failed: ${(e as Error).message}; the player will use the browser voice.`);
       return null;
     } finally {

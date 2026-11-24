@@ -397,6 +397,7 @@ function mergeHandoff(next: TenantIntegrations['handoff'], prev: TenantIntegrati
     dialerKey: mergeSecret(next.dialerKey, p.dialerKey),
     dialerOn: typeof next.dialerOn === 'boolean' ? next.dialerOn : p.dialerOn,
     reportOn: typeof next.reportOn === 'boolean' ? next.reportOn : p.reportOn,
+    alertsOn: typeof next.alertsOn === 'boolean' ? next.alertsOn : p.alertsOn,
   };
 }
 

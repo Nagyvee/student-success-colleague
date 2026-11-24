@@ -62,6 +62,12 @@ export default function NurtureClient() {
           ? <Chip tone={data.leadsSource.lastError ? 'warn' : 'good'}><Icon name="phoneCall" size={12} /> Leads from the dialer · {data.funnel.total} in nurturing</Chip>
           : data.leadsSource?.url ? <Chip tone="good"><Icon name="sheet" size={12} /> Leads sheet connected · {data.leadsSource.rows ?? 0} rows</Chip> : <Chip tone="warn"><Icon name="sheet" size={12} /> Leads sheet not connected</Chip>}
       </div>
+      {(data.problems || []).map((p) => (
+        <p key={p.what} className={`pg-banner ${p.critical ? 'bad' : 'warn'}`} role="alert">
+          <Icon name="warn" size={15} />
+          <span><b>{p.critical ? 'Critical: ' : ''}{p.what}</b> since {new Date(p.since).toLocaleString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}. Why: {p.why}{/[.!?]$/.test(p.why) ? '' : '.'} {p.fix}</span>
+        </p>
+      ))}
       <Notice n={notice} onClose={clear} />
 
       <Kpis data={data} />
