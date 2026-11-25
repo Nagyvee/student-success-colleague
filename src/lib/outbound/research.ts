@@ -2,6 +2,7 @@ import { currentTenantId } from '@/lib/auth/tenantContext';
 import { getAcademyContext } from '@/lib/auth/accounts';
 import { parseCsv } from '@/lib/lms/sheet';
 import { ask, jsonOf, type Answer } from './ask';
+import { around, readPage, readSite } from './pages';
 import { REJECT_REASONS, type Candidate, type Company, type Fact, type IdealCompany, type OutboundSettings } from './types';
 import { blankCompany, blockedReason, companies, domainOf, httpLink, ideals, nameKey, nid, saveIdeals, saveSettings, theirOwnSite, told } from './store';
 
@@ -11,9 +12,10 @@ import { blankCompany, blockedReason, companies, domainOf, httpLink, ideals, nam
  *   learnIdeals  what those companies have in common, as words people can edit
  *   discover     a few web searches for new companies like them, small ones
  *                first, learning from what people said no to
- *   research     one company: its own site and a search or two
+ *   research     one company: its own site, read here, and one search when it
+ *                looks good
  *
- * Nothing the AI says is taken on trust: a fact must come from a page it
+ * Nothing the AI says is taken on trust: a fact must come from a page that was
  * really opened, and an email address must be written on one of them. */
 
 const str = (v: unknown, max = 200) => (typeof v === 'string' || typeof v === 'number' ? String(v).replace(/\s+/g, ' ').trim().slice(0, max) : '');
@@ -138,30 +140,56 @@ export function angleOf(s: OutboundSettings, n: number): string {
 const seenIn = (a: Answer, url: string) => { const u = httpLink(url); return Boolean(u) && [...a.urls].some((x) => httpLink(x).replace(/[#?].*$/, '').replace(/\/$/, '') === u.replace(/[#?].*$/, '').replace(/\/$/, '')); };
 const hostSeen = (a: Answer, domain: string) => [...a.urls].some((x) => domainOf(x) === domain || domainOf(x).endsWith(`.${domain}`));
 
-/** A few searches for companies we do not know yet. */
+/** The words that tell this company from another ("Lesco" in "Lesco Manufacturing (Pty) Ltd"). */
+const tellWords = (name: string) => nameKey(name).split(' ').filter((x) => x.length > 2 && !/^(the|and|group|holdings?|company|services?|solutions?|south|africa|african|international|consulting|technologies|technology|systems)$/.test(x));
+const isNamed = (text: string, name: string) => { const t = text.slice(0, 60_000).toLowerCase(); const w = tellWords(name); return (w.length ? w.slice(0, 2) : nameKey(name).split(' ')).every((x) => t.includes(x)); };
+
+const FITS = 'where a page shows one of the signs, in about the last year, each with its own website (not a directory, job board or social page). Being the right size or sector is not a sign. Best of all: AI, new systems, technical hiring, or a learnership in IT, data or digital work. A company that sells AI or software is only a fit when it is hiring or training its own people. Leave out recruiters and staffing firms, anyone who sells training, universities, government and South African offices of foreign groups';
+
+/** Companies we do not know yet: a short search, and the lists it turned up, read here. */
 export async function discover(angle: number, tenantId = currentTenantId()): Promise<Candidate[]> {
   const s = told(tenantId);
   const known = [...companies(tenantId).sort((a, b) => b.foundAt - a.foundAt).slice(0, 150).map((c) => c.domain || c.name), ...ideals(tenantId).slice(0, 120).map((x) => x.domain || x.name)];
+  const system = `You find companies that could become clients of ${getAcademyContext(tenantId).academyName}, a South African academy. You only list real companies you read about here.`;
+  const about = `${wanted(s)}\n${lessons(companies(tenantId))}`;
   const a = await ask({
-    system: `You find companies that could become clients of ${getAcademyContext(tenantId).academyName}, a South African academy. You only list real companies you found in the searches.`,
-    prompt: `${wanted(s)}\n${lessons(companies(tenantId))}\n\nLook at: ${angleOf(s, angle)}\n\nSearch the web (South African companies only) for pages that name several companies: learnership and graduate lists, news roundups, award and employer lists, job adverts. Open the two or three best and take every company on them that fits; search again only when you have fewer than eight. List up to 15 companies where a page shows one of the signs, in about the last year, each with its own website (not a directory, job board or social page). Being the right size or sector is not a sign. Best of all: AI, new systems, technical hiring, or a learnership in IT, data or digital work. A company that sells AI or software is only a fit when it is hiring or training its own people. Leave out recruiters, anyone who sells training, universities, government, South African offices of foreign groups, and these we know already: ${known.join(', ') || 'none yet'}.\n\nEnd with one JSON object in a code block: {"companies": [{"name": "", "website": "https://…", "sign": the number of the sign it shows, "why": "one line: what the page says, and when", "url": "the page you read it on"}]}`,
-    kind: 'find', searches: 3, fetches: 3, pageTokens: 8000, maxTokens: 5000,
+    system,
+    prompt: `${about}\n\nLook at: ${angleOf(s, angle)}\n\nSearch the web (South African companies only). List up to 15 companies ${FITS}, and these we know already: ${known.join(', ') || 'none yet'}. Also give up to three pages from the results that name many South African companies with such a sign (learnership and graduate lists, news roundups, award and employer lists): they are read next.\n\nEnd with one JSON object in a code block: {"companies": [{"name": "", "website": "https://…", "sign": the number of the sign it shows, "why": "one line: what the page says, and when", "url": "the page you read it on"}], "lists": ["page address"]}`,
+    kind: 'find', searches: 2, maxTokens: 4000,
   });
-  const j = jsonOf<{ companies?: Record<string, unknown>[] }>(a);
   const out: Candidate[] = [];
-  for (const x of Array.isArray(j?.companies) ? j!.companies!.slice(0, 20) : []) {
+  const add = (x: Record<string, unknown>, url: string) => {
     const name = str(x?.name, 120);
     const website = httpLink(x?.website) || (domainOf(str(x?.website)) ? `https://${domainOf(str(x?.website))}/` : '');
     const domain = domainOf(website);
-    const url = httpLink(x?.url);
     const sign = signAt(s, x?.sign);
-    if (!name || !theirOwnSite(domain) || !sign) continue;
-    // It must have come up in the searches: its own site, or the page that names it.
-    if (!hostSeen(a, domain) && !seenIn(a, url)) continue;
-    if (out.some((y) => y.domain === domain) || blockedReason({ name, domain }, tenantId)) continue;
+    if (!name || !theirOwnSite(domain) || !sign) return;
+    if (out.some((y) => y.domain === domain || nameKey(y.name) === nameKey(name)) || blockedReason({ name, domain }, tenantId)) return;
     out.push({ name, website, domain, why: str(x?.why, 300), url, from: 'research', sign });
+  };
+  const rows = (v: unknown) => (Array.isArray(v) ? (v as Record<string, unknown>[]).slice(0, 25) : []);
+  const j = jsonOf<{ companies?: unknown; lists?: unknown }>(a);
+  for (const x of rows(j?.companies)) {
+    const url = httpLink(x?.url);
+    // It must have come up in the searches: its own site, or the page that names it.
+    if (hostSeen(a, domainOf(str(x?.website))) || seenIn(a, url)) add(x, url);
   }
-  return out;
+  // The lists that came up, read here: one page may name ten.
+  const lists: { url: string; text: string }[] = [];
+  for (const url of list(j?.lists, 3, 500).map(httpLink)) if (url && seenIn(a, url)) { const text = await readPage(url, 16_000); if (text.length > 400) lists.push({ url, text }); }
+  if (lists.length) {
+    const b = await ask({
+      system,
+      prompt: `${about}\n\nPages that name companies:\n${lists.map((l, i) => `=== PAGE ${i + 1}\n${l.text}`).join('\n\n')}\n\nList up to 25 South African companies from these pages ${FITS}. A website that is not on the page is given only when you are sure of it, otherwise leave the company out. We know these already: ${known.join(', ') || 'none yet'}.\n\nEnd with one JSON object in a code block: {"companies": [{"name": "as the page writes it", "website": "https://…", "sign": the number of the sign it shows, "why": "one line: what the page says, and when", "page": the number of the page}]}`,
+      kind: 'find', maxTokens: 4000,
+    });
+    for (const x of rows(jsonOf<{ companies?: unknown }>(b)?.companies)) {
+      const l = lists[Math.round(Number(x?.page)) - 1];
+      // Really on that page.
+      if (l && isNamed(l.text, str(x?.name, 120))) add(x, l.url);
+    }
+  }
+  return out.slice(0, 40);
 }
 
 /** Ideal companies marked "research" that were not looked at yet. */
@@ -185,6 +213,14 @@ export function onAPage(a: Pick<Answer, 'pages'>, email: string): string {
   return '';
 }
 
+/** What is asked about a company, and how it is scored. */
+const answerIn = (open: { id: string }[]) => `End with one JSON object in a code block:
+{"name": "as they write it", "what": "what they do, one sentence", "sector": "what it really does, in two or three words", "city": "", "province": "", "employees": "the number only, as the source says: 'about 80' or '50-100', or ''", "facts": [{"text": "one specific, recent fact, the strongest first", "sign": the number of the sign it shows, or 0 when it shows none (its size, offices, age or products show none), "url": "the page it is on"}], "fit": ["up to 3 reasons they would train people with us"], "concerns": "what speaks against it, one short sentence, or ''", "service": "what we would offer first, in two to six words", "sellsTraining": true when it sells training, runs an academy for others, or is a recruiter or staffing firm, else false, "magnet": "${open.map((x) => x.id).join('" or "') || ''}", "like": ["up to 2 of our ideal companies it resembles"], "contact": {"name": "who decides on training (HR, L&D, operations or the owner), if a page names them", "role": "", "email": "their address or the company's general one (HR or info rather than sales), only if it is written on a page", "phone": ""}, "score": 1-10, "scoreWhy": "one line"}
+Score: 8 or more for a strong sign in the last year (AI, new systems, technical hiring, or a learnership in IT, data or digital work), the right size and someone to write to; 7 for a strong sign and the right size; 6 for any other clear sign in the last year. A size nobody publishes lowers nothing, unless something shows it is far outside ours. 5 or less when it only fits on paper or the sign is older; 4 or less when training is decided abroad or by a bigger group, or its own training department does it all. If the website does not work or it is not a South African company, answer {"score": 0, "scoreWhy": "why"}.`;
+
+/** Worth a paid search to check it. */
+const PROMISING = 4;
+
 /** One company, researched. Null when it is not for us (with why). */
 export async function research(cand: Candidate, tenantId = currentTenantId()): Promise<{ company: Company | null; why: string }> {
   const stop = blockedReason(cand, tenantId);
@@ -192,12 +228,30 @@ export async function research(cand: Candidate, tenantId = currentTenantId()): P
   const s = told(tenantId);
   const open = s.magnets.filter((x) => x.on && x.when === 'open');
   const like = ideals(tenantId).slice(0, 80).map((x) => x.name);
-  const a = await ask({
-    system: `You research one company for the sales team of ${getAcademyContext(tenantId).academyName}, a South African academy. Short, factual, commercial. Every fact carries the address of the page you read it on.`,
-    prompt: `${wanted(s)}\n${open.length ? `What we can offer for free first: ${open.map((x) => `${x.name} [${x.id}]${x.about ? `: ${x.about}` : ''}`).join('; ')}` : ''}\n\nThe company: ${cand.name} (${cand.website}). ${cand.why}\n\nOpen its website first (home, contact, careers, news: up to four pages), then search once for what it did in about the last year and its size (a second time only when that found nothing). ${like.length ? `Our ideal companies, to compare: ${like.join(', ')}.` : ''}\n\nEnd with one JSON object in a code block:\n{"name": "as they write it", "what": "what they do, one sentence", "sector": "", "city": "", "province": "", "employees": "the number only, as the source says: 'about 80' or '50-100', or ''", "facts": [{"text": "one specific, recent fact, the strongest first", "sign": the number of the sign it shows, or 0 when it shows none (its size, offices, age or products show none), "url": "page"}], "fit": ["up to 3 reasons they would train people with us"], "concerns": "what speaks against it, one short sentence, or ''", "service": "what we would offer first, in two to six words", "sellsTraining": true when it sells training or runs an academy for others, else false, "magnet": "${open.map((x) => x.id).join('" or "') || ''}", "like": ["up to 2 of our ideal companies it resembles"], "contact": {"name": "who decides on training (HR, L&D, operations or the owner), if a page names them", "role": "", "email": "their address or the company's general one, only if it is written on a page you opened", "phone": ""}, "score": 1-10, "scoreWhy": "one line"}\nScore: 8 or more for a strong sign in the last year (AI, new systems, technical hiring, or a learnership in IT, data or digital work), the right size and someone to write to; 7 for a strong sign and the right size; 6 for any other clear sign in the last year. A size nobody publishes lowers nothing, unless something shows it is far outside ours. 5 or less when it only fits on paper or the sign is older; 4 or less when training is decided abroad or by a bigger group, or its own training department does it all. If the website does not work or it is not a South African company, answer {"score": 0, "scoreWhy": "why"}.`,
-    kind: 'read', searches: 2, fetches: 4, maxTokens: 6000,
-  });
-  const j = jsonOf<Record<string, unknown>>(a);
+  const system = `You research one company for the sales team of ${getAcademyContext(tenantId).academyName}, a South African academy. Short, factual, commercial. Every fact carries the address of the page it is on. Today is ${new Date().toISOString().slice(0, 10)}.`;
+  const about = `${wanted(s)}\n${open.length ? `What we can offer for free first: ${open.map((x) => `${x.name} [${x.id}]${x.about ? `: ${x.about}` : ''}`).join('; ')}` : ''}\n\nThe company: ${cand.name} (${cand.website}). ${cand.why}\n${like.length ? `Our ideal companies, to compare: ${like.join(', ')}.` : ''}`;
+  // Its site, read here and sent once; where it was named, when that is another page.
+  const site = await readSite(cand.website);
+  if (site.size && ![...site].some(([url, text]) => isNamed(`${url} ${text}`, cand.name)) && cand.from !== 'ideal') return { company: null, why: 'that website is not theirs' };
+  if (site.size && cand.url && domainOf(cand.url) !== cand.domain) { const t = around(await readPage(cand.url, 60_000), tellWords(cand.name)[0] || cand.name); if (t) site.set(cand.url, t); }
+  let a: Answer;
+  let j: Record<string, unknown> | null;
+  if (site.size) {
+    a = await ask({ system, prompt: `${about}\n\nPages read today:\n${[...site].map(([url, text]) => `=== ${url}\n${text}`).join('\n\n')}\n\n${answerIn(open)}`, kind: 'read', maxTokens: 3000 });
+    for (const [url, text] of site) { a.pages.set(url, text); a.urls.add(url); }
+    j = jsonOf<Record<string, unknown>>(a);
+    if (j && j.sellsTraining !== true && Number(j.score) >= PROMISING) {
+      // Good so far: one search for what its own pages do not say.
+      const b = await ask({ system, prompt: `${about}\n\nWhat its website says:\n${JSON.stringify(j)}\n\nSearch the web once for what that leaves open: how many people it has in South Africa, whether it belongs to a bigger group, and what it did in the last year. Then give the whole answer again, corrected: keep the facts above that still hold, with their pages, and the contact.\n\n${answerIn(open)}`, kind: 'read', searches: 1, maxTokens: 3500 });
+      for (const u of b.urls) a.urls.add(u);
+      for (const [u, t] of b.pages) a.pages.set(u, t);
+      j = jsonOf<Record<string, unknown>>(b) || j;
+    }
+  } else {
+    // A site that cannot be read from here: the AI opens it, two pages at most.
+    a = await ask({ system, prompt: `${about}\n\nOpen its website first (two pages at most), then search once for what it did in about the last year and its size.\n\n${answerIn(open)}`, kind: 'read', searches: 1, fetches: 2, maxTokens: 4000 });
+    j = jsonOf<Record<string, unknown>>(a);
+  }
   if (!j) return { company: null, why: 'the AI gave no usable answer' };
   let score = Math.max(0, Math.min(10, Math.round(Number(j.score) || 0)));
   const facts: Fact[] = (Array.isArray(j.facts) ? j.facts as Record<string, unknown>[] : [])
@@ -205,7 +259,7 @@ export async function research(cand: Candidate, tenantId = currentTenantId()): P
     // One that shows a sign comes first: it is what an email starts with.
     .sort((x, y) => Number(Boolean(y.sign)) - Number(Boolean(x.sign))).slice(0, 6);
   if (score < 1) return { company: null, why: str(j.scoreWhy, 160) || 'not a fit' };
-  if (j.sellsTraining === true && cand.from !== 'ideal') return { company: null, why: 'it sells training itself' };
+  if (j.sellsTraining === true && cand.from !== 'ideal') return { company: null, why: 'it sells training or staff itself' };
   if (!facts.length) return { company: null, why: 'nothing about it could be checked on a page' };
   const size = brief(str(j.employees).split(/[(;]/)[0], 40).trim();
   const employees = headcount(size);

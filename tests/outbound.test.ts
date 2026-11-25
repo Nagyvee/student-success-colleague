@@ -45,7 +45,11 @@ type M = {
   out: typeof import('../src/lib/outbound/outreach');
   ask: typeof import('../src/lib/outbound/ask');
   dis: typeof import('../src/lib/outbound/discord');
+  pg: typeof import('../src/lib/outbound/pages');
 };
+/** The pretend web: address → page. Nothing else can be opened. */
+let sites: Record<string, string> = {};
+const opened: string[] = [];
 let m: M;
 const T = <R>(fn: () => Promise<R> | R) => m.ctx.withTenant('default', fn);
 
@@ -64,8 +68,9 @@ before(async () => {
   }) as typeof fetch;
   m = {
     ctx: await import('../src/lib/auth/tenantContext'), acc: await import('../src/lib/auth/accounts'), st: await import('../src/lib/outbound/store'), re: await import('../src/lib/outbound/research'),
-    run: await import('../src/lib/outbound/run'), out: await import('../src/lib/outbound/outreach'), ask: await import('../src/lib/outbound/ask'), dis: await import('../src/lib/outbound/discord'),
+    run: await import('../src/lib/outbound/run'), out: await import('../src/lib/outbound/outreach'), ask: await import('../src/lib/outbound/ask'), dis: await import('../src/lib/outbound/discord'), pg: await import('../src/lib/outbound/pages'),
   };
+  m.pg.web.get = async (u) => { opened.push(u); return m.pg.mayRead(u) && sites[u] !== undefined ? { url: u, html: sites[u] } : null; };
   m.out.mailer.make = (() => ({
     sendMail: async (x: Mail) => { if (mailError) throw new Error(mailError); mails.push(x); return { messageId: `<${mails.length}@us>` }; },
     verify: async () => true,
@@ -79,6 +84,7 @@ const READY = {
 };
 
 beforeEach(() => T(() => {
+  sites = {}; opened.length = 0;
   asked.length = 0; posts.length = 0; mails.length = 0; mailError = '';
   ai = () => ({ content: [text('nothing')] });
   for (const c of m.st.companies()) { c.id = c.id; delete (globalThis as unknown as Record<string, Map<string, { value: Record<string, unknown> }>>).__thusoDoc_outbound_x; }
@@ -195,7 +201,7 @@ test('only good ones are put on the list: a sign on a page, not just the right s
   assert.equal((await is({ ...noSign, score: 9 })).company!.score, 5, 'right on paper only');
   assert.equal((await is({ score: 9 })).company!.score, 9);
   assert.equal((await is({ ...noSign, score: 9, facts: [{ text: 'x', url: 'https://good.co.za/never-opened', sign: 1 }, ...noSign.facts] })).company!.score, 5, 'a sign on a page nobody opened is none');
-  assert.equal((await is({ sellsTraining: true })).why, 'it sells training itself');
+  assert.equal((await is({ sellsTraining: true })).why, 'it sells training or staff itself');
   m.st.saveSettings({ sizeMin: 100 });
   assert.equal((await is({ score: 8, employees: '11-50' })).company!.score, 5, 'far too small');
   assert.equal((await is({ score: 8, employees: '' })).company!.score, 8, 'a size nobody publishes lowers nothing');
@@ -222,18 +228,19 @@ test('Find 5 now finds that many good ones, looks at three times as many at most
     const n = Object.keys(score).find((x) => p.includes(`The company: ${x} `))!;
     return { content: [read(`https://${n.toLowerCase()}.co.za/x`, 'x'), json({ ...ANSWER, name: n, facts: [{ text: 'A fact', sign: 1, url: `https://${n.toLowerCase()}.co.za/x` }], contact: {}, score: score[n] })] };
   };
-  assert.match(m.run.findNow(2, 'default', NOW).detail, /2 good ones now, in up to 6 companies, for about \$0\.40 at most/);
+  assert.match(m.run.findNow(2, 'default', NOW).detail, /2 good ones now, in up to 12 companies, for about \$0\.20 at most/);
   const steps: string[] = [];
   for (let i = 0; i < 12; i++) { const x = await m.run.researchStep('default', NOW + i * 20_000); if (!x) break; steps.push(x); }
   assert.deepEqual(steps, ['found 12', 'kept Co0x', 'not good enough: Co1x', 'not good enough: Co2x', 'kept Co3x']);
   assert.deepEqual(m.st.companies().filter((c) => c.listedOn).map((c) => c.name).sort(), ['Co0x', 'Co3x']);
   assert.equal(m.st.runState().kept, 2);
-  // Nobody good: it stops at three times as many.
+  // Nobody good: it stops when nobody is left, or at six times as many.
   for (const k of Object.keys(score)) score[k] = 3;
   m.run.findNow(2, 'default', NOW);
   let n = 0;
   while (n < 20 && await m.run.researchStep('default', NOW + 600_000 + n * 20_000)) n++;
-  assert.equal(n, 6);
+  assert.equal(m.st.companies().length, 12, 'each one once');
+  assert.ok(n < 13);
   assert.equal(m.st.runState().extra, 0);
   // A click costs no more than it said, one step over at most.
   for (const k of Object.keys(score)) score[k] = 3;
@@ -247,7 +254,7 @@ test('Find 5 now finds that many good ones, looks at three times as many at most
   let last = '';
   for (let i = 0; i < 20; i++) { const x = await m.run.researchStep('default', NOW + 1_200_000 + i * 20_000); if (!x) break; last = x; }
   assert.equal(last, 'the limit for this search');
-  assert.ok(m.st.spend().usd - from < 0.4 + 0.16, String(m.st.spend().usd - from));
+  assert.ok(m.st.spend().usd - from < 0.2 + 0.16, String(m.st.spend().usd - from));
   assert.ok(m.st.spend().kinds!.find!.calls >= 1 && m.st.spend().kinds!.read!.calls >= 1);
   // Nobody new: two searches, then it stops.
   ai = () => ({ content: [searched('https://n.example/a'), json({ companies: [] })] });
@@ -257,6 +264,83 @@ test('Find 5 now finds that many good ones, looks at three times as many at most
   for (let i = 0; i < 6; i++) await m.run.researchStep('default', NOW + 2_000_000 + i * 20_000);
   assert.equal(asked.length - before, 2);
   assert.equal(m.st.runState().extra, 0);
+}));
+
+test('a page is read as words, in one pass, and only from the public web', () => T(async () => {
+  const { toText, linksOf, allowedBy, isPrivate, mayRead, readSite, readPage } = m.pg;
+  const html = '<html><head><title>Good Co</title><meta name="description" content="Couriers &amp; more"><style>.x{}</style></head><body><!-- hidden --><script>var a = "<b>not text</b>";</script><h1>We move</h1><p>Call&nbsp;us</p><a href="mailto:hr@good.co.za?subject=x">Email us</a> <a href="/careers">Join us</a><a href="https://other.example/x">Other</a><a href="brochure.pdf">PDF</a><a href="https://careers.good.co.za/now">Vacancies</a></body></html>';
+  assert.equal(toText(html), 'Good Co\nCouriers & more\nWe move\nCall us\nhr@good.co.za Email us Join us Other PDF Vacancies');
+  assert.deepEqual(linksOf(html, 'https://www.good.co.za/').map((l) => `${l.url} ${l.words}`), ['https://www.good.co.za/careers Join us', 'https://careers.good.co.za/now Vacancies']);
+  // Pages made to hold a reader up are done in a moment.
+  const t0 = Date.now();
+  for (const bad of ['<!--'.repeat(200_000), '<a href="x'.repeat(100_000), '<script>'.repeat(120_000), '<'.repeat(900_000), '&a'.repeat(400_000), '<p>'.repeat(300_000), '('.repeat(900_000)]) { toText(bad); linksOf(bad, 'https://good.co.za/'); }
+  assert.ok(Date.now() - t0 < 6000, `${Date.now() - t0} ms`);
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', '::', 'fd00::1', 'fe80::1', '::ffff:127.0.0.1', '224.0.0.1', 'x']) assert.equal(isPrivate(ip), true, ip);
+  for (const ip of ['154.0.162.205', '104.26.5.50', '8.8.8.8', '2606:4700::1111', '172.67.68.226']) assert.equal(isPrivate(ip), false, ip);
+  for (const u of ['http://localhost/', 'http://127.0.0.1/', 'http://[::1]/', 'http://2130706433/', 'https://good.co.za:8443/', 'https://a:b@good.co.za/', 'file:///etc/passwd', 'ftp://good.co.za/', 'http://server.internal/', 'x']) assert.equal(mayRead(u), null, u);
+  assert.ok(mayRead('https://good.co.za/a'));
+  const robots = 'User-agent: BadBot\nDisallow: /\n\nUser-agent: *\nDisallow: /private\nAllow: /private/jobs\nDisallow: /*?s=';
+  assert.deepEqual(['/', '/private/x', '/private/jobs', '/a?s=1'].map((p) => allowedBy(robots, p)), [true, false, true, false]);
+  assert.equal(allowedBy('User-agent: *\nDisallow: /', '/'), false);
+  assert.equal(allowedBy('<html>not a robots file</html>', '/'), true);
+  // The pages that matter, never what robots.txt keeps, never another site.
+  const long = (t: string) => `<p>${t} ${'We deliver parcels across South Africa every day. '.repeat(12)}</p>`;
+  sites = {
+    'https://good.co.za/': `${long('Good Co')}<a href="/learnerships">Learnerships</a><a href="/contact">Contact</a><a href="/private/jobs-list">Jobs</a><a href="https://evil.example/about">About</a><a href="/about-us">About us</a>`,
+    'https://good.co.za/robots.txt': 'User-agent: *\nDisallow: /private',
+    'https://good.co.za/learnerships': long('Six learnerships'), 'https://good.co.za/contact': long('hr@good.co.za'), 'https://good.co.za/about-us': long('Since 1999'), 'https://good.co.za/private/jobs-list': long('secret'),
+  };
+  assert.deepEqual([...(await readSite('https://good.co.za/')).keys()], ['https://good.co.za/', 'https://good.co.za/learnerships', 'https://good.co.za/contact', 'https://good.co.za/about-us']);
+  assert.ok(!opened.some((u) => /private\/|evil/.test(u)));
+  assert.equal(await readPage('https://good.co.za/private/jobs-list'), '');
+  sites = { 'https://good.co.za/': '<div id="root"></div>' };
+  assert.equal((await readSite('https://good.co.za/')).size, 0, 'a site made by scripts says nothing here');
+}));
+
+test('a site is read here and sent once; only one that looks good is searched for; what is said must be on a page', () => T(async () => {
+  const long = (t: string) => `<p>${t} ${'We deliver parcels across South Africa every day. '.repeat(12)}</p>`;
+  const put = () => { sites = { 'https://good.co.za/': `${long('Good Co couriers')}<a href="/careers">Careers</a><a href="/contact">Contact</a>`, 'https://good.co.za/careers': long('Six junior data roles, November 2026'), 'https://good.co.za/contact': long('Write to hr@good.co.za') }; };
+  put();
+  const one = { ...ANSWER, score: 7, facts: [{ text: 'Six junior data roles', sign: 1, url: 'https://good.co.za/careers' }], contact: { name: '', role: '', email: 'hr@good.co.za', phone: '' }, employees: '' };
+  ai = (r) => ({ content: r.tools?.length ? [searched('https://news.example/good'), json({ ...one, employees: 'about 150', score: 8, facts: [...one.facts, { text: 'Opened a depot', sign: 3, url: 'https://news.example/good' }, { text: 'Made up', sign: 1, url: 'https://good.co.za/never' }] })] : [json(one)] });
+  const { company: c } = await m.re.research(CAND);
+  assert.equal(asked.length, 2);
+  assert.equal(asked[0].tools, undefined, 'the site is read without paid tools');
+  assert.match(String(asked[0].messages[0].content), /=== https:\/\/good\.co\.za\/careers\n[\s\S]*Six junior data roles, November 2026/);
+  assert.deepEqual(asked[1].tools!.map((t) => [t.type, t.max_uses]), [['web_search_20250305', 1]]);
+  assert.deepEqual([c!.score, c!.employees, c!.contact.email, c!.contact.source], [8, 150, 'hr@good.co.za', 'https://good.co.za/contact']);
+  assert.deepEqual(c!.facts.map((x) => x.text), ['Six junior data roles', 'Opened a depot'], 'nothing from a page nobody opened');
+  // Not promising, or selling training: nothing is paid for.
+  for (const o of [{ ...one, score: 2 }, { ...one, sellsTraining: true, score: 9 }]) {
+    asked.length = 0;
+    ai = () => ({ content: [json(o)] });
+    await m.re.research(CAND);
+    assert.equal(asked.length, 1);
+  }
+  // Someone else's website; a page that tries to give orders is only words.
+  sites = { 'https://good.co.za/': long('Totally different bakery') + long('Bread') };
+  asked.length = 0;
+  assert.equal((await m.re.research({ ...CAND, name: 'Zebra Freight', domain: 'good.co.za' })).why, 'that website is not theirs');
+  assert.equal(asked.length, 0);
+  // The page that named it, when that is another one.
+  put();
+  sites['https://list.example/learnerships'] = `<p>${'x '.repeat(3000)}</p><p>Good Co: 10 data learnerships, closing 30 November 2026</p>`;
+  asked.length = 0;
+  ai = () => ({ content: [json({ ...one, score: 3 })] });
+  await m.re.research({ ...CAND, url: 'https://list.example/learnerships' });
+  assert.match(String(asked[0].messages[0].content), /=== https:\/\/list\.example\/learnerships\n[\s\S]*10 data learnerships, closing 30 November 2026/);
+  // A company that costs almost nothing shows as that.
+  assert.ok(m.st.spend().usd < 0.02, String(m.st.spend().usd));
+}));
+
+test('the lists a search turned up are read here: many names for one search, each really on the page', () => T(async () => {
+  sites = { 'https://list.example/2026': `<p>Learnerships 2026</p>${['Alpha Couriers', 'Beta Foods', 'Gamma Glass'].map((n) => `<p>${n} is taking data learners, closing 30 November 2026. ${'More about it. '.repeat(12)}</p>`).join('')}` };
+  ai = (r) => ({ content: r.tools?.length
+    ? [searched('https://list.example/2026'), json({ companies: [], lists: ['https://list.example/2026', 'https://never-came-up.example/x', 'http://127.0.0.1/admin'] })]
+    : [json({ companies: [{ name: 'Alpha Couriers', website: 'https://alpha.co.za', sign: 2, why: 'x', page: 1 }, { name: 'Beta Foods', website: '', sign: 2, why: 'x', page: 1 }, { name: 'Gamma Glass (Pty) Ltd', website: 'gamma.co.za', sign: 2, why: 'x', page: 1 }, { name: 'Invented Co', website: 'https://invented.co.za', sign: 2, why: 'x', page: 1 }, { name: 'Alpha Couriers', website: 'https://alpha2.co.za', sign: 2, why: 'x', page: 4 }] })] });
+  const found = await m.re.discover(0);
+  assert.deepEqual(found.map((x) => [x.name, x.domain, x.url]), [['Alpha Couriers', 'alpha.co.za', 'https://list.example/2026'], ['Gamma Glass (Pty) Ltd', 'gamma.co.za', 'https://list.example/2026']]);
+  assert.deepEqual(opened.filter((u) => !/robots/.test(u)), ['https://list.example/2026'], 'only what came up in the search');
 }));
 
 test('a day: it looks, reads one company at a time, posts the best in the B2B channel, and stops', () => T(async () => {

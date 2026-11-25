@@ -68,7 +68,7 @@ export function saveSettings(p: Partial<Record<keyof OutboundSettings, unknown>>
     ? (p.magnets as Partial<Magnet>[]).slice(0, 12).map((m) => ({ id: String(m.id || nid('mg')).slice(0, 40), name: text(m.name, '', 80), about: text(m.about, '', 400), link: httpLink(m.link), when: m.when === 'open' ? 'open' as const : 'yes' as const, on: m.on !== false })).filter((m) => m.name)
     : s.magnets;
   const next: OutboundSettings = {
-    researchOn: bool(p.researchOn, s.researchOn), perDay: num(p.perDay, s.perDay, 1, 40), showPerDay: num(p.showPerDay, s.showPerDay, 1, 40), minScore: num(p.minScore, s.minScore, 1, 10), hour: num(p.hour, s.hour, 5, 16), budgetUsd: num(p.budgetUsd, s.budgetUsd, 1, 1000),
+    researchOn: bool(p.researchOn, s.researchOn), perDay: num(p.perDay, s.perDay, 1, 120), showPerDay: num(p.showPerDay, s.showPerDay, 1, 40), minScore: num(p.minScore, s.minScore, 1, 10), hour: num(p.hour, s.hour, 5, 16), budgetUsd: num(p.budgetUsd, s.budgetUsd, 1, 1000),
     about: text(p.about, s.about, 3000), services: text(p.services, s.services, 3000), ideal: text(p.ideal, s.ideal, 3000), profile: text(p.profile, s.profile, 4000),
     searchIdeas: Array.isArray(p.searchIdeas) ? p.searchIdeas.filter((x): x is string => typeof x === 'string').map((x) => x.trim().slice(0, 160)).filter(Boolean).slice(0, 30) : s.searchIdeas,
     signals: text(p.signals, s.signals, 2000), rules: text(p.rules, s.rules, 4000), never: text(p.never, s.never, 2000),
@@ -255,14 +255,22 @@ export function addSpend(model: string, u: Usage, tenantId = currentTenantId(), 
   s.calls++;
   s.searches += Number(u.server_tool_use?.web_search_requests || 0);
   s.days[sastDay(now)] = (s.days[sastDay(now)] || 0) + usd;
+  (s.lately ||= { usd: 0, companies: 0 }).usd += usd;
   if (kind) { const k = ((s.kinds ||= {})[kind] ||= { usd: 0, calls: 0 }); k.usd += usd; k.calls++; }
   spendDoc.save(tenantId);
   return usd;
 }
-export function countCompany(tenantId = currentTenantId()) { spend(tenantId).companies++; spendDoc.save(tenantId); }
+export function countCompany(tenantId = currentTenantId()) {
+  const s = spend(tenantId);
+  s.companies++;
+  const l = (s.lately ||= { usd: 0, companies: 0 });
+  l.companies++;
+  l.usd *= 0.97; l.companies *= 0.97;
+  spendDoc.save(tenantId);
+}
 
-/** What one company has cost so far, everything included (a guess until ten were looked at). */
-export const usdEach = (s: Pick<Spend, 'usd' | 'companies'>): number => (s.companies >= 10 ? s.usd / s.companies : 0.09);
+/** What one company costs lately, everything included (a guess until a few were looked at). */
+export const usdEach = (s: Pick<Spend, 'lately'>): number => (s.lately && s.lately.companies >= 5 ? s.lately.usd / s.lately.companies : 0.03);
 
 /** Weekdays left in this month, today included. */
 export function weekdaysLeft(now = Date.now()): number {

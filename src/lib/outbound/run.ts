@@ -20,10 +20,10 @@ import { blockedReason, companies, countCompany, domainOf, isWeekday, log, missi
  * mailbox and keeps the interested warm. */
 
 /** The most one step may cost: a step only starts when there is room for it. */
-const DISCOVER_USD = 0.2;
-const RESEARCH_USD = 0.12;
+const DISCOVER_USD = 0.06;
+const RESEARCH_USD = 0.06;
 /** The most "Find 5 now" may cost for each one asked for. */
-const ASKED_USD = 0.2;
+const ASKED_USD = 0.1;
 /** Kept back from research, so answering someone who wrote never waits for next month. */
 const reserve = (budget: number) => Math.min(1, budget * 0.05);
 
@@ -145,14 +145,14 @@ export async function finishDay(tenantId = currentTenantId(), now = Date.now(), 
   return best.length;
 }
 
-/** "Find 5 now": this many good ones on top of the daily ones (they go straight on the list), looking at three times as many at most. */
+/** "Find 5 now": this many good ones on top of the daily ones (they go straight on the list), looking at six times as many at most. */
 export function findNow(n: number, tenantId = currentTenantId(), now = Date.now()): { ok: boolean; detail: string } {
   const run = runState(tenantId);
   const before = run.extra;
   run.extra = Math.max(1, Math.min(20, Math.round(n) || 5));
   const stop = researchBlocked(tenantId, now);
   if (stop) { run.extra = before; saveRun(tenantId); return { ok: false, detail: stop }; }
-  run.looks = Math.min(30, run.extra * 3);
+  run.looks = Math.min(60, run.extra * 6);
   const most = run.extra * ASKED_USD;
   run.stopAt = spend(tenantId, now).usd + most;
   run.dry = 0;

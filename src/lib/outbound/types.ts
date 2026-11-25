@@ -184,4 +184,4 @@ export interface RunState {
 /** What the AI was asked for: to find names, to read about a company, to write. */
 export type AskKind = 'find' | 'read' | 'write';
 
-export interface Spend { month: string; usd: number; searches: number; calls: number; companies: number; days: Record<string, number>; kinds?: Partial<Record<AskKind, { usd: number; calls: number }>> }
+export interface Spend { month: string; usd: number; searches: number; calls: number; companies: number; days: Record<string, number>; kinds?: Partial<Record<AskKind, { usd: number; calls: number }>>; /** The same, weighed to the last thirty companies or so. */ lately?: { usd: number; companies: number } }

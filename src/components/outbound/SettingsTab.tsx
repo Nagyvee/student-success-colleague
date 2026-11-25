@@ -72,9 +72,9 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
         </div>
       </Card>
 
-      <Card icon="scanSearch" title="Research" sub={`At ${f.perDay} a day this is about $${daily.toFixed(0)} a month, at $${data.spend.each.toFixed(2)} a company${data.spend.companies >= 10 ? ', what it has cost so far' : ''}. It stops at the limit, whatever happens.${kinds.length ? ` This month: ${kinds.join(', ')}.` : ''}`}>
+      <Card icon="scanSearch" title="Research" sub={`At ${f.perDay} a day this is about $${daily.toFixed(0)} a month, at $${data.spend.each.toFixed(3)} a company lately. It stops at the limit, whatever happens.${kinds.length ? ` This month: ${kinds.join(', ')}.` : ''}`}>
         <div className="nu-form">
-          <label className="field"><span>Companies to look at a day</span><input {...num('perDay')} min={1} max={40} /></label>
+          <label className="field"><span>Companies to look at a day</span><input {...num('perDay')} min={1} max={120} /></label>
           <label className="field"><span>Best ones to show</span><input {...num('showPerDay')} min={1} max={40} /></label>
           <label className="field"><span>Lowest score to show (of 10)</span><input {...num('minScore')} min={1} max={10} /></label>
           <label className="field"><span>Limit a month (US dollars)</span><input {...num('budgetUsd')} min={1} /></label>

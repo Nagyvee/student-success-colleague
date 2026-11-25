@@ -48,7 +48,7 @@ export default function OutboundClient() {
       <div className="nu-status">
         <Chip tone={data.research.doing || data.research.extra ? 'brand' : data.research.on ? 'good' : 'muted'}><Icon name={data.research.doing ? 'spinner' : 'scanSearch'} size={12} className={data.research.doing ? 'spin' : ''} /> {data.research.doing || (data.research.on ? `Research on: ${data.settings.perDay} a day` : 'Research off')}</Chip>
         <Chip tone={data.sending.on ? (data.sending.blocked ? 'warn' : 'good') : 'muted'} title={data.sending.blocked}><Icon name="send" size={12} /> {data.sending.on ? (data.sending.blocked ? 'Sending waits' : `Sending on: ${data.sending.sentToday} of ${data.sending.perDay} today`) : 'Sending off'}</Chip>
-        <Chip tone={data.spend.usd >= data.spend.budget * 0.9 ? 'warn' : undefined} title={`${data.spend.searches} searches, ${data.spend.companies} companies looked at this month, about $${data.spend.each.toFixed(2)} each (an estimate from the price list)`}><Icon name="coins" size={12} /> ${data.spend.usd.toFixed(2)} of ${data.spend.budget} this month</Chip>
+        <Chip tone={data.spend.usd >= data.spend.budget * 0.9 ? 'warn' : undefined} title={`${data.spend.searches} searches, ${data.spend.companies} companies looked at this month, about $${data.spend.each.toFixed(3)} each lately (an estimate from the price list)`}><Icon name="coins" size={12} /> ${data.spend.usd.toFixed(2)} of ${data.spend.budget} this month</Chip>
         {data.sending.pausedUntil > 0 && <Chip tone="bad"><Icon name="warn" size={12} /> The outreach mailbox refused: trying again later</Chip>}
         {data.sending.mailError && <Chip tone="bad" title={data.sending.mailError}><Icon name="warn" size={12} /> Replies cannot be read</Chip>}
       </div>
