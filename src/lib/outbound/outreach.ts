@@ -10,7 +10,8 @@ import { noEmoji } from '@/lib/ai/llm';
 import { HAIKU, SONNET, ask, jsonOf } from './ask';
 import { postHandover, postNote } from './discord';
 import type { Company, Magnet, Message, Qualified } from './types';
-import { blockedReason, companies, isWeekday, log, missingForSending, nid, runState, saveCompany, saveRun, sastDay, sastHour, setStage, settings } from './store';
+import { outOfDate } from './clock';
+import { blockedReason, companies, countedTo, isWeekday, log, missingForSending, nid, runState, saveCompany, saveRun, sastDay, sastHour, setStage, settings, told } from './store';
 
 /* The conversation.
  *
@@ -107,13 +108,13 @@ export function cleanText(t: string): string {
   return noEmoji(String(t || '')).replace(/\bhttps?:\/\/\S+|\bwww\.\S+/gi, '').replace(/\n+(kind|warm|best)? ?regards[\s\S]*$/i, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/ {2,}/g, ' ').trim();
 }
 
-const offerOf = (c: Company): Magnet | null => { const s = settings(); const open = s.magnets.filter((m) => m.on && m.when === 'open'); return open.find((m) => m.id === c.magnetId) || open[0] || null; };
+const offerOf = (c: Company): Magnet | null => { const s = told(); const open = s.magnets.filter((m) => m.on && m.when === 'open'); return open.find((m) => m.id === c.magnetId) || open[0] || null; };
 const writerModel = () => (settings().writer === 'sonnet' ? SONNET : HAIKU);
 
 const newMessage = (o: Pick<Message, 'kind' | 'subject' | 'text'> & Partial<Message>): Message => ({ id: nid('m'), who: 'us', at: Date.now(), status: 'draft', ...o });
 
 function voice(c: Company): string {
-  const s = settings();
+  const s = told();
   return `You write emails for ${s.fromName || 'the team'}${s.fromTitle ? `, ${s.fromTitle}` : ''} at ${getAcademyContext().academyName}, a South African academy that trains companies' people. Plain, warm, specific, like a busy person writing to another. South African English. No buzzwords, no flattery, no pressure, no emoji, no links, no prices, no promises about results or money, and nothing about us that is not below. Never say how you found them beyond the public page. ${s.about ? `About us: ${s.about}` : ''}\nWhat we sell: ${s.services}${s.rules ? `\nHow we speak (always followed): ${s.rules}` : ''}${s.never.trim() ? `\nNever write these words (where it says "only with", never the first without the second): ${s.never.split(/\n+/).map((x) => x.trim()).filter(Boolean).join('; ')}` : ''}${c.contact.role ? `\nYou write to: ${[c.contact.name, c.contact.role].filter(Boolean).join(', ')}` : '\nYou write to a general address: assume whoever looks after people and training.'}\nThe company: ${c.name}. ${c.what}`;
 }
 
@@ -180,15 +181,15 @@ export function sendingBlocked(tenantId = currentTenantId()): string {
   return missing.length ? `Still missing: ${missing.join(', ')}.` : '';
 }
 
-/** Why this very message may not go: the person, or its words (the list may have changed since it was checked). */
-function notFit(c: Company, m: Message, tenantId: string): string {
+/** Why this very message may not go: the person, or its words (the list, or the time left before a date, may have changed since it was checked). */
+export function notFit(c: Company, m: Message, tenantId = currentTenantId(), now = Date.now()): string {
   const not = neverSaid(`${m.subject}\n${m.text}`, settings(tenantId).never);
-  return mayNotWrite(c, m.kind, tenantId) || (not.length ? `it says ${not[0]}` : '');
+  return mayNotWrite(c, m.kind, tenantId) || (not.length ? `it says ${not[0]}` : '') || outOfDate(m.text, countedTo(tenantId), m.at, now);
 }
 
 /** Sends one message now. Everything is checked again here. */
 export async function sendMessage(c: Company, m: Message, tenantId = currentTenantId(), now = Date.now()): Promise<{ ok: boolean; detail: string }> {
-  const blocked = sendingBlocked(tenantId) || notFit(c, m, tenantId);
+  const blocked = sendingBlocked(tenantId) || notFit(c, m, tenantId, now);
   if (blocked) return { ok: false, detail: blocked };
   const s = settings(tenantId);
   const e = compose(c, m, tenantId);
@@ -245,8 +246,8 @@ export async function pumpSend(tenantId = currentTenantId(), now = Date.now()): 
     const s = settings(tenantId);
     const due = companies(tenantId).flatMap((c) => c.thread.filter((m) => m.who === 'us' && m.status === 'ready').map((m) => ({ c, m })));
     // One that may not go waits for a person, and never holds up the next one.
-    const held = due.find((x) => notFit(x.c, x.m, tenantId));
-    if (held) { held.m.status = 'draft'; held.m.error = `Not sent: ${notFit(held.c, held.m, tenantId)}.`; saveCompany(held.c); return 0; }
+    const held = due.find((x) => notFit(x.c, x.m, tenantId, now));
+    if (held) { held.m.status = 'draft'; held.m.error = `Not sent: ${notFit(held.c, held.m, tenantId, now)}.`; saveCompany(held.c); return 0; }
     const answer = due.filter((x) => x.m.kind !== 'first').sort((a, b) => a.m.at - b.m.at)[0];
     if (answer) return (await sendMessage(answer.c, answer.m, tenantId, now)).ok ? 1 : 0;
     const today = run.sentDay === sastDay(now) ? run.sentToday : 0;
@@ -317,7 +318,7 @@ export async function handleReply(c: Company, r: { text: string; subject?: strin
   c.lastAt = at;
   saveCompany(c);
   if (clearNo(r.text)) { stopFor(c, 'said no'); return 'no'; }
-  const s = settings(tenantId);
+  const s = told(tenantId);
   const open = offerOf(c);
   const gifts = s.magnets.filter((x) => x.on && x.link);
   let j: Record<string, unknown> | null = null;
@@ -395,7 +396,7 @@ export async function keepWarm(tenantId = currentTenantId(), now = Date.now()): 
 }
 
 async function writeNurture(c: Company, tenantId: string): Promise<Message | null> {
-  const s = settings(tenantId);
+  const s = told(tenantId);
   const next = s.magnets.find((x) => x.on && x.link && x.when === 'yes' && !c.thread.some((m) => m.magnets?.includes(x.id)));
   const last = c.thread.filter((m) => m.status === 'sent' || m.status === 'in').slice(-5);
   const what = next ? `Give them "${next.name}"${next.about ? ` (${next.about})` : ''}: say in a sentence what it would do for them.` : `Ask gently whether this is still useful, and offer a short call with ${s.callsWith || 'a colleague'}.`;

@@ -104,6 +104,7 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
               {m.on && !m.link && <p className="ob-con"><Icon name="warn" size={12} /> No link yet: it cannot be sent.</p>}
             </div>
           ))}
+          <p className="nu-hint">A date that comes closer: write {'{time left to 1 April 2027}'} here or above, and Thuso says &quot;4 months left&quot;, counted on the day.</p>
           <button type="button" className="btn ghost sm" onClick={() => set('magnets', [...f.magnets, { id: `mg_${Date.now().toString(36)}`, name: '', about: '', link: '', when: 'yes', on: true }])}><Icon name="plus" size={14} /> Add another</button>
         </div>
       </Card>

@@ -7,7 +7,7 @@ import { liveAllowed } from '@/lib/email/pause';
 import { safeReason } from '@/lib/engine/problems';
 import { aiReady } from '@/lib/outbound/ask';
 import { postTest } from '@/lib/outbound/discord';
-import { approve, compose, draftFirst, draftProblems, mailer, mayNotWrite, officeHours, reject, sendMessage, sendingBlocked, stopFor } from '@/lib/outbound/outreach';
+import { approve, compose, draftFirst, draftProblems, mailer, mayNotWrite, notFit, officeHours, reject, sendMessage, sendingBlocked, stopFor } from '@/lib/outbound/outreach';
 import { addIdeals, isRejectReason, learnIdeals } from '@/lib/outbound/research';
 import { findNow, researchBlocked } from '@/lib/outbound/run';
 import { PIPELINE, REJECT_REASONS, STAGE_LABEL, type Company, type Stage } from '@/lib/outbound/types';
@@ -219,7 +219,7 @@ export async function POST(req: Request) {
         const not: string[] = [];
         for (const c of list) {
           for (const m of c.thread.filter((x) => x.status === 'draft' && (!b.message || x.id === str(b.message, 60)))) {
-            const why = mayNotWrite(c, m.kind) || draftProblems(m.subject, m.text, m.kind).join(', ');
+            const why = notFit(c, m) || draftProblems(m.subject, m.text, m.kind).join(', ');
             if (why) { not.push(`${c.name}: ${why}`); continue; }
             m.status = 'ready';
             m.error = undefined;

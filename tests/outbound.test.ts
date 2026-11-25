@@ -9,6 +9,7 @@ import path from 'node:path';
  * someone on our own list or asked before, one email until they answer, and
  * no means no. */
 
+const REPO = process.cwd();
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thuso-outbound-'));
 process.chdir(dir);
 for (const k of ['DATABASE_URL', 'PGHOST', 'OPENAI_API_KEY', 'SMTP_HOST', 'DISCORD_LEADS_WEBHOOK', 'ANTHROPIC_MODEL', 'ANTHROPIC_BASE_URL']) delete process.env[k];
@@ -285,6 +286,60 @@ test('what we never say is never sent, the reported figure only as reported, and
   assert.equal(mails.length, 0);
   assert.match(m.re.angleOf(m.st.settings(), 0), /Announces an AI strategy/);
 }));
+
+test('the time left before a date is counted today, and an email that has gone out of date waits for a person', () => T(async () => {
+  const k = await import('../src/lib/outbound/clock');
+  const at = (d: string) => Date.parse(`${d}T10:00:00+02:00`);
+  const left = (d: string) => k.timeLeft('2027-04-01', at(d));
+  assert.deepEqual(['2026-11-25', '2026-11-30', '2026-12-01', '2026-12-31', '2027-01-01', '2027-02-28', '2027-03-01', '2027-03-31', '2027-04-01', '2028-01-01'].map(left),
+    ['4 months left', '4 months left', '3 months left', '3 months left', '2 months left', '1 month left', 'less than a month left', 'less than a month left', 'closed', 'closed']);
+  // The month turns at midnight in South Africa, not in London.
+  assert.equal(k.timeLeft('2027-04-01', Date.parse('2026-11-30T22:30:00Z')), '3 months left');
+  assert.equal(k.withTime('12H: {time left to 1 April 2027}. {time left to 1 Apr 2027}. {time left to 2027-04-01}.', NOW), '12H: 4 months left. 4 months left. 4 months left.');
+  assert.equal(k.withTime('{time left to 31 April 2027} {time left to soon}', NOW), '{time left to 31 April 2027} {time left to soon}', 'what is not a date stays as it is');
+
+  // The AI reads it filled in; the settings keep the words.
+  m.st.saveSettings({ rules: 'Section 12H closes 1 April 2027 ({time left to 1 April 2027}).', magnets: [{ ...READY.magnets[0], about: 'Covers 12H, {time left to 1 April 2027}' }, ...READY.magnets.slice(1)] });
+  assert.match(m.st.settings().rules, /\{time left/);
+  assert.match(m.st.told('default', at('2027-01-10')).rules, /\(2 months left\)/);
+  assert.match(m.st.told('default', at('2027-01-10')).magnets[0].about, /2 months left/);
+  ai = () => ({ content: [json(FIRST)] });
+  const c = m.out.approve(company(), 'Nigel');
+  await m.out.draftNext();
+  assert.doesNotMatch(JSON.stringify(asked[0]), /\{time left/);
+  assert.match(asked[0].system, /Section 12H closes 1 April 2027 \((\d months? left|less than a month left|closed)\)/);
+
+  // Written in November, going out in December.
+  const d = c.thread[0];
+  Object.assign(d, { at: NOW, status: 'ready', text: `${FIRST.text}\n\nSection 12H has four months left.` });
+  assert.equal(m.out.notFit(c, d, 'default', NOW), '');
+  const dec = Date.parse('2026-12-02T08:00:00Z');
+  assert.match(m.out.notFit(c, d, 'default', dec), /"four months" was true when it was written, and it is now 3 months left/);
+  assert.equal(await m.out.pumpSend('default', dec), 0);
+  assert.equal(d.status, 'draft');
+  assert.match(d.error!, /Not sent: "four months"/);
+  assert.equal(mails.length, 0);
+  // Put right by a person, or about something else: it goes.
+  for (const ok of ['Section 12H has three months left.', 'Your 4-month project sounds useful.']) { d.text = `${FIRST.text}\n\n${ok}`; assert.equal(m.out.notFit(c, d, 'default', dec), '', ok); }
+}));
+
+test('the free report: the copy that is true today, to anyone with the link', async () => {
+  const { reportName } = await import('../src/lib/outbound/report');
+  const name = (d: string) => reportName(Date.parse(`${d}T10:00:00+02:00`));
+  assert.deepEqual(['2026-11-25', '2026-12-15', '2027-01-15', '2027-02-15', '2027-03-15', '2027-04-01'].map(name),
+    ['skills-2026-4.pdf', 'skills-2026-3.pdf', 'skills-2026-2.pdf', 'skills-2026-1.pdf', 'skills-2026-0.pdf', 'skills-2026-closed.pdf']);
+  const { GET } = await import('../src/app/b2b/report/route');
+  assert.equal((await GET()).status, 503, 'a missing file says so');
+  const here = process.cwd();
+  process.chdir(REPO);
+  try {
+    for (const n of ['4', '3', '2', '1', '0', 'closed']) assert.equal(fs.readFileSync(path.join('assets', 'skills-report', `skills-2026-${n}.pdf`)).subarray(0, 5).toString(), '%PDF-');
+    const r = await GET();
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'application/pdf');
+    assert.ok((await r.arrayBuffer()).byteLength > 400_000);
+  } finally { process.chdir(here); }
+});
 
 test('asked once, ever: never a second first email, not to a colleague, not to someone blocked since', () => T(async () => {
   const c = m.out.approve(company(), 'Nigel');

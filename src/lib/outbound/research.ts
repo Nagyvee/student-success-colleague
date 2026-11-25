@@ -3,7 +3,7 @@ import { getAcademyContext } from '@/lib/auth/accounts';
 import { parseCsv } from '@/lib/lms/sheet';
 import { ask, jsonOf, type Answer } from './ask';
 import { REJECT_REASONS, type Candidate, type Company, type Fact, type IdealCompany, type OutboundSettings } from './types';
-import { blankCompany, blockedReason, companies, domainOf, httpLink, ideals, nameKey, nid, saveIdeals, saveSettings, settings, theirOwnSite } from './store';
+import { blankCompany, blockedReason, companies, domainOf, httpLink, ideals, nameKey, nid, saveIdeals, saveSettings, theirOwnSite, told } from './store';
 
 /* Finding companies that look like our ideal ones.
  *
@@ -69,7 +69,7 @@ export function addIdeals(raw: string): { added: number; total: number } {
 export async function learnIdeals(): Promise<{ ok: boolean; detail: string }> {
   const all = ideals();
   if (all.length < 3) return { ok: false, detail: 'Add at least three ideal companies first.' };
-  const s = settings();
+  const s = told();
   // A list without details: a few are looked up.
   const bare = all.filter((x) => !x.sector).length > all.length / 2;
   const a = await ask({
@@ -130,7 +130,7 @@ const hostSeen = (a: Answer, domain: string) => [...a.urls].some((x) => domainOf
 
 /** A few searches for companies we do not know yet. */
 export async function discover(angle: number, tenantId = currentTenantId()): Promise<Candidate[]> {
-  const s = settings(tenantId);
+  const s = told(tenantId);
   const known = [...companies(tenantId).sort((a, b) => b.foundAt - a.foundAt).slice(0, 150).map((c) => c.domain || c.name), ...ideals(tenantId).slice(0, 120).map((x) => x.domain || x.name)];
   const a = await ask({
     system: `You find companies that could become clients of ${getAcademyContext(tenantId).academyName}, a South African academy. You only list real companies you found in the searches.`,
@@ -178,7 +178,7 @@ export function onAPage(a: Pick<Answer, 'pages'>, email: string): string {
 export async function research(cand: Candidate, tenantId = currentTenantId()): Promise<{ company: Company | null; why: string }> {
   const stop = blockedReason(cand, tenantId);
   if (stop) return { company: null, why: stop };
-  const s = settings(tenantId);
+  const s = told(tenantId);
   const open = s.magnets.filter((x) => x.on && x.when === 'open');
   const like = ideals(tenantId).slice(0, 80).map((x) => x.name);
   const a = await ask({

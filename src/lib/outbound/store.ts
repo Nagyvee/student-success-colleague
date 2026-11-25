@@ -1,6 +1,7 @@
 import { tenantDoc } from '@/lib/engine/tenantDoc';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { log as storeLog } from '@/lib/engine/store';
+import { datesIn, withTime } from './clock';
 import type { Candidate, Company, IdealCompany, Magnet, OutboundSettings, RunState, Spend, Stage } from './types';
 
 /* Where B2B outbound keeps its things, per workspace: the companies (its own
@@ -42,6 +43,17 @@ export function publicSettings(tenantId = currentTenantId()): OutboundSettings {
   const s = settings(tenantId);
   return { ...s, smtpPass: mask(s.smtpPass), discordWebhook: mask(s.discordWebhook) };
 }
+
+const WORDS = ['about', 'services', 'ideal', 'profile', 'signals', 'rules'] as const;
+
+/** The settings as the AI reads them: how long is left before a date is counted today. */
+export function told(tenantId = currentTenantId(), now = Date.now()): OutboundSettings {
+  const s = settings(tenantId);
+  return { ...s, ...Object.fromEntries(WORDS.map((k) => [k, withTime(s[k], now)])), magnets: s.magnets.map((m) => ({ ...m, about: withTime(m.about, now) })) };
+}
+
+/** The dates the settings count to. */
+export const countedTo = (tenantId = currentTenantId()): string[] => { const s = settings(tenantId); return datesIn([...WORDS.map((k) => s[k]), ...s.magnets.map((m) => m.about)].join('\n')); };
 
 const text = (v: unknown, old: string, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : old);
 const num = (v: unknown, old: number, min: number, max: number) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : old; };
