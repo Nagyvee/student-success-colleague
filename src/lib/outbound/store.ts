@@ -20,7 +20,7 @@ const MAGNETS = (): Magnet[] => [
 
 export const defaults = (): OutboundSettings => ({
   researchOn: false, perDay: 20, showPerDay: 10, hour: 7, budgetUsd: 50,
-  about: '', services: '', ideal: '', profile: '', searchIdeas: [], sectors: '', provinces: '', sizeMin: 20, sizeMax: 200, avoid: '',
+  about: '', services: '', ideal: '', profile: '', searchIdeas: [], signals: '', rules: '', never: '', sectors: '', provinces: '', sizeMin: 20, sizeMax: 200, avoid: '',
   writer: 'haiku', discordWebhook: '',
   sendingOn: false, checkFirst: true, checkReplies: true, sendPerDay: 5,
   smtpHost: '', smtpPort: 465, smtpUser: '', smtpPass: '', imapHost: '', fromName: '', fromTitle: '', bookingLink: '', address: '', callsWith: '',
@@ -59,6 +59,7 @@ export function saveSettings(p: Partial<Record<keyof OutboundSettings, unknown>>
     researchOn: bool(p.researchOn, s.researchOn), perDay: num(p.perDay, s.perDay, 1, 40), showPerDay: num(p.showPerDay, s.showPerDay, 1, 40), hour: num(p.hour, s.hour, 5, 16), budgetUsd: num(p.budgetUsd, s.budgetUsd, 1, 1000),
     about: text(p.about, s.about, 3000), services: text(p.services, s.services, 3000), ideal: text(p.ideal, s.ideal, 3000), profile: text(p.profile, s.profile, 4000),
     searchIdeas: Array.isArray(p.searchIdeas) ? p.searchIdeas.filter((x): x is string => typeof x === 'string').map((x) => x.trim().slice(0, 160)).filter(Boolean).slice(0, 30) : s.searchIdeas,
+    signals: text(p.signals, s.signals, 2000), rules: text(p.rules, s.rules, 4000), never: text(p.never, s.never, 2000),
     sectors: text(p.sectors, s.sectors, 600), provinces: text(p.provinces, s.provinces, 300), sizeMin: num(p.sizeMin, s.sizeMin, 1, 100000), sizeMax: num(p.sizeMax, s.sizeMax, 2, 1000000), avoid: text(p.avoid, s.avoid, 20000),
     writer: p.writer === 'sonnet' || p.writer === 'haiku' ? p.writer : s.writer,
     discordWebhook: secret(p.discordWebhook, s.discordWebhook),
@@ -138,6 +139,29 @@ export function domainOf(v: string | undefined): string {
 /** "Acme Holdings (Pty) Ltd" → "acme holdings". */
 export const nameKey = (v: string) => v.toLowerCase().replace(/\(.*?\)/g, ' ').replace(/\b(pty|ltd|limited|proprietary|cc|inc|npc|soc|group of companies)\b\.?/g, ' ').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
 
+// Words that do not tell one company from another.
+const FILLER = /\b(group|holdings?|sa|south africa|southern africa|africa|international|operations|corporation|corporate|company|the)\b/g;
+const core = (v: string) => nameKey(v).replace(FILLER, ' ').replace(/\s+/g, ' ').trim() || nameKey(v);
+// Too ordinary to be a company by itself ("Super Group" is not every "Super …").
+const ORDINARY = new Set(['super', 'first', 'premier', 'standard', 'capital', 'national', 'african', 'global', 'united', 'general', 'metro', 'pioneer', 'liquid', 'harmony', 'builders', 'merchants']);
+
+/** The names a company goes by: "Massmart (Walmart SA - Game/Makro)" is Massmart, Walmart, Game and Makro. */
+export function nameForms(v: string): { main: string[]; also: string[] } {
+  const main = v.replace(/\(.*?\)/g, ' ').split(/\s+\/\s+/).map(core).filter((x) => x.length > 1);
+  const also = [...v.matchAll(/\(([^)]*)\)/g)].flatMap((m) => m[1].replace(/\b(incl(uding)?|formerly|previously|now|part of|parent|trading as|rebranded|subsidiary|franchise)\b\.?/gi, ' ').split(/\s+-\s+|[,/;&+]/)).map(core).filter((x) => x.length > 1 && !/^(group|and)$/.test(x));
+  return { main, also };
+}
+
+/** The same company, or a part of the same group: "Shoprite" and "Shoprite Holdings", "Discovery Health" and
+ *  "Discovery Group", "FNB" and "FirstRand (FNB, RMB)". Rather one too many than one wrongly written to. */
+export function sameGroup(a: string, b: string): boolean {
+  const x = nameForms(a), y = nameForms(b);
+  const all = (f: typeof x) => [...f.main, ...f.also];
+  if (all(x).some((n) => all(y).includes(n))) return true;
+  const within = (short: string, long: string) => short.length >= 5 && !ORDINARY.has(short) && long.startsWith(`${short} `);
+  return x.main.some((m) => all(y).some((n) => within(m, n) || within(n, m))) || y.main.some((m) => x.also.some((n) => within(m, n) || within(n, m)));
+}
+
 // Directories, job boards and social networks: never the company's own site.
 const NOT_THEIR_SITE = /(^|\.)(linkedin|facebook|instagram|twitter|x|youtube|tiktok|wikipedia|indeed|pnet|careers24|careerjunction|glassdoor|gumtree|yellowpages|brabys|cylex|bizcommunity|news24|iol|dailymaverick|moneyweb|itweb|crunchbase|zoominfo|rocketreach|apollo|dnb|google|bing|yep|snupit|whoswho|sacci|gov|google)\.(com|co\.za|org|net|za|gov\.za|org\.za)$/;
 export const theirOwnSite = (domain: string) => Boolean(domain) && !NOT_THEIR_SITE.test(domain) && !/\.gov\.za$/.test(domain);
@@ -160,9 +184,15 @@ export function blockedReason(o: { name: string; domain: string }, tenantId = cu
   const s = settings(tenantId);
   const avoid = avoidList(s);
   const key = nameKey(o.name);
-  if ((o.domain && avoid.domains.has(o.domain)) || (key && avoid.names.has(key))) return 'on the never-contact list';
-  const ideal = ideals(tenantId).find((x) => (o.domain && x.domain === o.domain) || (key && nameKey(x.name) === key));
-  if (ideal && ideal.use === 'pattern') return 'one of our ideal companies marked "learn from it only"';
+  if ((o.domain && avoid.domains.has(o.domain)) || (key && (avoid.names.has(key) || [...avoid.names].some((n) => sameGroup(n, o.name))))) return 'on the never-contact list';
+  // One of our ideal companies by its own name or website: what it is marked as. Otherwise anything of the same
+  // group is left alone as well.
+  const list = ideals(tenantId);
+  const ideal = list.find((x) => (o.domain && x.domain === o.domain) || (key && nameKey(x.name) === key));
+  if (ideal) { if (ideal.use === 'pattern') return 'one of our ideal companies marked "learn from it only"'; } else {
+    const kin = key ? list.find((x) => x.use === 'pattern' && sameGroup(x.name, o.name)) : undefined;
+    if (kin) return `part of ${kin.name}, which is marked "learn from it only"`;
+  }
   const twin = companies(tenantId).find((c) => c.id !== exceptId && ((o.domain && c.domain === o.domain) || (key && nameKey(c.name) === key)));
   if (twin) return `already here (${twin.name})`;
   return '';

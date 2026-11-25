@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Icon, { type IconName } from '@/components/Icon';
 import type { Magnet, OutboundSettings } from '@/lib/outbound/types';
 import type { Overview } from './api';
@@ -8,6 +8,9 @@ import type { Act } from './OutboundClient';
 
 /* What Thuso looks for, what it may spend, what we give away, and the mailbox
  * it writes from. Both switches are off until someone turns them on. */
+
+/** What a setup file may fill in: never a switch, a password or a webhook. */
+const FROM_FILE = ['services', 'about', 'ideal', 'profile', 'searchIdeas', 'signals', 'rules', 'never', 'sectors', 'provinces', 'sizeMin', 'sizeMax', 'avoid', 'perDay', 'showPerDay', 'budgetUsd', 'hour', 'fromName', 'fromTitle', 'callsWith', 'bookingLink', 'address', 'magnets'] as const;
 
 function Card({ icon, title, sub, children }: { icon: IconName; title: string; sub: string; children: ReactNode }) {
   return <section className="pg-card"><div className="pg-card-h"><div><h2><Icon name={icon} size={16} /> {title}</h2><p className="pg-sub">{sub}</p></div></div>{children}</section>;
@@ -30,16 +33,36 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
   const save = async (extra: Partial<OutboundSettings> = {}) => { await run('save', { action: 'saveSettings', settings: { ...f, ...extra } }); setDirty(false); };
   const magnet = (i: number, p: Partial<Magnet>) => set('magnets', f.magnets.map((m, j) => (j === i ? { ...m, ...p } : m)));
   const daily = (f.perDay * 0.06 + 0.2) * 21;
+  const file = useRef<HTMLInputElement>(null);
+  const [loaded, setLoaded] = useState('');
+  async function loadFile(x: File) {
+    let j: { settings?: Partial<OutboundSettings>; ideals?: string } | null = null;
+    try { j = JSON.parse((await x.text()).replace(/^\uFEFF/, '')); } catch { /* said below */ }
+    if (!j || typeof j !== 'object' || (!j.settings && !j.ideals)) { setLoaded('That is not a setup file.'); return; }
+    if (j.settings) {
+      const given = j.settings as Record<string, unknown>;
+      setF((old) => ({ ...old, ...Object.fromEntries(FROM_FILE.filter((k) => given[k] !== undefined).map((k) => [k, given[k]])) }));
+      setDirty(true);
+    }
+    if (typeof j.ideals === 'string' && j.ideals.trim()) await run('file', { action: 'importIdeals', text: j.ideals });
+    setLoaded(j.settings ? 'Filled in below. Read it, change what is not right, then press Save.' : 'The ideal companies are in.');
+  }
 
   if (!data.canManage) return <section className="pg-card"><p className="nu-hint">Only owners and admins can change these.</p></section>;
   return (
     <div className="nu-tab">
+      <div className="ob-file">
+        <input ref={file} type="file" accept=".json,application/json" hidden onChange={(e) => { const x = e.target.files?.[0]; e.target.value = ''; if (x) void loadFile(x); }} />
+        <button type="button" className="btn ghost sm" disabled={Boolean(busy)} onClick={() => file.current?.click()}><Icon name="upload" size={14} /> {busy === 'file' ? 'Reading…' : 'Load a setup file'}</button>
+        <span className="nu-hint">{loaded || 'Fills in these settings and the ideal companies from one file. Switches, passwords and webhooks are never in it.'}</span>
+      </div>
       <Card icon="target" title="What we look for" sub="Thuso reads this before every search. Nothing is searched until what we sell, and what an ideal company looks like, are filled in.">
         <div className="nu-form">
           <label className="field is-full"><span>What we sell (one per line, the most important first)</span><textarea {...text('services')} placeholder={'Learnerships: we train your people or new juniors in software, data or cybersecurity\nTeam training for the people you have'} /></label>
           <label className="field is-full"><span>About us, in facts it may use</span><textarea {...text('about')} placeholder="Who we are, how we train, accreditation, clients we may name" /></label>
           <label className="field is-full"><span>Our ideal company, in your words</span><textarea {...text('ideal')} placeholder="Growing, employs juniors in numbers, struggles to find tech skills…" /></label>
           <label className="field is-full"><span>What our ideal companies have in common {f.profile ? '' : '(learnt on the Ideal companies tab)'}</span><textarea {...text('profile')} /></label>
+          <label className="field is-full"><span>What may show they need us now (one per line)</span><textarea {...text('signals')} placeholder={'Announces an AI strategy\nAdvertises learnerships or junior technical roles'} /></label>
           <label className="field"><span>Sectors</span><input {...text('sectors')} placeholder="Logistics, Retail, Financial services" /></label>
           <label className="field"><span>Places</span><input {...text('provinces')} placeholder="Gauteng, KwaZulu-Natal" /></label>
           <label className="field"><span>Smallest (people)</span><input {...num('sizeMin')} min={1} /></label>
@@ -57,6 +80,13 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
           <label className="field is-full"><span>Who writes the emails</span><select value={f.writer} onChange={(e) => set('writer', e.target.value as 'haiku' | 'sonnet')}><option value="haiku">Haiku 5.5 (cheapest)</option><option value="sonnet">Sonnet 5.5 (better words, about $4 a month more)</option></select></label>
         </div>
         <Switch on={f.researchOn} set={(v) => set('researchOn', v)} title="Look for companies every weekday">Sends nothing to anyone. The best are listed here, and in the B2B channel if it is connected.</Switch>
+      </Card>
+
+      <Card icon="chat" title="How we speak" sub="The AI follows this in every email. An email with words from the second list is never sent until a person changes it.">
+        <div className="nu-form">
+          <label className="field is-full"><span>How we speak, and to whom about what</span><textarea {...text('rules')} rows={7} placeholder="To a head of learning: completion and reporting first…" /></label>
+          <label className="field is-full"><span>Never say (one per line; &quot;92% only with reported&quot; means never 92% without the word reported)</span><textarea {...text('never')} rows={5} placeholder={'guarantee\n92% only with reported'} /></label>
+        </div>
       </Card>
 
       <Card icon="file" title="What we give away" sub="The first email only offers one thing and asks if we may send it. The links go out after they say yes, so each one needs its link.">

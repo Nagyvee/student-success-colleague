@@ -98,6 +98,7 @@ function wanted(s: OutboundSettings): string {
     s.about && `About us: ${s.about}`,
     s.ideal && `Our ideal company: ${s.ideal}`,
     s.profile && `What our ideal companies have in common: ${s.profile}`,
+    s.signals && `What may show they need us now (signs to look for, not proof): ${split(s.signals).join('; ')}`,
     s.sectors && `Sectors: ${s.sectors}`,
     s.provinces && `Places: ${s.provinces}`,
     `Size: ${s.sizeMin} to ${s.sizeMax} employees (a smaller company decides faster; leave out large groups and their brands)`,
@@ -120,7 +121,8 @@ export function angleOf(s: OutboundSettings, n: number): string {
   const pick = (xs: string[], step: number) => (xs.length ? xs[(n * step) % xs.length] : '');
   const idea = s.searchIdeas.length && n % 2 === 1 ? s.searchIdeas[((n - 1) / 2) % s.searchIdeas.length] : '';
   const place = pick(split(s.provinces), 1) || 'South Africa';
-  return idea ? `${idea} (${place})` : `${[pick(split(s.sectors), 1) || 'companies like our ideal ones', `in ${place}`, pick(SIGNALS, 5)].join(', ')}`;
+  const signs = s.signals.trim() ? s.signals.split(/\n+/).map((x) => x.trim()).filter(Boolean) : SIGNALS;
+  return idea ? `${idea} (${place})` : `${[pick(split(s.sectors), 1) || 'companies like our ideal ones', `in ${place}`, pick(signs, 5)].join(', ')}`;
 }
 
 const seenIn = (a: Answer, url: string) => { const u = httpLink(url); return Boolean(u) && [...a.urls].some((x) => httpLink(x).replace(/[#?].*$/, '').replace(/\/$/, '') === u.replace(/[#?].*$/, '').replace(/\/$/, '')); };

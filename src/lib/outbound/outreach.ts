@@ -77,15 +77,28 @@ export function mayNotWrite(c: Company, kind: Message['kind'], tenantId = curren
 
 /* ── Writing ──────────────────────────────────────────────────────────────── */
 
+/** The words an email may not have ("92% only with reported": not without the other), or nothing. */
+export function neverSaid(text: string, never: string): string[] {
+  const t = text.toLowerCase().replace(/\s+/g, ' ');
+  const has = (w: string) => { const x = w.trim().toLowerCase().replace(/\s+/g, ' '); return Boolean(x) && new RegExp(`(^|[^a-z0-9])${x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(t); };
+  return never.split(/\n+/).map((x) => x.trim()).filter(Boolean).flatMap((rule) => {
+    const only = /^(.+?)\s+only with\s+(.+)$/i.exec(rule);
+    if (only) return has(only[1]) && !has(only[2]) ? [`"${only[1]}" without "${only[2]}"`] : [];
+    return has(rule) ? [`"${rule}"`] : [];
+  });
+}
+
 /** What is wrong with a draft, or nothing. */
 export function draftProblems(subject: string, text: string, kind: Message['kind']): string[] {
   const words = text.split(/\s+/).filter(Boolean).length;
+  const not = neverSaid(`${subject}\n${text}`, settings().never);
   return [
     !subject.trim() ? 'no subject' : subject.length > 90 ? 'the subject is too long' : '',
     words < 15 ? 'too short' : words > (kind === 'first' ? 170 : 260) ? 'too long' : '',
     /\[[^\]]{2,40}\]|\{\{|<[a-z]+ ?[^>]*>/i.test(text) ? 'a blank left to fill in' : '',
     kind === 'first' && /https?:\/\/|www\./i.test(text) ? 'a link (the first email has none, so it is not taken for spam)' : '',
-    /guarantee|risk[- ]free|act now|limited time|100%/i.test(text) ? 'a promise or pressure' : '',
+    /guarantee|risk[- ]free|act now|limited time|100%(?! (black|online|female|youth))/i.test(text) ? 'a promise or pressure' : '',
+    not.length ? `something we never say: ${not.slice(0, 3).join(', ')}` : '',
   ].filter(Boolean);
 }
 
@@ -101,7 +114,7 @@ const newMessage = (o: Pick<Message, 'kind' | 'subject' | 'text'> & Partial<Mess
 
 function voice(c: Company): string {
   const s = settings();
-  return `You write emails for ${s.fromName || 'the team'}${s.fromTitle ? `, ${s.fromTitle}` : ''} at ${getAcademyContext().academyName}, a South African academy that trains companies' people. Plain, warm, specific, like a busy person writing to another. South African English. No buzzwords, no flattery, no pressure, no emoji, no links, no prices, no promises about results or money, and nothing about us that is not below. Never say how you found them beyond the public page. ${s.about ? `About us: ${s.about}` : ''}\nWhat we sell: ${s.services}\nThe company: ${c.name}. ${c.what}`;
+  return `You write emails for ${s.fromName || 'the team'}${s.fromTitle ? `, ${s.fromTitle}` : ''} at ${getAcademyContext().academyName}, a South African academy that trains companies' people. Plain, warm, specific, like a busy person writing to another. South African English. No buzzwords, no flattery, no pressure, no emoji, no links, no prices, no promises about results or money, and nothing about us that is not below. Never say how you found them beyond the public page. ${s.about ? `About us: ${s.about}` : ''}\nWhat we sell: ${s.services}${s.rules ? `\nHow we speak (always followed): ${s.rules}` : ''}${s.never.trim() ? `\nNever write these words (where it says "only with", never the first without the second): ${s.never.split(/\n+/).map((x) => x.trim()).filter(Boolean).join('; ')}` : ''}${c.contact.role ? `\nYou write to: ${[c.contact.name, c.contact.role].filter(Boolean).join(', ')}` : '\nYou write to a general address: assume whoever looks after people and training.'}\nThe company: ${c.name}. ${c.what}`;
 }
 
 /** The one first email: something true about them, something useful for them, one question. */
@@ -109,16 +122,23 @@ export async function writeFirst(c: Company): Promise<Message> {
   const offer = offerOf(c);
   const name = offer?.name || 'a short guide';
   let subject = '', text = '';
-  try {
-    const a = await ask({
-      model: writerModel(), maxTokens: 3000, system: voice(c),
-      prompt: `Write the only email we may send before they answer. We may ask once: may we send them "${name}"${offer?.about ? ` (${offer.about})` : ''}?\n\nTrue things about them (use one, the most telling):\n${c.facts.map((f) => `- ${f.text}`).join('\n')}\nWhy they might train people: ${c.fit.join('; ')}\nThe service behind it: ${c.service}\n\nStart with "${hello(c)}". 60 to 110 words, two or three short paragraphs. One observation about them, why it made us think of them, what ${name} would give them, and end with one easy question asking if you may send it. Do not ask for a call. Do not sign it.\nJSON only: {"subject": "under 60 characters, specific to them, no capitals for effect", "text": "paragraphs separated by \\n\\n"}`,
-    });
-    const j = jsonOf<{ subject?: string; text?: string }>(a);
-    subject = String(j?.subject || '').replace(/\s+/g, ' ').trim().slice(0, 90);
-    text = cleanText(j?.text || '');
-  } catch (e) {
-    log('system', 'error', `The first email to ${c.name} could not be written by the AI: ${safeReason((e as Error).message)}`);
+  let wrong: string[] = [];
+  // A second try says what was wrong with the first.
+  for (let i = 0; i < 2; i++) {
+    try {
+      const a = await ask({
+        model: writerModel(), maxTokens: 3000, system: voice(c),
+        prompt: `Write the only email we may send before they answer. We may ask once: may we send them "${name}"${offer?.about ? ` (${offer.about})` : ''}?\n\nTrue things about them (use one, the most telling):\n${c.facts.map((f) => `- ${f.text}`).join('\n')}\nWhy they might train people: ${c.fit.join('; ')}\nThe service behind it: ${c.service}\n\nStart with "${hello(c)}". 60 to 110 words, two or three short paragraphs. One observation about them, why it made us think of them, what ${name} would give them, and end with one easy question asking if you may send it. Do not ask for a call. Do not sign it.${wrong.length ? `\nYour last try had: ${wrong.join('; ')}. Write it without that.` : ''}\nJSON only: {"subject": "under 60 characters, specific to them, no capitals for effect", "text": "paragraphs separated by \\n\\n"}`,
+      });
+      const j = jsonOf<{ subject?: string; text?: string }>(a);
+      subject = String(j?.subject || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+      text = cleanText(j?.text || '');
+      wrong = draftProblems(subject, text, 'first');
+      if (!wrong.length) break;
+    } catch (e) {
+      log('system', 'error', `The first email to ${c.name} could not be written by the AI: ${safeReason((e as Error).message)}`);
+      break;
+    }
   }
   if (!text || draftProblems(subject, text, 'first').length) {
     // A plain one a person can work from.
@@ -160,9 +180,15 @@ export function sendingBlocked(tenantId = currentTenantId()): string {
   return missing.length ? `Still missing: ${missing.join(', ')}.` : '';
 }
 
+/** Why this very message may not go: the person, or its words (the list may have changed since it was checked). */
+function notFit(c: Company, m: Message, tenantId: string): string {
+  const not = neverSaid(`${m.subject}\n${m.text}`, settings(tenantId).never);
+  return mayNotWrite(c, m.kind, tenantId) || (not.length ? `it says ${not[0]}` : '');
+}
+
 /** Sends one message now. Everything is checked again here. */
 export async function sendMessage(c: Company, m: Message, tenantId = currentTenantId(), now = Date.now()): Promise<{ ok: boolean; detail: string }> {
-  const blocked = sendingBlocked(tenantId) || mayNotWrite(c, m.kind, tenantId);
+  const blocked = sendingBlocked(tenantId) || notFit(c, m, tenantId);
   if (blocked) return { ok: false, detail: blocked };
   const s = settings(tenantId);
   const e = compose(c, m, tenantId);
@@ -218,6 +244,9 @@ export async function pumpSend(tenantId = currentTenantId(), now = Date.now()): 
   try {
     const s = settings(tenantId);
     const due = companies(tenantId).flatMap((c) => c.thread.filter((m) => m.who === 'us' && m.status === 'ready').map((m) => ({ c, m })));
+    // One that may not go waits for a person, and never holds up the next one.
+    const held = due.find((x) => notFit(x.c, x.m, tenantId));
+    if (held) { held.m.status = 'draft'; held.m.error = `Not sent: ${notFit(held.c, held.m, tenantId)}.`; saveCompany(held.c); return 0; }
     const answer = due.filter((x) => x.m.kind !== 'first').sort((a, b) => a.m.at - b.m.at)[0];
     if (answer) return (await sendMessage(answer.c, answer.m, tenantId, now)).ok ? 1 : 0;
     const today = run.sentDay === sastDay(now) ? run.sentToday : 0;
@@ -226,8 +255,6 @@ export async function pumpSend(tenantId = currentTenantId(), now = Date.now()): 
     if (today >= s.sendPerDay || now - run.lastSendAt < gap) return 0;
     const first = due.filter((x) => x.m.kind === 'first').sort((a, b) => b.c.score - a.c.score)[0];
     if (!first) return 0;
-    const why = mayNotWrite(first.c, 'first', tenantId);
-    if (why) { first.m.status = 'draft'; first.m.error = `Not sent: ${why}.`; saveCompany(first.c); return 0; }
     return (await sendMessage(first.c, first.m, tenantId, now)).ok ? 1 : 0;
   } finally {
     busy.delete(tenantId);

@@ -112,6 +112,12 @@ export interface OutboundSettings {
   /** The pattern Thuso read from the ideal companies (it can be edited). */
   profile: string;
   searchIdeas: string[];
+  /** What shows a company may need us now (one per line). */
+  signals: string;
+  /** How we speak, and to whom about what. */
+  rules: string;
+  /** Words no email may have, one per line; "92% only with reported" allows one only beside the other. */
+  never: string;
   sectors: string;
   provinces: string;
   sizeMin: number;

@@ -99,6 +99,7 @@
 .ob-answer .field { width:100%; }
 
 /* settings */
+.ob-file { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .ob-switch { align-items:flex-start; line-height:1.45; font-size:13px; }
 .ob-switch span { display:block; color:var(--ink-2); }
 .ob-switch b { color:var(--ink); }

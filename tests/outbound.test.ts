@@ -72,7 +72,7 @@ before(async () => {
 });
 
 const READY = {
-  researchOn: true, perDay: 2, showPerDay: 10, hour: 7, budgetUsd: 50, services: 'Learnerships and team training in software, data and cybersecurity', ideal: 'Growing firms that employ many juniors', sectors: 'Logistics, Retail', provinces: 'Gauteng, KwaZulu-Natal', sizeMin: 20, sizeMax: 200, avoid: 'Blocked Co, never.co.za', searchIdeas: [],
+  researchOn: true, perDay: 2, showPerDay: 10, hour: 7, budgetUsd: 50, services: 'Learnerships and team training in software, data and cybersecurity', ideal: 'Growing firms that employ many juniors', sectors: 'Logistics, Retail', provinces: 'Gauteng, KwaZulu-Natal', sizeMin: 20, sizeMax: 200, avoid: 'Blocked Co, never.co.za', searchIdeas: [], signals: '', rules: '', never: '',
   discordWebhook: 'https://discord.com/api/webhooks/9/b2b', sendingOn: true, checkFirst: true, checkReplies: true, sendPerDay: 2, smtpHost: 'smtp.example.org', smtpPort: 465, smtpUser: 'team@out.example.org', smtpPass: 'pw', fromName: 'Naledi M', fromTitle: 'Partnerships', bookingLink: 'https://cal.example.org/team', address: '1 Main Road, Durban', callsWith: 'Thabile',
   magnets: [{ id: 'mg_report', name: 'The free report', about: 'What training juniors costs and returns', link: 'https://melsoft.example/report', when: 'open', on: true }, { id: 'mg_toolkit', name: 'The toolkit', about: '', link: 'https://melsoft.example/toolkit', when: 'yes', on: true }, { id: 'mg_12h', name: 'The 12H calculator', about: 'What you could claim back', link: 'https://melsoft.example/12h', when: 'yes', on: true }],
 };
@@ -107,6 +107,22 @@ test('our ideal list is read from a paste, a CSV or just names, and never contac
   assert.equal(m.st.blockedReason({ name: 'Acme', domain: 'acme.co.za' }), '');
   assert.match(m.st.blockedReason({ name: 'Blocked Co', domain: '' }), /never-contact/);
   assert.match(m.st.blockedReason({ name: 'Something', domain: 'never.co.za' }), /never-contact/);
+}));
+
+test('a company on our list is left alone by any of its names, its brands and its group; an ordinary word is not a name', () => T(() => {
+  m.re.addIdeals(['Company,Website', 'Shoprite Holdings,shopriteholdings.co.za', '"FirstRand Group (FNB, RMB, WesBank)",firstrand.co.za', 'Massmart (Walmart SA - Game/Makro/Builders),massmart.co.za', 'Imperial / Motus Holdings,motus.co.za', 'Discovery Group,discovery.co.za', 'Capitec Bank,', 'BCX (Telkom subsidiary),bcx.co.za', 'Spar Group (corporate + franchise),', 'Valterra Platinum (formerly Amplats),', 'Super Group,supergroup.co.za', 'Premier Foods,', 'iOCO (EOH rebranded),'].join('\n'));
+  const no = (name: string, domain = '') => m.st.blockedReason({ name, domain });
+  for (const x of ['Shoprite', 'SHOPRITE (Pty) Ltd', 'FNB', 'WesBank', 'RMB', 'FirstRand', 'Massmart', 'Makro', 'Game', 'Walmart', 'Motus', 'Imperial', 'Discovery Health', 'Discovery Bank', 'Capitec', 'BCX', 'Telkom', 'Spar', 'Amplats', 'Valterra', 'Super Group', 'Premier Foods SA', 'EOH', 'iOCO Holdings']) assert.match(no(x), /learn from it only/, x);
+  assert.match(no('Anything', 'motus.co.za'), /learn from it only/);
+  for (const x of ['Super Glass Durban', 'Premier Logistics', 'Gamehaven Lodge', 'Sparkle Cleaning', 'Motusi Traders', 'Builders Yard Vaal', 'First Freight', 'Discover Travel']) assert.equal(no(x), '', x);
+  // Their own mark decides when it is the very company.
+  m.st.saveIdeals([...m.st.ideals(), { id: 'x', name: 'Discovery Vitality Labs', domain: 'vitalitylabs.co.za', sector: '', size: '', province: '', note: '', use: 'research' }]);
+  assert.equal(no('Discovery Vitality Labs', 'vitalitylabs.co.za'), '');
+  m.st.saveSettings({ avoid: 'Checkers\nBidvest Group' });
+  assert.match(no('Checkers Sixty60'), /never-contact/);
+  assert.match(no('Bidvest'), /never-contact/);
+  // The columns with people's names in a list are not read.
+  assert.doesNotMatch(JSON.stringify(m.re.readIdeals('#,Owner,Company,Sector,Chief of People / HR,CIO / CTO\n1,Kennedy,Acme,Retail,Some Person SEQUENCE,Other Person')), /Person|Kennedy/);
 }));
 
 test('what the ideal companies have in common is learnt, kept as words people can change', () => T(async () => {
@@ -235,6 +251,39 @@ test('the first email: one thing true, one thing offered, one question; who we a
   await m.out.draftNext();
   assert.match(c2.thread[0].text, /^Hello Other Co team,/);
   assert.deepEqual(m.out.draftProblems('', 'Hi [name], act now', 'first').sort(), ['a blank left to fill in', 'a promise or pressure', 'no subject', 'too short'].sort());
+}));
+
+test('what we never say is never sent, the reported figure only as reported, and the AI gets one more try', () => T(async () => {
+  m.st.saveSettings({ never: '135%\nfines\nonly provider\n92% only with reported', rules: 'To a head of learning: completion first.', signals: 'Announces an AI strategy' });
+  const body = (x: string) => `Hi Sipho,\n\nI read that you opened a depot in Durban and take on juniors there each year.\n\n${x} May I send you our free report?`;
+  const p = (x: string) => m.out.draftProblems('A report', body(x), 'first');
+  assert.deepEqual(p('Our programmes have a reported 92% completion rate.'), []);
+  assert.deepEqual(p('We are Level 1 B-BBEE and 100% Black Female Youth-Owned, and classes are 100% online.'), [], 'who we are is not a promise');
+  assert.match(p('Our completion rate is 92%.').join(), /"92%" without "reported"/);
+  assert.match(p('Every rand counts at 135%.').join(), /"135%"/);
+  assert.match(p('Avoid FINES this year.').join(), /"fines"/);
+  assert.match(p('We are the only\nprovider that does it.').join(), /"only provider"/);
+  assert.deepEqual(p('We refined the report for you.'), [], 'a word inside another word is not it');
+  assert.match(p('It works 100% of the time.').join(), /promise/);
+  const tries: string[] = [];
+  ai = (r) => { tries.push(String(r.messages[0].content)); return { content: [json(tries.length === 1 ? { ...FIRST, text: body('Every rand counts at 135%.') } : FIRST)] }; };
+  const c = m.out.approve(company(), 'Nigel');
+  await m.out.draftNext();
+  assert.equal(tries.length, 2);
+  assert.match(tries[1], /Your last try had: something we never say: "135%"/);
+  assert.equal(c.thread[0].text, FIRST.text);
+  assert.match(asked[0].system, /How we speak \(always followed\): To a head of learning/);
+  assert.match(asked[0].system, /You write to: Sipho Khumalo, HR/);
+  // One that still says it waits for a person, and does not go when it is pressed.
+  c.thread[0].text = body('Every rand counts at 135%.');
+  m.st.saveSettings({ checkFirst: false });
+  assert.ok(m.out.draftProblems(c.thread[0].subject, c.thread[0].text, 'first').length);
+  c.thread[0].status = 'ready';
+  assert.equal(await m.out.pumpSend('default', NOW), 0);
+  assert.equal(c.thread[0].status, 'draft');
+  assert.match(c.thread[0].error!, /it says "135%"/);
+  assert.equal(mails.length, 0);
+  assert.match(m.re.angleOf(m.st.settings(), 0), /Announces an AI strategy/);
 }));
 
 test('asked once, ever: never a second first email, not to a colleague, not to someone blocked since', () => T(async () => {

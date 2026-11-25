@@ -149,7 +149,7 @@ async function phoneFieldIds(mc: ReturnType<typeof manychat>, known?: Awaited<Re
 const firstNameOf = (rec: Pick<DataRecord, 'name' | 'fields'>) => (rec.fields.first_name || rec.name).trim().split(/\s+/)[0] || '';
 
 /** Sends one lead the WhatsApp they are due, and remembers it. Everything is checked again here. */
-async function sendTo(mc: ReturnType<typeof manychat>, rec: DataRecord, kind: WaKind, s: ReturnType<typeof settings>, fields: number[], tenantId: string): Promise<Outcome> {
+async function sendTo(mc: ReturnType<typeof manychat>, rec: DataRecord, kind: WaKind, s: ReturnType<typeof settings>, fields: number[], tenantId: string, at0 = Date.now()): Promise<Outcome> {
   const set = (k: string, v: string) => setRecordField(rec.sourceId, rec.key, k, v);
   const later = (days: number) => set('whatsapp_retry_at', new Date(Date.now() + days * DAY).toISOString());
   const found = await mc.find(rec.phone, rec.email, fields);
@@ -190,7 +190,7 @@ async function sendTo(mc: ReturnType<typeof manychat>, rec: DataRecord, kind: Wa
   const prevLast = rec.fields.whatsapp_last_at || '';
   const out = await deliver(mc, contact, { sourceId: rec.sourceId, key: rec.key, programme: leadProgramme(liveFields(rec)) }, kind, s.flows[kind], tenantId, () => {
     // Remembered before it leaves: a crash or a lost answer never sends it twice.
-    const now = new Date().toISOString();
+    const now = new Date(at0).toISOString();
     set(stamp, now);
     set('whatsapp_last_at', now);
   });
@@ -261,7 +261,7 @@ export async function pumpWhatsApp(tenantId = currentTenantId(), now = Date.now(
       if (sent >= PER_TICK || st.sent >= s.perDay) break;
       const rec = getRecord(d.rec.sourceId, d.rec.key);
       if (!rec || whatsappDue(rec, now, videoFits(leadProgramme(liveFields(rec)))).kind !== d.kind) continue;
-      const out = await sendTo(mc, rec, d.kind, s, fields, tenantId);
+      const out = await sendTo(mc, rec, d.kind, s, fields, tenantId, now);
       if (out.result === 'sent') {
         sent++; st.sent++; st.fails = 0; st.unsure = 0; st.stuckOn = ''; st.lastError = '';
         noteFine('whatsapp', tenantId, now);
