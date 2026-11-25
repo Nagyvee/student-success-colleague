@@ -219,7 +219,7 @@ export async function research(cand: Candidate, tenantId = currentTenantId()): P
   const page = email ? onAPage(a, email) : '';
   const name = str(j.name, 120) || cand.name;
   const company = blankCompany({
-    name, domain: cand.domain, website: cand.website, from: cand.from, what: str(j.what, 300), sector: str(j.sector, 80), city: str(j.city, 60), province: str(j.province, 60), size, employees,
+    name, domain: cand.domain, website: cand.website, from: cand.from, what: str(j.what, 300), sector: str(j.sector, 80), city: brief(str(j.city).split(/[(;]/)[0], 40).trim(), province: str(j.province, 60), size, employees,
     facts, fit: list(j.fit, 3, 200), concerns: brief(j.concerns, 240), service: brief(str(j.service).split(/[(;:]/)[0], 60).trim(), magnetId: open.some((x) => x.id === j.magnet) ? String(j.magnet) : open[0]?.id || '',
     like: list(j.like, 2, 120).filter((x) => like.some((y) => nameKey(y) === nameKey(x))),
     contact: { name: str(c.name, 80), role: str(c.role, 80), email: page ? email : '', phone: str(c.phone, 40), source: page }, score, scoreWhy: str(j.scoreWhy, 240),

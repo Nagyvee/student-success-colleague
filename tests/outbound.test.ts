@@ -322,6 +322,15 @@ test('what we never say is never sent, the reported figure only as reported, and
   assert.equal(c.thread[0].text, FIRST.text);
   assert.match(asked[0].system, /How we speak \(always followed\): To a head of learning/);
   assert.match(asked[0].system, /You write to: Sipho Khumalo, HR/);
+  // Words nobody would say aloud: another try too, but a person may write what they like.
+  tries.length = 0;
+  ai = (r) => { tries.push(String(r.messages[0].content)); return { content: [json(tries.length === 1 ? { ...FIRST, text: body('You run a learnership, which means a structured route into work. We work on the same stretch.') } : FIRST)] }; };
+  const c2 = m.out.approve(company({ name: 'Plain Co', domain: 'plain.co.za', contact: { name: 'Ann', role: 'HR', email: 'ann@plain.co.za', phone: '', source: 'x' } }), 'Nigel');
+  await m.out.draftFirst(c2);
+  assert.match(tries[1], /Your last try had: stiff words \(which means, structured route, the same stretch\)/);
+  assert.equal(c2.thread[0].text, FIRST.text);
+  assert.deepEqual(p('It opens a structured route into work for juniors.'), []);
+  assert.deepEqual(m.out.stiffWords('We train people in AI, data and software, and I saw that you hire juniors.'), []);
   // One that still says it waits for a person, and does not go when it is pressed.
   c.thread[0].text = body('Every rand counts at 135%.');
   m.st.saveSettings({ checkFirst: false });

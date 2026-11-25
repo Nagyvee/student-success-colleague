@@ -135,7 +135,7 @@ function Draft({ m, data, go, why, first }: { m: DraftMessage; data: Overview; g
       {m.problems.length > 0 && <p className="ob-con"><Icon name="warn" size={12} /> Fix first: {m.problems.join(', ')}.</p>}
       {m.status === 'draft' && why && <p className="ob-con"><Icon name="warn" size={12} /> It cannot go: {why}.</p>}
       <button type="button" className="nu-link" onClick={() => setFull(!full)}><Icon name="eye" size={13} /> {full ? 'Hide' : 'See'} the whole email</button>
-      {full && <pre className="ob-full">{m.full}</pre>}
+      {full && <pre className="ob-full">{m.full.replace(/ use https?:\/\/\S+\/b2b\/[\w-]+\.[\w-]+/, ' tell us here (a link)')}</pre>}
       <div className="pg-actions">
         {m.status === 'ready' ? <button type="button" className="btn ghost sm" disabled={busy} onClick={() => void run({ action: 'holdDraft' })}>Hold it</button> : (
           <>
