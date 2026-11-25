@@ -20,8 +20,17 @@ export const STAGE_LABEL: Record<Stage, string> = { ...Object.fromEntries(PIPELI
 /** Why a company is not for us: Thuso looks for fewer like it. */
 export const REJECT_REASONS = ['Too big', 'Too small', 'Wrong sector', 'Wrong place', 'Already talking to them', 'Not a real fit'] as const;
 
-/** Something true about a company, and the page that says it. */
-export interface Fact { text: string; url: string }
+/** Something true about a company, and the page that says it. `sign`: which sign that it may need us it shows, when it shows one. */
+export interface Fact { text: string; url: string; sign?: string }
+
+/** "160+ (global, five offices)" as people read it: "160+ people". Without a number it says nothing. */
+export function peopleOf(size: string): string {
+  const t = size.split(/[(;]/)[0].trim();
+  return !/\d/.test(t) ? '' : /people|staff|employees|experts|specialists|consultants|engineers/i.test(t) ? t : `${t} people`;
+}
+
+/** Is it one to choose from: on a day's list and good enough (or added by a person)? */
+export const onList = (c: { listedOn: string; score: number; from: string }, min: number) => Boolean(c.listedOn) && (c.from === 'manual' || c.score >= min);
 
 export interface Contact { name: string; role: string; email: string; phone: string; /** The page the address was read on. */ source: string }
 
@@ -104,6 +113,8 @@ export interface OutboundSettings {
   researchOn: boolean;
   perDay: number;
   showPerDay: number;
+  /** A company is only put on the list with this score or more. */
+  minScore: number;
   hour: number;
   budgetUsd: number;
   about: string;
@@ -142,15 +153,16 @@ export interface OutboundSettings {
   magnets: Magnet[];
 }
 
-export interface Candidate { name: string; website: string; domain: string; why: string; url: string; from: 'research' | 'ideal' }
+export interface Candidate { name: string; website: string; domain: string; why: string; url: string; from: 'research' | 'ideal'; /** The sign it was found for. */ sign?: string }
 
 export interface RunState {
   /** The day the numbers are for (YYYY-MM-DD, South African time). */
   day: string;
   researched: number;
   kept: number;
-  /** Companies someone asked for on top of the daily ones ("Find companies now"). */
+  /** Good companies someone asked for on top of the daily ones ("Find 5 now"), and how many more may be looked at to find them. */
   extra: number;
+  looks?: number;
   done: boolean;
   /** Rounds in a row that found nobody new. */
   dry: number;

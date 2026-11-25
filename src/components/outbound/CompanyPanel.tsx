@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '@/components/Icon';
 import { Chip, Modal } from '@/components/nurture/ui';
-import { PIPELINE, STAGE_LABEL, type Stage } from '@/lib/outbound/types';
+import { PIPELINE, STAGE_LABEL, peopleOf, type Stage } from '@/lib/outbound/types';
 import { when, type CompanyDetail, type Overview } from './api';
 import type { Act } from './OutboundClient';
 
@@ -28,7 +28,7 @@ export default function CompanyPanel({ id, data, act, onClose }: { id: string; d
   if (!c) return <Modal title="Company" onClose={onClose}><div className="nu-loading"><Icon name="spinner" size={15} className="spin" /> Loading…</div></Modal>;
   const closed = c.consent === 'no';
   return (
-    <Modal wide title={c.name} sub={[c.sector, [c.city, c.province].filter(Boolean).join(', '), c.size ? `${c.size} people` : ''].filter(Boolean).join(' · ')} onClose={onClose}>
+    <Modal wide title={c.name} sub={[c.sector, [c.city, c.province].filter(Boolean).join(', '), peopleOf(c.size)].filter(Boolean).join(' · ')} onClose={onClose}>
       <div className="ob-panel">
         <div className="ob-panel-top">
           <span className={`ob-score${c.score >= 8 ? ' hi' : c.score >= 6 ? ' mid' : ''}`} title={c.scoreWhy}>{c.score}<small>/10</small></span>

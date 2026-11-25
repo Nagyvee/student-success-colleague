@@ -142,12 +142,13 @@ test('only companies that came up in the searches, with their own site, not know
   company({ name: 'Known One', domain: 'known.co.za' });
   ai = () => ({
     content: [searched('https://www.good.co.za/careers', 'https://news.example/list', 'https://linkedin.com/company/social'), json({ companies: [
-      { name: 'Good Co', website: 'https://good.co.za', why: 'hiring juniors', url: 'https://www.good.co.za/careers' },
-      { name: 'Named In News', website: 'named.co.za', why: 'growing', url: 'https://news.example/list' },
-      { name: 'Made Up', website: 'https://madeup.co.za', why: 'x', url: 'https://nowhere.example' },
-      { name: 'Social', website: 'https://linkedin.com/company/social', why: 'x', url: 'https://linkedin.com/company/social' },
-      { name: 'Known One (Pty) Ltd', website: 'https://known.co.za', why: 'x', url: 'https://news.example/list' },
-      { name: 'Blocked Co', website: 'https://blocked.co.za', why: 'x', url: 'https://news.example/list' },
+      { name: 'Good Co', website: 'https://good.co.za', sign: 1, why: 'hiring juniors', url: 'https://www.good.co.za/careers' },
+      { name: 'Big Enough', website: 'https://good2.co.za', sign: 0, why: 'the right size', url: 'https://news.example/list' },
+      { name: 'Named In News', website: 'named.co.za', sign: '3. growing', why: 'growing', url: 'https://news.example/list' },
+      { name: 'Made Up', website: 'https://madeup.co.za', sign: 1, why: 'x', url: 'https://nowhere.example' },
+      { name: 'Social', website: 'https://linkedin.com/company/social', sign: 1, why: 'x', url: 'https://linkedin.com/company/social' },
+      { name: 'Known One (Pty) Ltd', website: 'https://known.co.za', sign: 1, why: 'x', url: 'https://news.example/list' },
+      { name: 'Blocked Co', website: 'https://blocked.co.za', sign: 1, why: 'x', url: 'https://news.example/list' },
     ] })],
     usage: { server_tool_use: { web_search_requests: 6, web_fetch_requests: 0 } },
   });
@@ -160,13 +161,14 @@ test('only companies that came up in the searches, with their own site, not know
 }));
 
 const CAND = { name: 'Good Co', website: 'https://good.co.za/', domain: 'good.co.za', why: 'hiring', url: '', from: 'research' as const };
-const ANSWER = { name: 'Good Co', what: 'A courier company.', sector: 'Logistics', city: 'Durban', province: 'KwaZulu-Natal', employees: 'about 80', facts: [{ text: 'Advertising six junior roles', url: 'https://good.co.za/careers' }, { text: 'Invented', url: 'https://good.co.za/never-opened' }], fit: ['Hires juniors'], concerns: '', service: 'Data learnership', magnet: 'mg_report', like: ['Imperial Logistics', 'Nobody'], contact: { name: 'Ann Botha', role: 'HR manager', email: 'HR@good.co.za', phone: '031 000 0000' }, score: 9, scoreWhy: 'Hiring now' };
+const ANSWER = { name: 'Good Co', what: 'A courier company.', sector: 'Logistics', city: 'Durban', province: 'KwaZulu-Natal', employees: 'about 80', facts: [{ text: 'It has about 80 people', url: 'https://good.co.za/careers', sign: 0 }, { text: 'Advertising six junior roles', url: 'https://good.co.za/careers', sign: 1 }, { text: 'Invented', sign: 1, url: 'https://good.co.za/never-opened' }], fit: ['Hires juniors'], concerns: '', service: 'Data learnership', magnet: 'mg_report', like: ['Imperial Logistics', 'Nobody'], contact: { name: 'Ann Botha', role: 'HR manager', email: 'HR@good.co.za', phone: '031 000 0000' }, score: 9, scoreWhy: 'Hiring now' };
 
 test('a fact needs a page that was opened, and an address must be written on one', () => T(async () => {
   m.re.addIdeals('Imperial Logistics');
   ai = () => ({ content: [read('https://good.co.za/careers', 'Join us! Six junior roles.'), read('https://good.co.za/contact', 'Write to hr (at) good.co.za'), json(ANSWER)] });
   const { company: c } = await m.re.research(CAND);
-  assert.deepEqual(c!.facts.map((x) => x.text), ['Advertising six junior roles']);
+  assert.deepEqual(c!.facts.map((x) => x.text), ['Advertising six junior roles', 'It has about 80 people'], 'the sign first: an email starts with it');
+  assert.match(c!.facts[0].sign!, /advertising for juniors/);
   assert.equal(c!.contact.email, 'hr@good.co.za');
   assert.equal(c!.contact.source, 'https://good.co.za/contact');
   assert.equal(c!.employees, 80);
@@ -186,13 +188,58 @@ test('small ones first: one far too big is left out, unless it is on our own lis
   assert.deepEqual(['about 80', '50-100', '1,200', '2k+', '', 'unknown'].map(m.re.headcount), [80, 75, 1200, 2000, null, null]);
 }));
 
+test('only good ones are put on the list: a sign on a page, not just the right size, and never someone who sells training', () => T(async () => {
+  const page = read('https://good.co.za/careers', 'Join us!');
+  const is = async (o: Record<string, unknown>, cand: Partial<typeof CAND> = {}) => { ai = () => ({ content: [page, json({ ...ANSWER, ...o })] }); return m.re.research({ ...CAND, ...cand } as typeof CAND); };
+  const noSign = { facts: [{ text: 'It has 250+ experts', url: 'https://good.co.za/careers', sign: 0 }] };
+  assert.equal((await is({ ...noSign, score: 9 })).company!.score, 5, 'right on paper only');
+  assert.equal((await is({ score: 9 })).company!.score, 9);
+  assert.equal((await is({ ...noSign, score: 9, facts: [{ text: 'x', url: 'https://good.co.za/never-opened', sign: 1 }, ...noSign.facts] })).company!.score, 5, 'a sign on a page nobody opened is none');
+  assert.equal((await is({ sellsTraining: true })).why, 'it sells training itself');
+  // Short where it is shown, never cut inside a word.
+  const c = (await is({ employees: '160+ (global, across five offices; South African count not stated)', service: 'Learnerships and structured skills development (pipeline building), with AI upskilling', concerns: 'word '.repeat(60) })).company!;
+  assert.equal(c.size, '160+');
+  assert.equal(c.service, 'Learnerships and structured skills development');
+  assert.match(c.concerns, /word$/);
+  const t = await import('../src/lib/outbound/types');
+  assert.deepEqual(['160+ (global, across five offices; South African count not s', 'over 200', '250+ experts', 'not published', ''].map(t.peopleOf), ['160+ people', 'over 200 people', '250+ experts', '', '']);
+  assert.equal(t.onList({ listedOn: 'x', score: 4, from: 'research' }, 6), false, 'one listed before today is not shown either');
+  assert.equal(t.onList({ listedOn: 'x', score: 0, from: 'manual' }, 6), true, 'one a person added always is');
+}));
+
+test('Find 5 now finds that many good ones, looks at three times as many at most, and leaves what was found before without a sign', () => T(async () => {
+  m.st.saveSettings({ researchOn: false, perDay: 1 });
+  m.st.savePool([{ ...CAND, name: 'Old Co', domain: 'old.co.za', website: 'https://old.co.za/' }]);
+  const score: Record<string, number> = {};
+  for (let i = 0; i < 12; i++) score[`Co${i}x`] = i % 3 === 0 ? 8 : 4;
+  ai = (r) => {
+    const p = String(r.messages[0].content);
+    if (/list up to 12 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: Object.keys(score).map((n) => ({ name: n, website: `https://${n.toLowerCase()}.co.za`, sign: 1, why: 'x', url: 'https://n.example/a' })) })] };
+    const n = Object.keys(score).find((x) => p.includes(`The company: ${x} `))!;
+    return { content: [read(`https://${n.toLowerCase()}.co.za/x`, 'x'), json({ ...ANSWER, name: n, facts: [{ text: 'A fact', sign: 1, url: `https://${n.toLowerCase()}.co.za/x` }], contact: {}, score: score[n] })] };
+  };
+  assert.match(m.run.findNow(2, 'default', NOW).detail, /2 good ones now, in up to 6 companies \(about \$0\.36 at most\)/);
+  const steps: string[] = [];
+  for (let i = 0; i < 12; i++) { const x = await m.run.researchStep('default', NOW + i * 20_000); if (!x) break; steps.push(x); }
+  assert.deepEqual(steps, ['found 12', 'kept Co0x', 'not good enough: Co1x', 'not good enough: Co2x', 'kept Co3x']);
+  assert.deepEqual(m.st.companies().filter((c) => c.listedOn).map((c) => c.name).sort(), ['Co0x', 'Co3x']);
+  assert.equal(m.st.runState().kept, 2);
+  // Nobody good: it stops at three times as many.
+  for (const k of Object.keys(score)) score[k] = 3;
+  m.run.findNow(2, 'default', NOW);
+  let n = 0;
+  while (n < 20 && await m.run.researchStep('default', NOW + 600_000 + n * 20_000)) n++;
+  assert.equal(n, 6);
+  assert.equal(m.st.runState().extra, 0);
+}));
+
 test('a day: it looks, reads one company at a time, posts the best in the B2B channel, and stops', () => T(async () => {
   const cos = ['One', 'Two', 'Three'];
   ai = (r) => {
     const p = String(r.messages[0].content);
-    if (/list up to 12 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: cos.map((n) => ({ name: `${n} Co`, website: `https://${n.toLowerCase()}.co.za`, why: 'x', url: 'https://n.example/a' })) })] };
+    if (/list up to 12 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: cos.map((n) => ({ name: `${n} Co`, website: `https://${n.toLowerCase()}.co.za`, sign: 2, why: 'x', url: 'https://n.example/a' })) })] };
     const n = cos.find((x) => p.includes(`${x} Co`))!;
-    return { content: [read(`https://${n.toLowerCase()}.co.za/x`, `hi@${n.toLowerCase()}.co.za`), json({ ...ANSWER, name: `${n} Co`, facts: [{ text: 'A fact', url: `https://${n.toLowerCase()}.co.za/x` }], contact: { email: `hi@${n.toLowerCase()}.co.za` }, score: n === 'Two' ? 9 : 6 })] };
+    return { content: [read(`https://${n.toLowerCase()}.co.za/x`, `hi@${n.toLowerCase()}.co.za`), json({ ...ANSWER, name: `${n} Co`, facts: [{ text: 'A fact', sign: 1, url: `https://${n.toLowerCase()}.co.za/x` }], contact: { email: `hi@${n.toLowerCase()}.co.za` }, score: n === 'Two' ? 9 : 6 })] };
   };
   const steps: string[] = [];
   for (let i = 0; i < 6; i++) steps.push(await m.run.researchStep('default', NOW + i * 20_000));

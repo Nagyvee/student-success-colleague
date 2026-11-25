@@ -60,13 +60,13 @@ export async function researchStep(tenantId = currentTenantId(), now = Date.now(
   if (!extra && run.researched >= s.perDay) { run.done = true; saveRun(tenantId); await finishDay(tenantId, now); return 'done'; }
   busy.add(tenantId);
   try {
-    let list = pool(tenantId).filter((x) => !blockedReason(x, tenantId));
+    let list = pool(tenantId).filter((x) => (x.from === 'ideal' || x.sign) && !blockedReason(x, tenantId));
     if (!list.length) list = idealCandidates(tenantId);
     if (!list.length) {
       const left = extra ? r.month : r.today;
       if (run.dry >= 4 || left < DISCOVER_USD) {
         // Nobody new after four different searches: enough for now.
-        if (extra) run.extra = 0; else { run.done = true; await finishDay(tenantId, now, run.dry >= 4 ? 'no more new names found' : 'budget reached'); }
+        if (extra) { run.extra = 0; run.looks = 0; } else { run.done = true; await finishDay(tenantId, now, run.dry >= 4 ? 'no more new names found' : 'budget reached'); }
         run.dry = 0; run.doing = ''; saveRun(tenantId);
         return 'nobody new';
       }
@@ -85,25 +85,30 @@ export async function researchStep(tenantId = currentTenantId(), now = Date.now(
     countCompany(tenantId);
     run.researched++;
     run.dry = 0;
-    if (extra) run.extra--;
+    const good = Boolean(out.company && out.company.score >= s.minScore);
+    if (extra) {
+      run.looks = (run.looks ?? run.extra) - 1;
+      if (good) run.extra--;
+      if (run.looks <= 0 || run.extra <= 0) { run.extra = 0; run.looks = 0; }
+    }
     if (out.company) {
       out.company.foundAt = now;
-      if (extra) out.company.listedOn = today;
+      if (extra && good) out.company.listedOn = today;
       saveCompany(out.company, tenantId);
-      run.kept++;
+      if (good) run.kept++;
     } else {
       // Looked at and not for us: kept, so it is not found again tomorrow.
       saveCompany({ ...nothing(cand, out.why) }, tenantId);
     }
     run.doing = ''; run.lastError = ''; saveRun(tenantId);
-    return out.company ? `kept ${out.company.name}` : `left out ${cand.name}: ${out.why}`;
+    return !out.company ? `left out ${cand.name}: ${out.why}` : good ? `kept ${out.company.name}` : `not good enough: ${out.company.name}`;
   } catch (e) {
     run.doing = '';
     run.lastError = safeReason((e as Error).message);
     run.lastErrorAt = now;
     // An error is never a loop: three in a row end the day (and any extra ones).
     run.dry++;
-    if (run.dry >= 3) { run.done = true; run.extra = 0; run.dry = 0; }
+    if (run.dry >= 3) { run.done = true; run.extra = 0; run.looks = 0; run.dry = 0; }
     saveRun(tenantId);
     log('system', 'error', `B2B research stopped on an error: ${run.lastError}`);
     return '';
@@ -123,7 +128,7 @@ export async function finishDay(tenantId = currentTenantId(), now = Date.now(), 
   if (run.posted) return 0;
   const s = settings(tenantId);
   const today = sastDay(now);
-  const best = companies(tenantId).filter((c) => c.stage === 'found' && sastDay(c.foundAt) === today && c.score >= 5).sort((a, b) => b.score - a.score || Number(Boolean(b.contact.email)) - Number(Boolean(a.contact.email))).slice(0, s.showPerDay);
+  const best = companies(tenantId).filter((c) => c.stage === 'found' && sastDay(c.foundAt) === today && c.score >= s.minScore).sort((a, b) => b.score - a.score || Number(Boolean(b.contact.email)) - Number(Boolean(a.contact.email))).slice(0, s.showPerDay);
   for (const c of best) { c.listedOn = today; saveCompany(c, tenantId); }
   run.posted = true;
   saveRun(tenantId);
@@ -133,16 +138,17 @@ export async function finishDay(tenantId = currentTenantId(), now = Date.now(), 
   return best.length;
 }
 
-/** "Find companies now": this many on top of the daily ones (they go straight on the list). */
+/** "Find 5 now": this many good ones on top of the daily ones (they go straight on the list), looking at three times as many at most. */
 export function findNow(n: number, tenantId = currentTenantId(), now = Date.now()): { ok: boolean; detail: string } {
   const run = runState(tenantId);
   const before = run.extra;
   run.extra = Math.max(1, Math.min(20, Math.round(n) || 5));
   const stop = researchBlocked(tenantId, now);
   if (stop) { run.extra = before; saveRun(tenantId); return { ok: false, detail: stop }; }
+  run.looks = Math.min(30, run.extra * 3);
   run.dry = 0;
   saveRun(tenantId);
-  return { ok: true, detail: `Looking at ${run.extra} companies now. They appear here one by one, over the next few minutes.` };
+  return { ok: true, detail: `Looking for ${run.extra} good ones now, in up to ${run.looks} companies (about $${(run.looks * 0.06).toFixed(2)} at most). They appear here one by one.` };
 }
 
 /* ── The outreach mailbox ─────────────────────────────────────────────────── */

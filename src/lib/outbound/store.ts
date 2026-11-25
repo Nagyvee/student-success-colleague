@@ -20,7 +20,7 @@ const MAGNETS = (): Magnet[] => [
 ];
 
 export const defaults = (): OutboundSettings => ({
-  researchOn: false, perDay: 20, showPerDay: 10, hour: 7, budgetUsd: 50,
+  researchOn: false, perDay: 20, showPerDay: 10, minScore: 6, hour: 7, budgetUsd: 50,
   about: '', services: '', ideal: '', profile: '', searchIdeas: [], signals: '', rules: '', never: '', sectors: '', provinces: '', sizeMin: 20, sizeMax: 200, avoid: '',
   writer: 'haiku', discordWebhook: '',
   sendingOn: false, checkFirst: true, checkReplies: true, sendPerDay: 5,
@@ -68,7 +68,7 @@ export function saveSettings(p: Partial<Record<keyof OutboundSettings, unknown>>
     ? (p.magnets as Partial<Magnet>[]).slice(0, 12).map((m) => ({ id: String(m.id || nid('mg')).slice(0, 40), name: text(m.name, '', 80), about: text(m.about, '', 400), link: httpLink(m.link), when: m.when === 'open' ? 'open' as const : 'yes' as const, on: m.on !== false })).filter((m) => m.name)
     : s.magnets;
   const next: OutboundSettings = {
-    researchOn: bool(p.researchOn, s.researchOn), perDay: num(p.perDay, s.perDay, 1, 40), showPerDay: num(p.showPerDay, s.showPerDay, 1, 40), hour: num(p.hour, s.hour, 5, 16), budgetUsd: num(p.budgetUsd, s.budgetUsd, 1, 1000),
+    researchOn: bool(p.researchOn, s.researchOn), perDay: num(p.perDay, s.perDay, 1, 40), showPerDay: num(p.showPerDay, s.showPerDay, 1, 40), minScore: num(p.minScore, s.minScore, 1, 10), hour: num(p.hour, s.hour, 5, 16), budgetUsd: num(p.budgetUsd, s.budgetUsd, 1, 1000),
     about: text(p.about, s.about, 3000), services: text(p.services, s.services, 3000), ideal: text(p.ideal, s.ideal, 3000), profile: text(p.profile, s.profile, 4000),
     searchIdeas: Array.isArray(p.searchIdeas) ? p.searchIdeas.filter((x): x is string => typeof x === 'string').map((x) => x.trim().slice(0, 160)).filter(Boolean).slice(0, 30) : s.searchIdeas,
     signals: text(p.signals, s.signals, 2000), rules: text(p.rules, s.rules, 4000), never: text(p.never, s.never, 2000),

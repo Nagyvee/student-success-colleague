@@ -10,7 +10,7 @@ import type { Act } from './OutboundClient';
  * it writes from. Both switches are off until someone turns them on. */
 
 /** What a setup file may fill in: never a switch, a password or a webhook. */
-const FROM_FILE = ['services', 'about', 'ideal', 'profile', 'searchIdeas', 'signals', 'rules', 'never', 'sectors', 'provinces', 'sizeMin', 'sizeMax', 'avoid', 'perDay', 'showPerDay', 'budgetUsd', 'hour', 'fromName', 'fromTitle', 'callsWith', 'bookingLink', 'address', 'magnets'] as const;
+const FROM_FILE = ['services', 'about', 'ideal', 'profile', 'searchIdeas', 'signals', 'rules', 'never', 'sectors', 'provinces', 'sizeMin', 'sizeMax', 'avoid', 'perDay', 'showPerDay', 'minScore', 'budgetUsd', 'hour', 'fromName', 'fromTitle', 'callsWith', 'bookingLink', 'address', 'magnets'] as const;
 
 function Card({ icon, title, sub, children }: { icon: IconName; title: string; sub: string; children: ReactNode }) {
   return <section className="pg-card"><div className="pg-card-h"><div><h2><Icon name={icon} size={16} /> {title}</h2><p className="pg-sub">{sub}</p></div></div>{children}</section>;
@@ -75,6 +75,7 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
         <div className="nu-form">
           <label className="field"><span>Companies to look at a day</span><input {...num('perDay')} min={1} max={40} /></label>
           <label className="field"><span>Best ones to show</span><input {...num('showPerDay')} min={1} max={40} /></label>
+          <label className="field"><span>Lowest score to show (of 10)</span><input {...num('minScore')} min={1} max={10} /></label>
           <label className="field"><span>Limit a month (US dollars)</span><input {...num('budgetUsd')} min={1} /></label>
           <label className="field"><span>Starts at (weekdays)</span><select value={f.hour} onChange={(e) => set('hour', Number(e.target.value))}>{[5, 6, 7, 8, 9, 10].map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>
           <label className="field is-full"><span>Who writes the emails</span><select value={f.writer} onChange={(e) => set('writer', e.target.value as 'haiku' | 'sonnet')}><option value="haiku">Haiku 5.5 (cheapest)</option><option value="sonnet">Sonnet 5.5 (better words, about $4 a month more)</option></select></label>

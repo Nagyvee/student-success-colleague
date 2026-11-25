@@ -2,7 +2,7 @@ import { currentTenantId } from '@/lib/auth/tenantContext';
 import { publicUrl } from '@/lib/engine/store';
 import { isDiscordHook } from '@/lib/nurture/qualify';
 import { fitLines } from '@/lib/nurture/report';
-import type { Company } from './types';
+import { peopleOf, type Company } from './types';
 import { settings } from './store';
 
 /* B2B's own Discord channel: the morning's companies, and a card when one is
@@ -23,7 +23,7 @@ async function post(body: Record<string, unknown>, tenantId: string): Promise<bo
   return Boolean(res?.ok);
 }
 
-const facts = (c: Company) => [c.sector, [c.city, c.province].filter(Boolean).join(', '), c.size ? `${c.size} people` : 'size not known'].filter(Boolean).map((x) => plain(x, 60)).join(' · ');
+const facts = (c: Company) => [c.sector, [c.city, c.province].filter(Boolean).join(', '), peopleOf(c.size) || 'size not known'].filter(Boolean).map((x) => plain(x, 60)).join(' · ');
 
 /** The morning's companies, best first. */
 export function listCard(list: Company[], o: { found: number; spent: number; budget: number; note?: string }, tenantId = currentTenantId()) {
