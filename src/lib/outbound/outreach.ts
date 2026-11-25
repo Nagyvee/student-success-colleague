@@ -104,8 +104,11 @@ export function draftProblems(subject: string, text: string, kind: Message['kind
 }
 
 /** Phrases that sound like a machine or a brochure. The AI gets another try; a person may write what they like. */
-const STIFF = /\b(which means|structured (route|pathway|path)|(the )?same stretch|close (that|the|this) gaps?|value (is|can get|gets) lost|leverag\w+|unlock\w*|landscape|delve|seamless(ly)?|empower\w*|cutting[- ]edge|robust|holistic|synerg\w+|talent pipelines?|resonat\w+|hope this (email )?finds you|in today's|fast[- ]paced|game[- ]chang\w+)\b/gi;
+const STIFF = /\b(which means|structured (route|pathway|path|learnerships?|pipelines?)|caught (our|my|your) eye|exactly what we|(the )?same stretch|close (that|the|this) gaps?|value (is|can get|gets) lost|leverag\w+|unlock\w*|landscape|delve|seamless(ly)?|empower\w*|cutting[- ]edge|robust|holistic|synerg\w+|talent pipelines?|resonat\w+|hope this (email )?finds you|in today's|fast[- ]paced|game[- ]chang\w+)\b/gi;
 export const stiffWords = (t: string): string[] => [...new Set((t.match(STIFF) || []).map((x) => x.toLowerCase()))].slice(0, 3);
+
+/** More than two or three things in one sentence reads as a brochure. */
+export const longList = (t: string): boolean => t.split(/(?<=[.!?])\s+|\n+/).some((x) => (x.match(/[,;]/g) || []).length >= 4);
 
 /** The AI's words, cleaned: no links (ours are added), no emoji, no sign-off of its own. */
 export function cleanText(t: string): string {
@@ -133,13 +136,13 @@ export async function writeFirst(c: Company): Promise<Message> {
     try {
       const a = await ask({
         model: writerModel(), maxTokens: 3000, system: voice(c),
-        prompt: `Write the only email we may send before they answer. We may ask once: may we send them "${name}"${offer?.about ? ` (${offer.about})` : ''}?\n\nTrue things about them (use one, the most telling):\n${c.facts.map((f) => `- ${f.text}`).join('\n')}\nWhy they might train people: ${c.fit.join('; ')}\nWhat we might offer later (do not pitch it now): ${c.service}\n\nStart with "${hello(c)}", then three short paragraphs, 55 to 95 words in all:\n1. The one thing you read about them, plainly ("I saw that ..."). One sentence. Never explain their own business to them, or what it means.\n2. Who we are and what we train people in, in a few words, one way it may touch their work, said as a possibility, and one or two concrete things in ${name} that someone in their job could use, taken only from what is in brackets above.\n3. One short question: shall I send it?\nWrite as one person ("I" for yourself, "we" for the academy), in short everyday sentences you would say aloud. Concrete things, no abstract ones. Do not ask for a call. Do not sign it.${wrong.length ? `\nYour last try had: ${wrong.join('; ')}. Write it without that.` : ''}\nJSON only: {"subject": "under 60 characters, specific to them, no capitals for effect", "text": "paragraphs separated by \\n\\n"}`,
+        prompt: `Write the only email we may send before they answer. We may ask once: may we send them "${name}"${offer?.about ? ` (${offer.about})` : ''}?\n\nTrue things about them (use one, the most telling):\n${c.facts.map((f) => `- ${f.text}`).join('\n')}\nWhy they might train people: ${c.fit.join('; ')}\nWhat we might offer later (do not pitch it now): ${c.service}\n\nStart with "${hello(c)}", then three short paragraphs, 55 to 95 words in all:\n1. The one thing you read about them, plainly ("I saw that ..."). One sentence. Never explain their own business to them, or what it means.\n2. Who we are and what we train people in, in a few words, one way it may touch their work, said as a possibility, and one or two concrete things in ${name} that someone in their job could use, taken only from what is in brackets above.\n3. One short question: shall I send it?\nWrite as one person ("I" for yourself, "we" for the academy), in short everyday sentences you would say aloud. Concrete things, no abstract ones. Name at most two things from ${name}, never a list. Never say or hint that we do the kind of training they already run, unless What we sell says so. Do not ask for a call. Do not sign it.\n\nThe tone, from an email to another company (copy how it sounds, never what it says):\n"I saw that you opened a second warehouse in May and are hiring ten junior planners.\n\nI'm with ${getAcademyContext().academyName}. We train people in data and software. If you are training the new planners, our free guide may help: it has a checklist for choosing who to take on.\n\nShall I send it to you?"${wrong.length ? `\nYour last try had: ${wrong.join('; ')}. Write it without that.` : ''}\nJSON only: {"subject": "under 60 characters, specific to them, no capitals for effect", "text": "paragraphs separated by \\n\\n"}`,
       });
       const j = jsonOf<{ subject?: string; text?: string }>(a);
       subject = String(j?.subject || '').replace(/\s+/g, ' ').trim().slice(0, 90);
       text = cleanText(j?.text || '');
       const stiff = stiffWords(text);
-      wrong = [...draftProblems(subject, text, 'first'), ...(stiff.length ? [`stiff words (${stiff.join(', ')})`] : [])];
+      wrong = [...draftProblems(subject, text, 'first'), ...(stiff.length ? [`stiff words (${stiff.join(', ')})`] : []), ...(longList(text) ? ['a long list in one sentence (name one or two things)'] : [])];
       if (!wrong.length) break;
     } catch (e) {
       log('system', 'error', `The first email to ${c.name} could not be written by the AI: ${safeReason((e as Error).message)}`);

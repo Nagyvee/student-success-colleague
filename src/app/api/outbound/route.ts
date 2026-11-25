@@ -11,7 +11,7 @@ import { approve, compose, draftFirst, draftProblems, mailer, mayNotWrite, notFi
 import { addIdeals, isRejectReason, learnIdeals } from '@/lib/outbound/research';
 import { findNow, researchBlocked } from '@/lib/outbound/run';
 import { PIPELINE, REJECT_REASONS, STAGE_LABEL, type Company, type Stage } from '@/lib/outbound/types';
-import { blankCompany, blockedReason, companies, domainOf, getCompany, httpLink, ideals, log, missingForResearch, missingForSending, publicSettings, room, runState, sastDay, saveCompany, saveIdeals, saveSettings, setStage, settings, spend } from '@/lib/outbound/store';
+import { blankCompany, blockedReason, companies, domainOf, getCompany, httpLink, ideals, log, missingForResearch, missingForSending, publicSettings, room, runState, sastDay, saveCompany, saveIdeals, saveSettings, setStage, settings, spend, usdEach } from '@/lib/outbound/store';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -46,7 +46,7 @@ function overview(manager: boolean) {
     missingForResearch: missingForResearch(s), missingForSending: missingForSending(s),
     research: { on: s.researchOn, blocked: researchBlocked(), doing: run.doing, researched: run.day === sastDay() ? run.researched : 0, kept: run.day === sastDay() ? run.kept : 0, extra: run.extra, lastError: run.lastError, lastErrorAt: run.lastErrorAt },
     sending: { on: s.sendingOn, blocked: sendingBlocked(), sentToday: run.sentDay === sastDay() ? run.sentToday : 0, perDay: s.sendPerDay, pausedUntil: run.pausedUntil && run.pausedUntil > Date.now() ? run.pausedUntil : 0, mailError: run.mail.lastError, hours: officeHours(), live: liveAllowed(getTenantIntegrations(currentTenantId()).liveOutreachEnabled) },
-    spend: { usd: sp.usd, budget: s.budgetUsd, today: r.spentToday, searches: sp.searches, companies: sp.companies, month: sp.month },
+    spend: { usd: sp.usd, budget: s.budgetUsd, today: r.spentToday, searches: sp.searches, companies: sp.companies, month: sp.month, each: usdEach(sp), kinds: sp.kinds || {} },
     counts: Object.fromEntries(PIPELINE.map((p) => [p.id, all.filter((c) => c.stage === p.id).length])) as Record<Stage, number>,
     looked: all.length,
     companies: shown.sort((a, b) => (b.listedOn || '').localeCompare(a.listedOn || '') || b.score - a.score || b.foundAt - a.foundAt).slice(0, 1500).map(row),

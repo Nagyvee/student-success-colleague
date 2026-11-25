@@ -2,7 +2,7 @@ import { tenantDoc } from '@/lib/engine/tenantDoc';
 import { currentTenantId } from '@/lib/auth/tenantContext';
 import { log as storeLog } from '@/lib/engine/store';
 import { datesIn, withTime } from './clock';
-import type { Candidate, Company, IdealCompany, Magnet, OutboundSettings, RunState, Spend, Stage } from './types';
+import type { AskKind, Candidate, Company, IdealCompany, Magnet, OutboundSettings, RunState, Spend, Stage } from './types';
 
 /* Where B2B outbound keeps its things, per workspace: the companies (its own
  * CRM), our ideal companies, the settings, and what the research has cost. */
@@ -248,17 +248,21 @@ export function costOf(model: string, u: Usage): number {
   return (fresh * p.in + read * p.in * 0.1 + write * p.in * 1.25 + Number(u.output_tokens || 0) * p.out) / 1e6 + Number(u.server_tool_use?.web_search_requests || 0) * SEARCH_USD;
 }
 
-export function addSpend(model: string, u: Usage, tenantId = currentTenantId(), now = Date.now()): number {
+export function addSpend(model: string, u: Usage, tenantId = currentTenantId(), now = Date.now(), kind?: AskKind): number {
   const s = spend(tenantId, now);
   const usd = costOf(model, u);
   s.usd += usd;
   s.calls++;
   s.searches += Number(u.server_tool_use?.web_search_requests || 0);
   s.days[sastDay(now)] = (s.days[sastDay(now)] || 0) + usd;
+  if (kind) { const k = ((s.kinds ||= {})[kind] ||= { usd: 0, calls: 0 }); k.usd += usd; k.calls++; }
   spendDoc.save(tenantId);
   return usd;
 }
 export function countCompany(tenantId = currentTenantId()) { spend(tenantId).companies++; spendDoc.save(tenantId); }
+
+/** What one company has cost so far, everything included (a guess until ten were looked at). */
+export const usdEach = (s: Pick<Spend, 'usd' | 'companies'>): number => (s.companies >= 10 ? s.usd / s.companies : 0.09);
 
 /** Weekdays left in this month, today included. */
 export function weekdaysLeft(now = Date.now()): number {

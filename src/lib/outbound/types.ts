@@ -163,6 +163,8 @@ export interface RunState {
   /** Good companies someone asked for on top of the daily ones ("Find 5 now"), and how many more may be looked at to find them. */
   extra: number;
   looks?: number;
+  /** "Find 5 now" stops when the month's spending reaches this (US dollars). */
+  stopAt?: number;
   done: boolean;
   /** Rounds in a row that found nobody new. */
   dry: number;
@@ -179,4 +181,7 @@ export interface RunState {
   mail: { uidValidity: string; lastUid: number; lastCheck: number | null; lastError: string };
 }
 
-export interface Spend { month: string; usd: number; searches: number; calls: number; companies: number; days: Record<string, number> }
+/** What the AI was asked for: to find names, to read about a company, to write. */
+export type AskKind = 'find' | 'read' | 'write';
+
+export interface Spend { month: string; usd: number; searches: number; calls: number; companies: number; days: Record<string, number>; kinds?: Partial<Record<AskKind, { usd: number; calls: number }>> }

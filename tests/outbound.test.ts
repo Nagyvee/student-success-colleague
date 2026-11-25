@@ -196,6 +196,10 @@ test('only good ones are put on the list: a sign on a page, not just the right s
   assert.equal((await is({ score: 9 })).company!.score, 9);
   assert.equal((await is({ ...noSign, score: 9, facts: [{ text: 'x', url: 'https://good.co.za/never-opened', sign: 1 }, ...noSign.facts] })).company!.score, 5, 'a sign on a page nobody opened is none');
   assert.equal((await is({ sellsTraining: true })).why, 'it sells training itself');
+  m.st.saveSettings({ sizeMin: 100 });
+  assert.equal((await is({ score: 8, employees: '11-50' })).company!.score, 5, 'far too small');
+  assert.equal((await is({ score: 8, employees: '' })).company!.score, 8, 'a size nobody publishes lowers nothing');
+  m.st.saveSettings({ sizeMin: 20 });
   // Short where it is shown, never cut inside a word.
   const c = (await is({ employees: '160+ (global, across five offices; South African count not stated)', service: 'Learnerships and structured skills development (pipeline building), with AI upskilling', concerns: 'word '.repeat(60) })).company!;
   assert.equal(c.size, '160+');
@@ -214,11 +218,11 @@ test('Find 5 now finds that many good ones, looks at three times as many at most
   for (let i = 0; i < 12; i++) score[`Co${i}x`] = i % 3 === 0 ? 8 : 4;
   ai = (r) => {
     const p = String(r.messages[0].content);
-    if (/list up to 12 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: Object.keys(score).map((n) => ({ name: n, website: `https://${n.toLowerCase()}.co.za`, sign: 1, why: 'x', url: 'https://n.example/a' })) })] };
+    if (/List up to 15 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: Object.keys(score).map((n) => ({ name: n, website: `https://${n.toLowerCase()}.co.za`, sign: 1, why: 'x', url: 'https://n.example/a' })) })] };
     const n = Object.keys(score).find((x) => p.includes(`The company: ${x} `))!;
     return { content: [read(`https://${n.toLowerCase()}.co.za/x`, 'x'), json({ ...ANSWER, name: n, facts: [{ text: 'A fact', sign: 1, url: `https://${n.toLowerCase()}.co.za/x` }], contact: {}, score: score[n] })] };
   };
-  assert.match(m.run.findNow(2, 'default', NOW).detail, /2 good ones now, in up to 6 companies \(about \$0\.36 at most\)/);
+  assert.match(m.run.findNow(2, 'default', NOW).detail, /2 good ones now, in up to 6 companies, for about \$0\.40 at most/);
   const steps: string[] = [];
   for (let i = 0; i < 12; i++) { const x = await m.run.researchStep('default', NOW + i * 20_000); if (!x) break; steps.push(x); }
   assert.deepEqual(steps, ['found 12', 'kept Co0x', 'not good enough: Co1x', 'not good enough: Co2x', 'kept Co3x']);
@@ -231,13 +235,35 @@ test('Find 5 now finds that many good ones, looks at three times as many at most
   while (n < 20 && await m.run.researchStep('default', NOW + 600_000 + n * 20_000)) n++;
   assert.equal(n, 6);
   assert.equal(m.st.runState().extra, 0);
+  // A click costs no more than it said, one step over at most.
+  for (const k of Object.keys(score)) score[k] = 3;
+  m.st.savePool([]);
+  for (const c of m.st.companies()) c.domain = `gone-${c.domain}`;
+  for (const c of m.st.companies()) c.name = `Gone ${c.name}`;
+  const old = ai;
+  ai = (r) => ({ ...(old(r) as { content: Block[] }), usage: { server_tool_use: { web_search_requests: 15, web_fetch_requests: 0 } } });
+  m.run.findNow(2, 'default', NOW);
+  const from = m.st.spend().usd;
+  let last = '';
+  for (let i = 0; i < 20; i++) { const x = await m.run.researchStep('default', NOW + 1_200_000 + i * 20_000); if (!x) break; last = x; }
+  assert.equal(last, 'the limit for this search');
+  assert.ok(m.st.spend().usd - from < 0.4 + 0.16, String(m.st.spend().usd - from));
+  assert.ok(m.st.spend().kinds!.find!.calls >= 1 && m.st.spend().kinds!.read!.calls >= 1);
+  // Nobody new: two searches, then it stops.
+  ai = () => ({ content: [searched('https://n.example/a'), json({ companies: [] })] });
+  m.st.savePool([]);
+  m.run.findNow(5, 'default', NOW);
+  const before = asked.length;
+  for (let i = 0; i < 6; i++) await m.run.researchStep('default', NOW + 2_000_000 + i * 20_000);
+  assert.equal(asked.length - before, 2);
+  assert.equal(m.st.runState().extra, 0);
 }));
 
 test('a day: it looks, reads one company at a time, posts the best in the B2B channel, and stops', () => T(async () => {
   const cos = ['One', 'Two', 'Three'];
   ai = (r) => {
     const p = String(r.messages[0].content);
-    if (/list up to 12 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: cos.map((n) => ({ name: `${n} Co`, website: `https://${n.toLowerCase()}.co.za`, sign: 2, why: 'x', url: 'https://n.example/a' })) })] };
+    if (/List up to 15 companies/.test(p)) return { content: [searched('https://n.example/a'), json({ companies: cos.map((n) => ({ name: `${n} Co`, website: `https://${n.toLowerCase()}.co.za`, sign: 2, why: 'x', url: 'https://n.example/a' })) })] };
     const n = cos.find((x) => p.includes(`${x} Co`))!;
     return { content: [read(`https://${n.toLowerCase()}.co.za/x`, `hi@${n.toLowerCase()}.co.za`), json({ ...ANSWER, name: `${n} Co`, facts: [{ text: 'A fact', sign: 1, url: `https://${n.toLowerCase()}.co.za/x` }], contact: { email: `hi@${n.toLowerCase()}.co.za` }, score: n === 'Two' ? 9 : 6 })] };
   };
@@ -330,6 +356,10 @@ test('what we never say is never sent, the reported figure only as reported, and
   assert.match(tries[1], /Your last try had: stiff words \(which means, structured route, the same stretch\)/);
   assert.equal(c2.thread[0].text, FIRST.text);
   assert.deepEqual(p('It opens a structured route into work for juniors.'), []);
+  assert.match(asked.at(-1)!.messages[0].content as string, /never say or hint that we do the kind of training they already run/i);
+  assert.equal(m.out.longList('It includes a scorecard, the 15 numbers worth tracking, where learners drop out and why, a 90-day plan, and how points work.'), true);
+  assert.equal(m.out.longList('It has a scorecard to check any provider, and shows where learners drop out and why.'), false);
+  assert.deepEqual(m.out.stiffWords('Your learnership caught our eye, because structured learnerships like that are exactly what we work on.'), ['caught our eye', 'structured learnerships', 'exactly what we']);
   assert.deepEqual(m.out.stiffWords('We train people in AI, data and software, and I saw that you hire juniors.'), []);
   // One that still says it waits for a person, and does not go when it is pressed.
   c.thread[0].text = body('Every rand counts at 135%.');

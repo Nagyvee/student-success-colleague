@@ -32,7 +32,8 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
   const run = async (key: string, body: Record<string, unknown>) => { setBusy(key); const ok = await act(body); setBusy(''); return ok; };
   const save = async (extra: Partial<OutboundSettings> = {}) => { await run('save', { action: 'saveSettings', settings: { ...f, ...extra } }); setDirty(false); };
   const magnet = (i: number, p: Partial<Magnet>) => set('magnets', f.magnets.map((m, j) => (j === i ? { ...m, ...p } : m)));
-  const daily = (f.perDay * 0.06 + 0.2) * 21;
+  const daily = f.perDay * data.spend.each * 21;
+  const kinds = ([['find', 'finding names'], ['read', 'reading about companies'], ['write', 'writing']] as const).map(([k, l]) => (data.spend.kinds[k] ? `${l} $${data.spend.kinds[k].usd.toFixed(2)} (${data.spend.kinds[k].calls}×)` : '')).filter(Boolean);
   const file = useRef<HTMLInputElement>(null);
   const [loaded, setLoaded] = useState('');
   async function loadFile(x: File) {
@@ -71,7 +72,7 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
         </div>
       </Card>
 
-      <Card icon="scanSearch" title="Research" sub={`At ${f.perDay} a day this is about $${daily.toFixed(0)} a month. It stops at the limit, whatever happens.`}>
+      <Card icon="scanSearch" title="Research" sub={`At ${f.perDay} a day this is about $${daily.toFixed(0)} a month, at $${data.spend.each.toFixed(2)} a company${data.spend.companies >= 10 ? ', what it has cost so far' : ''}. It stops at the limit, whatever happens.${kinds.length ? ` This month: ${kinds.join(', ')}.` : ''}`}>
         <div className="nu-form">
           <label className="field"><span>Companies to look at a day</span><input {...num('perDay')} min={1} max={40} /></label>
           <label className="field"><span>Best ones to show</span><input {...num('showPerDay')} min={1} max={40} /></label>

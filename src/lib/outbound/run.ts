@@ -20,8 +20,10 @@ import { blockedReason, companies, countCompany, domainOf, isWeekday, log, missi
  * mailbox and keeps the interested warm. */
 
 /** The most one step may cost: a step only starts when there is room for it. */
-const DISCOVER_USD = 0.1;
-const RESEARCH_USD = 0.09;
+const DISCOVER_USD = 0.2;
+const RESEARCH_USD = 0.12;
+/** The most "Find 5 now" may cost for each one asked for. */
+const ASKED_USD = 0.2;
 /** Kept back from research, so answering someone who wrote never waits for next month. */
 const reserve = (budget: number) => Math.min(1, budget * 0.05);
 
@@ -55,6 +57,11 @@ export async function researchStep(tenantId = currentTenantId(), now = Date.now(
   const stop = researchBlocked(tenantId, now);
   const ended = run.researched > 0 && !run.posted && (run.done || /spent|Done/.test(stop));
   if (stop) { if (ended) await finishDay(tenantId, now, /spent/.test(stop) ? 'budget reached' : ''); run.doing = ''; return ''; }
+  // "Find 5 now" has its own limit, so a click never costs more than it said.
+  if (run.extra > 0 && run.stopAt !== undefined && spend(tenantId, now).usd >= run.stopAt) {
+    Object.assign(run, { extra: 0, looks: 0, stopAt: undefined, dry: 0, doing: '' }); saveRun(tenantId);
+    return 'the limit for this search';
+  }
   const extra = run.extra > 0;
   const r = room(tenantId, now);
   if (!extra && run.researched >= s.perDay) { run.done = true; saveRun(tenantId); await finishDay(tenantId, now); return 'done'; }
@@ -64,9 +71,9 @@ export async function researchStep(tenantId = currentTenantId(), now = Date.now(
     if (!list.length) list = idealCandidates(tenantId);
     if (!list.length) {
       const left = extra ? r.month : r.today;
-      if (run.dry >= 4 || left < DISCOVER_USD) {
-        // Nobody new after four different searches: enough for now.
-        if (extra) { run.extra = 0; run.looks = 0; } else { run.done = true; await finishDay(tenantId, now, run.dry >= 4 ? 'no more new names found' : 'budget reached'); }
+      if (run.dry >= (extra ? 2 : 3) || left < DISCOVER_USD) {
+        // Nobody new after a few different searches: enough for now (each one costs).
+        if (extra) { run.extra = 0; run.looks = 0; } else { run.done = true; await finishDay(tenantId, now, run.dry >= 3 ? 'no more new names found' : 'budget reached'); }
         run.dry = 0; run.doing = ''; saveRun(tenantId);
         return 'nobody new';
       }
@@ -146,9 +153,11 @@ export function findNow(n: number, tenantId = currentTenantId(), now = Date.now(
   const stop = researchBlocked(tenantId, now);
   if (stop) { run.extra = before; saveRun(tenantId); return { ok: false, detail: stop }; }
   run.looks = Math.min(30, run.extra * 3);
+  const most = run.extra * ASKED_USD;
+  run.stopAt = spend(tenantId, now).usd + most;
   run.dry = 0;
   saveRun(tenantId);
-  return { ok: true, detail: `Looking for ${run.extra} good ones now, in up to ${run.looks} companies (about $${(run.looks * 0.06).toFixed(2)} at most). They appear here one by one.` };
+  return { ok: true, detail: `Looking for ${run.extra} good ones now, in up to ${run.looks} companies, for about $${most.toFixed(2)} at most. They appear here one by one.` };
 }
 
 /* ── The outreach mailbox ─────────────────────────────────────────────────── */
