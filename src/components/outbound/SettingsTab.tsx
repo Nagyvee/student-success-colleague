@@ -42,7 +42,9 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
     if (!j || typeof j !== 'object' || (!j.settings && !j.ideals)) { setLoaded('That is not a setup file.'); return; }
     if (j.settings) {
       const given = j.settings as Record<string, unknown>;
-      setF((old) => ({ ...old, ...Object.fromEntries(FROM_FILE.filter((k) => given[k] !== undefined).map((k) => [k, given[k]])) }));
+      // "Never contact" only grows from a file: what is there already stays.
+      const avoid = (old: string) => [...new Set([...old.split(/\n+/), ...String(given.avoid || '').split(/\n+/)].map((x) => x.trim()).filter(Boolean))].join('\n');
+      setF((old) => ({ ...old, ...Object.fromEntries(FROM_FILE.filter((k) => given[k] !== undefined).map((k) => [k, k === 'avoid' ? avoid(old.avoid) : given[k]])) }));
       setDirty(true);
     }
     if (typeof j.ideals === 'string' && j.ideals.trim()) await run('file', { action: 'importIdeals', text: j.ideals });

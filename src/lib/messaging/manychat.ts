@@ -33,26 +33,43 @@ export function accountTrouble(error: string): boolean {
 /** The last nine digits: the same number written +27…, 27… or 0…. */
 export const samePhoneKey = (v: string | null | undefined) => String(v || '').replace(/\D/g, '').slice(-9);
 
+/** ManyChat's reasons, in whatever shape they come: a list of {message}, or fields with lists of words. */
+export function reasonsOf(v: unknown, depth = 0): string[] {
+  if (depth > 4 || v === null || v === undefined) return [];
+  if (typeof v === 'string') return v.trim() ? [v.trim()] : [];
+  if (typeof v === 'number' || typeof v === 'boolean') return [String(v)];
+  if (Array.isArray(v)) return v.flatMap((x) => reasonsOf(x, depth + 1));
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (typeof o.message === 'string') return reasonsOf(o.message, depth + 1);
+    return Object.entries(o).flatMap(([k, x]) => reasonsOf(x, depth + 1).map((t) => (/^\d+$/.test(k) || k === 'messages' ? t : `${k}: ${t}`)));
+  }
+  return [];
+}
+
 export function manychat(apiKey: string, timeoutMs = 10_000) {
   async function call<T = unknown>(method: 'GET' | 'POST', path: string, o: { query?: Record<string, string>; body?: unknown } = {}): Promise<McReply<T>> {
     const url = new URL(path, BASE);
     for (const [k, v] of Object.entries(o.query || {})) url.searchParams.set(k, v);
+    let res: Response;
+    let j: { status?: string; data?: T; message?: string; details?: unknown } | null;
     try {
-      const res = await fetch(url, {
+      res = await fetch(url, {
         method,
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json', ...(o.body ? { 'Content-Type': 'application/json' } : {}) },
         ...(o.body ? { body: JSON.stringify(o.body) } : {}),
         signal: AbortSignal.timeout(timeoutMs),
         cache: 'no-store',
       });
-      const j = (await res.json().catch(() => null)) as { status?: string; data?: T; message?: string; details?: { messages?: { message?: string }[] } } | null;
-      if (res.ok && j?.status === 'success') return { ok: true, status: res.status, data: j.data ?? null, error: '' };
-      const details = (j?.details?.messages || []).map((m) => m?.message).filter(Boolean).join('; ');
-      return { ok: false, status: res.status, data: j?.data ?? null, error: [j?.message || `ManyChat answered HTTP ${res.status}`, details].filter(Boolean).join(': ').slice(0, 300) };
+      j = (await res.json().catch(() => null)) as typeof j;
     } catch (e) {
       // No answer: we cannot know whether ManyChat did it.
       return { ok: false, status: 0, data: null, error: `ManyChat did not answer: ${(e as Error).message}` };
     }
+    // It answered: what it said is read here, outside the part that means "no answer", so a reply we did not expect is never taken for silence.
+    if (res.ok && j?.status === 'success') return { ok: true, status: res.status, data: j.data ?? null, error: '' };
+    const details = [...new Set(reasonsOf(j?.details))].slice(0, 5).join('; ');
+    return { ok: false, status: res.status, data: j?.data ?? null, error: [typeof j?.message === 'string' && j.message ? j.message : `ManyChat answered HTTP ${res.status}`, details].filter(Boolean).join(': ').slice(0, 300) };
   }
 
   const one = (data: unknown): McContact[] => (Array.isArray(data) ? data : data ? [data] : []).filter((c): c is McContact => Boolean(c && (c as McContact).id));
