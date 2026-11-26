@@ -78,7 +78,7 @@ before(async () => {
 });
 
 const READY = {
-  researchOn: true, perDay: 2, showPerDay: 10, hour: 7, budgetUsd: 50, services: 'Learnerships and team training in software, data and cybersecurity', ideal: 'Growing firms that employ many juniors', sectors: 'Logistics, Retail', provinces: 'Gauteng, KwaZulu-Natal', sizeMin: 20, sizeMax: 200, avoid: 'Blocked Co, never.co.za', searchIdeas: [], signals: '', rules: '', never: '',
+  addressOnly: false, researchOn: true, perDay: 2, showPerDay: 10, hour: 7, budgetUsd: 50, services: 'Learnerships and team training in software, data and cybersecurity', ideal: 'Growing firms that employ many juniors', sectors: 'Logistics, Retail', provinces: 'Gauteng, KwaZulu-Natal', sizeMin: 20, sizeMax: 200, avoid: 'Blocked Co, never.co.za', searchIdeas: [], signals: '', rules: '', never: '',
   discordWebhook: 'https://discord.com/api/webhooks/9/b2b', sendingOn: true, checkFirst: true, checkReplies: true, sendPerDay: 2, smtpHost: 'smtp.example.org', smtpPort: 465, smtpUser: 'team@out.example.org', smtpPass: 'pw', fromName: 'Naledi M', fromTitle: 'Partnerships', bookingLink: 'https://cal.example.org/team', address: '1 Main Road, Durban', callsWith: 'Thabile',
   magnets: [{ id: 'mg_report', name: 'The free report', about: 'What training juniors costs and returns', link: 'https://melsoft.example/report', when: 'open', on: true }, { id: 'mg_toolkit', name: 'The toolkit', about: '', link: 'https://melsoft.example/toolkit', when: 'yes', on: true }, { id: 'mg_12h', name: 'The 12H calculator', about: 'What you could claim back', link: 'https://melsoft.example/12h', when: 'yes', on: true }],
 };
@@ -213,8 +213,11 @@ test('only good ones are put on the list: a sign on a page, not just the right s
   assert.match(c.concerns, /word$/);
   const t = await import('../src/lib/outbound/types');
   assert.deepEqual(['160+ (global, across five offices; South African count not s', 'over 200', '250+ experts', 'not published', ''].map(t.peopleOf), ['160+ people', 'over 200 people', '250+ experts', '', '']);
-  assert.equal(t.onList({ listedOn: 'x', score: 4, from: 'research' }, 6), false, 'one listed before today is not shown either');
-  assert.equal(t.onList({ listedOn: 'x', score: 0, from: 'manual' }, 6), true, 'one a person added always is');
+  const to = (email: string) => ({ email });
+  assert.equal(t.onList({ listedOn: 'x', score: 4, from: 'research', contact: to('a@b.co.za') }, { minScore: 6 }), false, 'one listed before today is not shown either');
+  assert.equal(t.onList({ listedOn: 'x', score: 0, from: 'manual', contact: to('') }, { minScore: 6, addressOnly: true }), true, 'one a person added always is');
+  assert.equal(t.onList({ listedOn: 'x', score: 8, from: 'research', contact: to('') }, { minScore: 6, addressOnly: true }), false, 'nobody has to look for an address');
+  assert.equal(t.onList({ listedOn: 'x', score: 8, from: 'research', contact: to('') }, { minScore: 6, addressOnly: false }), true);
 }));
 
 test('Find 5 now finds that many good ones, looks at three times as many at most, and leaves what was found before without a sign', () => T(async () => {
@@ -341,6 +344,37 @@ test('the lists a search turned up are read here: many names for one search, eac
   const found = await m.re.discover(0);
   assert.deepEqual(found.map((x) => [x.name, x.domain, x.url]), [['Alpha Couriers', 'alpha.co.za', 'https://list.example/2026'], ['Gamma Glass (Pty) Ltd', 'gamma.co.za', 'https://list.example/2026']]);
   assert.deepEqual(opened.filter((u) => !/robots/.test(u)), ['https://list.example/2026'], 'only what came up in the search');
+}));
+
+test('the best address its own pages give, never one to look for: a person, HR, then info, sales last; a general inbox is asked to pass it on', () => T(async () => {
+  const pages = (o: Record<string, string>) => ({ pages: new Map(Object.entries(o)) });
+  const best = (o: Record<string, string>, person = '', said = '') => m.re.bestAddress(pages(o), 'good.co.za', person, said);
+  assert.deepEqual(best({ 'https://good.co.za/contact': 'sales@good.co.za info@good.co.za', 'https://good.co.za/careers': 'Send your CV to careers (at) good.co.za' }), { email: 'careers@good.co.za', source: 'https://good.co.za/careers' });
+  assert.equal(best({ 'https://good.co.za/': 'sales@good.co.za info@good.co.za' }).email, 'info@good.co.za');
+  assert.equal(best({ 'https://good.co.za/': 'sales@good.co.za' }).email, 'sales@good.co.za', 'sales only when nothing else is there');
+  assert.equal(best({ 'https://good.co.za/': 'hr@good.co.za thandi.mokoena@good.co.za' }, 'Thandi Mokoena').email, 'thandi.mokoena@good.co.za');
+  assert.equal(best({ 'https://good.co.za/': 'privacy@good.co.za noreply@good.co.za logo@2x.png' }).email, '', 'a POPIA or no-reply address is never written to');
+  assert.equal(best({ 'https://list.example/x': 'info@list.example hr@good.co.za' }).email, '', 'not from another site');
+  assert.equal(best({ 'https://good.co.za/': 'info@good-group.co.za' }, '', 'info@good-group.co.za').email, 'info@good-group.co.za', 'the group address on its own site, when named');
+  assert.equal(best({}).email, '');
+  // Only companies with an address are put on the list, when that is asked for.
+  m.st.saveSettings({ addressOnly: true });
+  const page = read('https://good.co.za/careers', 'Join us!');
+  ai = () => ({ content: [page, json({ ...ANSWER, score: 8, contact: {} })] });
+  const { company: none } = await m.re.research(CAND);
+  assert.equal(none!.contact.email, '');
+  const t = await import('../src/lib/outbound/types');
+  assert.equal(t.writable(none!, m.st.settings()), false);
+  // A general inbox: "Hello … team", and a line asking them to pass it on (the AI gets another try without it).
+  const tries: string[] = [];
+  const plain = { ...FIRST, text: FIRST.text.replace('Hi Sipho', 'Hello Fast Freight team') };
+  ai = (r) => { tries.push(String(r.messages[0].content)); return { content: [json(tries.length === 1 ? plain : { ...plain, text: plain.text.replace('May I send', 'If this is not yours, could you pass it to whoever looks after training? May I send') })] }; };
+  const c = m.out.approve(company({ contact: { name: '', role: '', email: 'sales@fastfreight.co.za', phone: '', source: 'x' } }), 'Nigel');
+  await m.out.draftNext();
+  assert.match(tries[0], /general inbox \(sales@fastfreight\.co\.za\)[\s\S]*pass it to whoever looks after training or HR/);
+  assert.match(tries[1], /no line asking them to pass it on/);
+  assert.match(c.thread[0].text, /^Hello Fast Freight team,[\s\S]*could you pass it to whoever looks after training\?/);
+  assert.deepEqual(['info@x.co.za', 'sales@x.co.za', 'enquiries@x.co.za', 'hr@x.co.za', 'thandi@x.co.za', 'careers@x.co.za'].map(t.generalAddress), [true, true, true, false, false, false]);
 }));
 
 test('a day: it looks, reads one company at a time, posts the best in the B2B channel, and stops', () => T(async () => {

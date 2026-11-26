@@ -29,8 +29,16 @@ export function peopleOf(size: string): string {
   return !/\d/.test(t) ? '' : /people|staff|employees|experts|specialists|consultants|engineers/i.test(t) ? t : `${t} people`;
 }
 
-/** Is it one to choose from: on a day's list and good enough (or added by a person)? */
-export const onList = (c: { listedOn: string; score: number; from: string }, min: number) => Boolean(c.listedOn) && (c.from === 'manual' || c.score >= min);
+/** An inbox anyone at the company may read (info@, sales@), not a person's or HR's. */
+export const generalAddress = (email: string): boolean => /^(info|enquir\w*|inquir\w*|sales|hello|contact\w*|admin\w*|office|reception|mail|general|marketing|support|service\w*|team|quer\w*|ask|connect|accounts?|orders?|quotes?|bookings?)([._-][a-z0-9]+)?@/i.test(email);
+
+/** Good enough to write to: on the list for its score (a person's own additions always), and with an address when that is asked for. */
+export function writable(c: { score: number; from: string; contact: { email: string } }, s: { minScore: number; addressOnly?: boolean }): boolean {
+  return c.from === 'manual' || (c.score >= s.minScore && (!s.addressOnly || Boolean(c.contact.email)));
+}
+
+/** Is it one to choose from: on a day's list and good enough? */
+export const onList = (c: { listedOn: string; score: number; from: string; contact: { email: string } }, s: { minScore: number; addressOnly?: boolean }) => Boolean(c.listedOn) && writable(c, s);
 
 export interface Contact { name: string; role: string; email: string; phone: string; /** The page the address was read on. */ source: string }
 
@@ -115,6 +123,8 @@ export interface OutboundSettings {
   showPerDay: number;
   /** A company is only put on the list with this score or more. */
   minScore: number;
+  /** Only companies whose website gives an email address (so nobody has to look for one). */
+  addressOnly: boolean;
   hour: number;
   budgetUsd: number;
   about: string;

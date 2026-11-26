@@ -76,6 +76,7 @@ export default function SettingsTab({ data, act }: { data: Overview; act: Act })
         <div className="nu-form">
           <label className="field"><span>Companies to look at a day</span><input {...num('perDay')} min={1} max={120} /></label>
           <label className="field"><span>Best ones to show</span><input {...num('showPerDay')} min={1} max={40} /></label>
+          <label className="nu-check is-full"><input type="checkbox" checked={f.addressOnly} onChange={(e) => set('addressOnly', e.target.checked)} /> Only show companies whose website gives an email address (so nobody has to look for one)</label>
           <label className="field"><span>Lowest score to show (of 10)</span><input {...num('minScore')} min={1} max={10} /></label>
           <label className="field"><span>Limit a month (US dollars)</span><input {...num('budgetUsd')} min={1} /></label>
           <label className="field"><span>Starts at (weekdays)</span><select value={f.hour} onChange={(e) => set('hour', Number(e.target.value))}>{[5, 6, 7, 8, 9, 10].map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}</select></label>

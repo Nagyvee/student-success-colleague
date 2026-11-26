@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import Icon from '@/components/Icon';
 import { Chip, Empty, Notice } from '@/components/nurture/ui';
-import { PIPELINE, STAGE_LABEL, onList, peopleOf, type Stage } from '@/lib/outbound/types';
+import { PIPELINE, STAGE_LABEL, generalAddress, onList, peopleOf, type Stage } from '@/lib/outbound/types';
 import { outboundPost, useOutbound, type CompanyRow, type Overview } from './api';
 import CompanyPanel from './CompanyPanel';
 import IdealTab from './IdealTab';
@@ -42,7 +42,7 @@ export default function OutboundClient() {
   if (!data) return <main className="pg-main"><div className="nu-loading"><Icon name="spinner" size={16} className="spin" /> Loading B2B outbound…</div></main>;
 
   const toCheck = data.companies.filter((c) => c.drafts > 0).length;
-  const toChoose = data.companies.filter((c) => c.stage === 'found' && onList(c, data.settings.minScore)).length;
+  const toChoose = data.companies.filter((c) => c.stage === 'found' && onList(c, data.settings)).length;
   return (
     <main className="pg-main nu ob">
       <div className="nu-status">
@@ -82,8 +82,8 @@ function Today({ data, act, open, go }: { data: Overview; act: Act; open: (id: s
   const [more, setMore] = useState(false);
   const found = data.companies.filter((c) => c.stage === 'found');
   const min = data.settings.minScore;
-  const listed = found.filter((c) => onList(c, min));
-  const rest = found.filter((c) => !onList(c, min));
+  const listed = found.filter((c) => onList(c, data.settings));
+  const rest = found.filter((c) => !onList(c, data.settings));
   const check = data.companies.filter((c) => c.drafts > 0);
   const noAddress = data.companies.filter((c) => c.stage === 'approved' && !c.contact.email);
   const picked = [...ticked].filter((id) => listed.some((c) => c.id === id));
@@ -148,7 +148,7 @@ function Today({ data, act, open, go }: { data: Overview; act: Act; open: (id: s
         ) : <Empty icon="building" title="Nothing to choose from yet">{data.research.on ? 'The next companies come in the morning.' : 'Switch daily research on in Settings, or press Find 5 now.'}</Empty>}
         {rest.length > 0 && (
           <div>
-            <button type="button" className="nu-link" onClick={() => setMore(!more)}><Icon name="chevronRight" size={13} /> {more ? 'Hide' : 'Show'} {rest.length} more it looked at (below {min}, or not in the best {data.settings.showPerDay})</button>
+            <button type="button" className="nu-link" onClick={() => setMore(!more)}><Icon name="chevronRight" size={13} /> {more ? 'Hide' : 'Show'} {rest.length} more it looked at (below {min}{data.settings.addressOnly ? ', no address' : ''}, or not in the best {data.settings.showPerDay})</button>
             {more && <div className="ob-cards" style={{ marginTop: 12 }}>{rest.slice(0, 60).map((c) => <CompanyCard key={c.id} c={c} open={() => open(c.id)} yes={() => void run(c.id, { action: 'decide', id: c.id, yes: true })} no={(reason) => void run(c.id, { action: 'decide', id: c.id, yes: false, reason })} reasons={data.rejectReasons} busy={busy === c.id} />)}</div>}
           </div>
         )}
@@ -191,7 +191,7 @@ function CompanyCard({ c, ticked, tick, open, yes, no, reasons, busy }: { c: Com
       <div className="ob-tags">
         {c.service && <Chip tone="brand" title={c.service}>{c.service.split(/[(;:,]/)[0].trim()}</Chip>}
         {c.like.length > 0 && <Chip title="One of your ideal companies it looks like">Like {c.like[0]}</Chip>}
-        <Chip tone={c.contact.email ? 'good' : 'muted'}>{c.contact.email ? 'Has an address' : 'No address yet'}</Chip>
+        <Chip tone={c.contact.email ? 'good' : 'muted'} title={c.contact.email || undefined}>{!c.contact.email ? 'No address yet' : generalAddress(c.contact.email) ? 'General inbox' : 'Has an address'}</Chip>
       </div>
       <footer>
         <button type="button" className="btn primary sm" disabled={busy} onClick={yes}>{busy ? 'Working…' : 'Yes'}</button>
@@ -206,7 +206,7 @@ function CompanyCard({ c, ticked, tick, open, yes, no, reasons, busy }: { c: Com
 
 function Pipeline({ data, act, open }: { data: Overview; act: Act; open: (id: string) => void }) {
   const [over, setOver] = useState<Stage | null>(null);
-  const cols = useMemo(() => PIPELINE.map((p) => ({ ...p, list: data.companies.filter((c) => c.stage === p.id && (p.id !== 'found' || onList(c, data.settings.minScore))) })), [data.companies, data.settings.minScore]);
+  const cols = useMemo(() => PIPELINE.map((p) => ({ ...p, list: data.companies.filter((c) => c.stage === p.id && (p.id !== 'found' || onList(c, data.settings))) })), [data.companies, data.settings]);
   return (
     <div className="ob-board" role="list" aria-label="Pipeline">
       {cols.map((col) => (

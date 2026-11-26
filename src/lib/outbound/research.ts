@@ -3,7 +3,7 @@ import { getAcademyContext } from '@/lib/auth/accounts';
 import { parseCsv } from '@/lib/lms/sheet';
 import { ask, jsonOf, type Answer } from './ask';
 import { around, readPage, readSite } from './pages';
-import { REJECT_REASONS, type Candidate, type Company, type Fact, type IdealCompany, type OutboundSettings } from './types';
+import { generalAddress, REJECT_REASONS, type Candidate, type Company, type Fact, type IdealCompany, type OutboundSettings } from './types';
 import { blankCompany, blockedReason, companies, domainOf, httpLink, ideals, nameKey, nid, saveIdeals, saveSettings, theirOwnSite, told } from './store';
 
 /* Finding companies that look like our ideal ones.
@@ -206,6 +206,34 @@ export function headcount(v: string): number | null {
 }
 
 const EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+const EMAILS = /[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/gi;
+// Never written to: no one reads them, or they are there for another purpose (a POPIA request, a complaint).
+const NEVER = /^(no-?reply|do-?not-?reply|postmaster|abuse|webmaster|hostmaster|privacy|popia|paia|dpo|information\.?officer|complaints?|unsubscribe|bounces?|mailer-daemon|whistle\w*|ethics|fraud|tip-?offs?|legal)@/i;
+const PEOPLE = /^(hr|h\.r|humanresources|human\.resources|people|talent|careers?|recruit\w*|jobs|cvs?|vacanc\w*|training|learning|l-?and-?d|ld|skills|learnerships?|bursar\w*|internships?|graduates?|hrd)([._-][a-z0-9]+)?@/i;
+const SELLING = /^(sales|marketing|support|service\w*|accounts?|billing|orders?|quotes?|bookings?|media|press|pr|helpdesk|tech\w*)([._-][a-z0-9]+)?@/i;
+const unmask = (t: string) => t.toLowerCase().replace(/\s*[[(]\s*at\s*[\])]\s*/g, '@').replace(/\s*[[(]\s*dot\s*[\])]\s*/g, '.');
+
+/** The best address its own pages give: the named person's, then HR or careers, then info@, and sales@ only when nothing else is there. */
+export function bestAddress(a: Pick<Answer, 'pages'>, domain: string, person: string, said: string): { email: string; source: string } {
+  const own = (d: string) => Boolean(domain) && (d === domain || d.endsWith(`.${domain}`) || domain.endsWith(`.${d}`));
+  const words = person.toLowerCase().split(/\s+/).filter((x) => x.length > 2);
+  const found: { email: string; source: string; rank: number }[] = [];
+  for (const [url, text] of a.pages) {
+    const ours = own(domainOf(url));
+    for (const raw of unmask(text).match(EMAILS) || []) {
+      const email = raw.replace(/^[._-]+|[._-]+$/g, '');
+      const at = email.split('@')[1] || '';
+      if (NEVER.test(email) || /\.(png|jpe?g|gif|svg|webp|css|js)$/.test(at) || found.some((x) => x.email === email)) continue;
+      // Another site's address only counts when the AI named it from the company's own pages.
+      if (!ours && email !== said) continue;
+      const local = email.split('@')[0];
+      const rank = (words.some((w) => local.includes(w)) ? 0 : PEOPLE.test(email) ? 1 : generalAddress(email) && !SELLING.test(email) ? 2 : SELLING.test(email) ? 4 : 3) + (own(at) ? 0 : 0.5) + (email === said ? -0.1 : 0);
+      found.push({ email, source: url, rank });
+    }
+  }
+  const best = found.sort((x, y) => x.rank - y.rank)[0];
+  return best ? { email: best.email, source: best.source } : { email: '', source: '' };
+}
 /** Is this address really written on a page we read? ("info (at) acme.co.za" counts.) */
 export function onAPage(a: Pick<Answer, 'pages'>, email: string): string {
   const want = email.toLowerCase();
@@ -270,14 +298,13 @@ export async function research(cand: Candidate, tenantId = currentTenantId()): P
   if (cand.from !== 'ideal' && employees && employees > s.sizeMax) score = Math.min(score, 6);
   if (cand.from !== 'ideal' && employees && employees < s.sizeMin) score = Math.min(score, 5);
   const c = (j.contact || {}) as Record<string, unknown>;
-  const email = (str(c.email, 120).match(EMAIL)?.[0] || '').toLowerCase();
-  const page = email ? onAPage(a, email) : '';
+  const pick = bestAddress(a, cand.domain, str(c.name, 80), (str(c.email, 120).match(EMAIL)?.[0] || '').toLowerCase());
   const name = str(j.name, 120) || cand.name;
   const company = blankCompany({
     name, domain: cand.domain, website: cand.website, from: cand.from, what: str(j.what, 300), sector: str(j.sector, 80), city: brief(str(j.city).split(/[(;]/)[0], 40).trim(), province: str(j.province, 60), size, employees,
     facts, fit: list(j.fit, 3, 200), concerns: brief(j.concerns, 240), service: brief(str(j.service).split(/[(;:]/)[0], 60).trim(), magnetId: open.some((x) => x.id === j.magnet) ? String(j.magnet) : open[0]?.id || '',
     like: list(j.like, 2, 120).filter((x) => like.some((y) => nameKey(y) === nameKey(x))),
-    contact: { name: str(c.name, 80), role: str(c.role, 80), email: page ? email : '', phone: str(c.phone, 40), source: page }, score, scoreWhy: str(j.scoreWhy, 240),
+    contact: { name: str(c.name, 80), role: str(c.role, 80), email: pick.email, phone: str(c.phone, 40), source: pick.source }, score, scoreWhy: str(j.scoreWhy, 240),
   });
   return { company, why: '' };
 }

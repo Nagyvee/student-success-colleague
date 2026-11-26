@@ -7,7 +7,7 @@ import { aiReady } from './ask';
 import { postList } from './discord';
 import { bounced, draftNext, handleReply, keepWarm, pumpSend } from './outreach';
 import { discover, idealCandidates, research } from './research';
-import type { Candidate, Company } from './types';
+import { writable, type Candidate, type Company } from './types';
 import { blockedReason, companies, countCompany, domainOf, isWeekday, log, missingForResearch, pool, room, runState, sastDay, sastHour, saveCompany, savePool, saveRun, settings, spend } from './store';
 
 /* The day.
@@ -92,7 +92,7 @@ export async function researchStep(tenantId = currentTenantId(), now = Date.now(
     countCompany(tenantId);
     run.researched++;
     run.dry = 0;
-    const good = Boolean(out.company && out.company.score >= s.minScore);
+    const good = Boolean(out.company && writable(out.company, s));
     if (extra) {
       run.looks = (run.looks ?? run.extra) - 1;
       if (good) run.extra--;
@@ -135,7 +135,7 @@ export async function finishDay(tenantId = currentTenantId(), now = Date.now(), 
   if (run.posted) return 0;
   const s = settings(tenantId);
   const today = sastDay(now);
-  const best = companies(tenantId).filter((c) => c.stage === 'found' && sastDay(c.foundAt) === today && c.score >= s.minScore).sort((a, b) => b.score - a.score || Number(Boolean(b.contact.email)) - Number(Boolean(a.contact.email))).slice(0, s.showPerDay);
+  const best = companies(tenantId).filter((c) => c.stage === 'found' && sastDay(c.foundAt) === today && writable(c, s)).sort((a, b) => b.score - a.score || Number(Boolean(b.contact.email)) - Number(Boolean(a.contact.email))).slice(0, s.showPerDay);
   for (const c of best) { c.listedOn = today; saveCompany(c, tenantId); }
   run.posted = true;
   saveRun(tenantId);

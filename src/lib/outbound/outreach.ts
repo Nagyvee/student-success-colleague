@@ -9,7 +9,7 @@ import { safeReason } from '@/lib/engine/problems';
 import { noEmoji } from '@/lib/ai/llm';
 import { HAIKU, SONNET, ask, jsonOf } from './ask';
 import { postHandover, postNote } from './discord';
-import type { Company, Magnet, Message, Qualified } from './types';
+import { generalAddress, type Company, type Magnet, type Message, type Qualified } from './types';
 import { outOfDate } from './clock';
 import { blockedReason, companies, countedTo, isWeekday, log, missingForSending, nid, runState, saveCompany, saveRun, sastDay, sastHour, setStage, settings, told } from './store';
 
@@ -131,18 +131,22 @@ export async function writeFirst(c: Company): Promise<Message> {
   const name = offer?.name || 'a short guide';
   let subject = '', text = '';
   let wrong: string[] = [];
+  // An inbox anyone may read: whoever opens it is asked to pass it on, so nobody has to look for the right person.
+  const general = generalAddress(c.contact.email);
+  const passOn = general ? `\nIt goes to a general inbox (${c.contact.email}): just before the question, add one short line asking whoever reads it to pass it to ${c.contact.name || 'whoever looks after training or HR'} if it is not theirs.` : '';
+  const passedOn = (t: string) => !general || /pass (it|this)|forward/i.test(t);
   // A second try says what was wrong with the first.
   for (let i = 0; i < 2; i++) {
     try {
       const a = await ask({
         model: writerModel(), maxTokens: 3000, system: voice(c),
-        prompt: `Write the only email we may send before they answer. We may ask once: may we send them "${name}"${offer?.about ? ` (${offer.about})` : ''}?\n\nTrue things about them (use one, the most telling):\n${c.facts.map((f) => `- ${f.text}`).join('\n')}\nWhy they might train people: ${c.fit.join('; ')}\nWhat we might offer later (do not pitch it now): ${c.service}\n\nStart with "${hello(c)}", then three short paragraphs, 55 to 95 words in all:\n1. The one thing you read about them, plainly ("I saw that ..."). One sentence. Never explain their own business to them, or what it means.\n2. Who we are and what we train people in, in a few words, one way it may touch their work, said as a possibility, and one or two concrete things in ${name} that someone in their job could use, taken only from what is in brackets above.\n3. One short question: shall I send it?\nWrite as one person ("I" for yourself, "we" for the academy), in short everyday sentences you would say aloud. Concrete things, no abstract ones. Name at most two things from ${name}, never a list. Never say or hint that we do the kind of training they already run, unless What we sell says so. Do not ask for a call. Do not sign it.\n\nThe tone, from an email to another company (copy how it sounds, never what it says):\n"I saw that you opened a second warehouse in May and are hiring ten junior planners.\n\nI'm with ${getAcademyContext().academyName}. We train people in data and software. If you are training the new planners, our free guide may help: it has a checklist for choosing who to take on.\n\nShall I send it to you?"${wrong.length ? `\nYour last try had: ${wrong.join('; ')}. Write it without that.` : ''}\nJSON only: {"subject": "under 60 characters, specific to them, no capitals for effect", "text": "paragraphs separated by \\n\\n"}`,
+        prompt: `Write the only email we may send before they answer. We may ask once: may we send them "${name}"${offer?.about ? ` (${offer.about})` : ''}?\n\nTrue things about them (use one, the most telling):\n${c.facts.map((f) => `- ${f.text}`).join('\n')}\nWhy they might train people: ${c.fit.join('; ')}\nWhat we might offer later (do not pitch it now): ${c.service}\n\nStart with "${hello(c)}", then three short paragraphs, 55 to 95 words in all:\n1. The one thing you read about them, plainly ("I saw that ..."). One sentence. Never explain their own business to them, or what it means.\n2. Who we are and what we train people in, in a few words, one way it may touch their work, said as a possibility, and one or two concrete things in ${name} that someone in their job could use, taken only from what is in brackets above.\n3. One short question: shall I send it?\nWrite as one person ("I" for yourself, "we" for the academy), in short everyday sentences you would say aloud. Concrete things, no abstract ones. Name at most two things from ${name}, never a list. Never say or hint that we do the kind of training they already run, unless What we sell says so. Do not ask for a call. Do not sign it.${passOn}\n\nThe tone, from an email to another company (copy how it sounds, never what it says):\n"I saw that you opened a second warehouse in May and are hiring ten junior planners.\n\nI'm with ${getAcademyContext().academyName}. We train people in data and software. If you are training the new planners, our free guide may help: it has a checklist for choosing who to take on.\n\nShall I send it to you?"${wrong.length ? `\nYour last try had: ${wrong.join('; ')}. Write it without that.` : ''}\nJSON only: {"subject": "under 60 characters, specific to them, no capitals for effect", "text": "paragraphs separated by \\n\\n"}`,
       });
       const j = jsonOf<{ subject?: string; text?: string }>(a);
       subject = String(j?.subject || '').replace(/\s+/g, ' ').trim().slice(0, 90);
       text = cleanText(j?.text || '');
       const stiff = stiffWords(text);
-      wrong = [...draftProblems(subject, text, 'first'), ...(stiff.length ? [`stiff words (${stiff.join(', ')})`] : []), ...(longList(text) ? ['a long list in one sentence (name one or two things)'] : [])];
+      wrong = [...draftProblems(subject, text, 'first'), ...(stiff.length ? [`stiff words (${stiff.join(', ')})`] : []), ...(longList(text) ? ['a long list in one sentence (name one or two things)'] : []), ...(passedOn(text) ? [] : ['no line asking them to pass it on'])];
       if (!wrong.length) break;
     } catch (e) {
       log('system', 'error', `The first email to ${c.name} could not be written by the AI: ${safeReason((e as Error).message)}`);
@@ -152,7 +156,7 @@ export async function writeFirst(c: Company): Promise<Message> {
   if (!text || draftProblems(subject, text, 'first').length) {
     // A plain one a person can work from.
     subject = `${name} for ${c.name}`.slice(0, 88);
-    text = `${hello(c)}\n\n${c.facts[0] ? `I read that ${c.facts[0].text.replace(/\.$/, '').replace(/^[A-Z](?=[a-z])/, (x) => x.toLowerCase())}.` : `I came across ${c.name}.`} We train teams in ${c.service || 'practical technology skills'}, and it made me think of you.\n\nWe have put together ${name.replace(/^The /, 'the ')}${offer?.about ? `: ${offer.about.replace(/\.$/, '')}` : ''}. May I send it to you?`;
+    text = `${hello(c)}\n\n${c.facts[0] ? `I read that ${c.facts[0].text.replace(/\.$/, '').replace(/^[A-Z](?=[a-z])/, (x) => x.toLowerCase())}.` : `I came across ${c.name}.`} We train teams in ${c.service || 'practical technology skills'}, and it made me think of you.\n\nWe have put together ${name.replace(/^The /, 'the ')}${offer?.about ? `: ${offer.about.replace(/\.$/, '')}` : ''}.${general ? ` If this is not yours, could you pass it to ${c.contact.name || 'whoever looks after training'}?` : ''} May I send it to you?`;
   }
   return newMessage({ kind: 'first', subject, text });
 }
